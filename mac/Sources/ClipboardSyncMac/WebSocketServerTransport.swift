@@ -227,7 +227,7 @@ private final class ServerPeer {
     }
 
     private func receivePayload(opcode: UInt8, masked: Bool, length: UInt64) {
-        guard length <= 1_048_576 else {
+        guard length <= UInt64(ClipboardLimits.maxWebSocketMessageBytes) else {
             close()
             return
         }

@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -11,16 +13,19 @@ internal sealed class TrayAppContext : ApplicationContext
 {
     private static readonly JsonSerializerOptions MessageJsonOptions = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
     };
 
     private readonly NotifyIcon notifyIcon;
     private readonly ToolStripMenuItem statusItem;
+    private readonly ToolStripMenuItem historyItem;
     private readonly ToolStripMenuItem clientModeItem;
     private readonly ToolStripMenuItem serverModeItem;
     private readonly ClipboardMonitor clipboardMonitor;
     private readonly SynchronizationContext uiContext;
     private readonly Icon trayIcon;
+    private readonly List<ClipboardHistoryEntry> history = [];
 
     private AppConfig config;
     private ISyncTransport? transport;
@@ -32,6 +37,7 @@ internal sealed class TrayAppContext : ApplicationContext
         config = ConfigStore.Load();
 
         statusItem = new ToolStripMenuItem("Status: stopped") { Enabled = false };
+        historyItem = new ToolStripMenuItem("History");
         clientModeItem = new ToolStripMenuItem("Client mode", null, (_, _) => SetMode(SyncMode.Client));
         serverModeItem = new ToolStripMenuItem("Server mode", null, (_, _) => SetMode(SyncMode.Server));
         trayIcon = LoadTrayIcon();
@@ -45,7 +51,12 @@ internal sealed class TrayAppContext : ApplicationContext
         };
 
         clipboardMonitor = new ClipboardMonitor();
-        clipboardMonitor.LocalTextChanged += Publish;
+        clipboardMonitor.LocalContentChanged += content => Publish(content);
+        clipboardMonitor.LocalSkipped += reason => OnUi(() =>
+        {
+            status = reason;
+            UpdateMenu();
+        });
         clipboardMonitor.Start();
 
         RestartTransport();
@@ -69,6 +80,10 @@ internal sealed class TrayAppContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(statusItem);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(historyItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(new ToolStripMenuItem("Send Files from Clipboard", null, (_, _) => SendFilesFromClipboard()));
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(clientModeItem);
         menu.Items.Add(serverModeItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -91,6 +106,7 @@ internal sealed class TrayAppContext : ApplicationContext
         statusItem.Text = $"Status: {status}";
         clientModeItem.Checked = config.Mode == SyncMode.Client;
         serverModeItem.Checked = config.Mode == SyncMode.Server;
+        RefreshHistoryMenu();
     }
 
     private void SetMode(SyncMode mode)
@@ -157,18 +173,52 @@ internal sealed class TrayAppContext : ApplicationContext
         UpdateMenu();
     }
 
-    private void Publish(string text)
+    private void SendFilesFromClipboard()
     {
-        var message = new SyncMessage
+        var content = clipboardMonitor.ReadFilesForManualSend();
+        if (content is null)
         {
-            Type = "clipboard",
-            Origin = config.DeviceId,
-            Text = text,
-            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
-        };
+            status = "copy files first";
+            UpdateMenu();
+            return;
+        }
 
-        var payload = JsonSerializer.Serialize(message, MessageJsonOptions);
+        if (transport is null)
+        {
+            RestartTransport();
+        }
+
+        if (transport is null)
+        {
+            return;
+        }
+
+        if (Publish(content))
+        {
+            status = "file transfer started";
+            UpdateMenu();
+        }
+    }
+
+    private bool Publish(ClipboardContent content, bool recordHistory = true)
+    {
+        var message = content.ToMessage(config.DeviceId);
+        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(message, MessageJsonOptions);
+        if (payloadBytes.Length > ClipboardLimits.MaxWebSocketMessageBytes)
+        {
+            status = "clipboard payload too large";
+            UpdateMenu();
+            return false;
+        }
+
+        if (recordHistory)
+        {
+            AddHistory(content);
+        }
+
+        var payload = System.Text.Encoding.UTF8.GetString(payloadBytes);
         _ = transport?.SendAsync(payload);
+        return true;
     }
 
     private void HandleMessage(string payload)
@@ -188,7 +238,69 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
-        clipboardMonitor.ApplyRemoteText(message.Text);
+        var content = ClipboardContent.FromMessage(message);
+        if (content is not null && clipboardMonitor.ApplyContent(content))
+        {
+            AddHistory(content);
+        }
+    }
+
+    private void AddHistory(ClipboardContent content)
+    {
+        var signature = content.Signature;
+        history.RemoveAll(item => item.Content.Signature == signature);
+        history.Insert(0, new ClipboardHistoryEntry { Content = content });
+        if (history.Count > ClipboardLimits.HistoryLimit)
+        {
+            history.RemoveRange(ClipboardLimits.HistoryLimit, history.Count - ClipboardLimits.HistoryLimit);
+        }
+        RefreshHistoryMenu();
+    }
+
+    private void RefreshHistoryMenu()
+    {
+        historyItem.DropDownItems.Clear();
+        if (history.Count == 0)
+        {
+            historyItem.DropDownItems.Add(new ToolStripMenuItem("No clipboard history") { Enabled = false });
+            return;
+        }
+
+        foreach (var entry in history)
+        {
+            var item = new ToolStripMenuItem(entry.Content.HistoryTitle)
+            {
+                Tag = entry.Id
+            };
+            item.Click += (_, _) => UseHistoryItem(entry.Id);
+            historyItem.DropDownItems.Add(item);
+        }
+
+        historyItem.DropDownItems.Add(new ToolStripSeparator());
+        historyItem.DropDownItems.Add(new ToolStripMenuItem("Clear History", null, (_, _) =>
+        {
+            history.Clear();
+            RefreshHistoryMenu();
+        }));
+    }
+
+    private void UseHistoryItem(Guid id)
+    {
+        var entry = history.FirstOrDefault(item => item.Id == id);
+        if (entry is null)
+        {
+            return;
+        }
+
+        if (!clipboardMonitor.ApplyContent(entry.Content))
+        {
+            status = "failed to restore history item";
+            UpdateMenu();
+            return;
+        }
+
+        AddHistory(entry.Content);
+        Publish(entry.Content, recordHistory: false);
     }
 
     private void OnUi(Action action)

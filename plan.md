@@ -10,7 +10,10 @@ stage1:
 - Scope is text only.
 
 stage2:
-clipboard history for latest 10 items, accept image and file
+- Clipboard history for latest 10 unique items.
+- Text and image clipboard changes sync automatically.
+- File clipboard changes are explicit: user clicks `Send Files from Clipboard`.
+- File and image payloads are capped at 10 MB raw bytes per item.
 
 stage3:
 shows a different icon when receive a clipboard updates

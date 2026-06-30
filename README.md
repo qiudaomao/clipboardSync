@@ -1,6 +1,6 @@
 # Clipboard Sync
 
-Native text clipboard sync over WebSocket.
+Native clipboard sync over WebSocket.
 
 ## Stage 1 Goal
 
@@ -37,6 +37,8 @@ open mac/DerivedData/Build/Products/Release/ClipboardSyncMac.app
 
 The app appears in the menu bar. Configure one machine as `Server`, then configure the other as `Client` with the server host and port.
 In server mode the settings window shows the LAN WebSocket address, such as `ws://192.168.1.20:8787/`. Use that LAN IP on the client; `127.0.0.1` only points to the same machine and is rejected for client mode.
+Text and image clipboard changes sync automatically. File clipboard contents are not sent by the poller; copy files in Finder, then click `Send Files from Clipboard` from the menu bar. Each file must be 10 MB or smaller.
+The `History` submenu keeps the latest 10 clipboard items and can restore/resend an item.
 
 The Swift Package in `mac/Package.swift` is kept as a lightweight compiler check, but the Xcode project is the native app bundle build.
 
@@ -48,7 +50,9 @@ dotnet run --project win\ClipboardSyncWin\ClipboardSyncWin.csproj
 
 The app appears in the system tray. Configure one machine as `Server`, then configure the other as `Client` with the server host and port.
 The Windows server also binds to the LAN and shows a `ws://LAN-IP:port/` address in the tray status/config form. Use that LAN IP on clients; loopback hosts such as `127.0.0.1` and `localhost` are rejected for client mode.
+Text and image clipboard changes sync automatically. File clipboard contents are only sent from `Send Files from Clipboard` in the tray menu, with a 10 MB limit per file.
+The `History` submenu keeps the latest 10 clipboard items and can restore/resend an item.
 
 ## Notes
 
-The Stage 1 transport has no authentication and no TLS. Use it only on a trusted network until a security layer is added.
+The transport has no authentication and no TLS. Use it only on a trusted network until a security layer is added.

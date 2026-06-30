@@ -1,8 +1,19 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace ClipboardSyncWin;
+
+internal static class ClipboardLimits
+{
+    public const int MaxFileBytes = 10 * 1024 * 1024;
+    public const int MaxWebSocketMessageBytes = 16 * 1024 * 1024;
+    public const int HistoryLimit = 10;
+}
 
 internal enum SyncMode
 {
@@ -44,8 +55,139 @@ internal sealed class SyncMessage
 {
     public string Type { get; set; } = "clipboard";
     public string Origin { get; set; } = "";
+    public string Kind { get; set; } = "text";
     public string Text { get; set; } = "";
+    public ClipboardImagePayload? Image { get; set; }
+    public List<ClipboardFilePayload>? Files { get; set; }
     public double SentAt { get; set; }
+}
+
+internal sealed class ClipboardImagePayload
+{
+    public string MimeType { get; set; } = "image/png";
+    public string FileName { get; set; } = "clipboard.png";
+    public string DataBase64 { get; set; } = "";
+    public int Size { get; set; }
+}
+
+internal sealed class ClipboardFilePayload
+{
+    public string Name { get; set; } = "";
+    public string DataBase64 { get; set; } = "";
+    public int Size { get; set; }
+}
+
+internal sealed class ClipboardContent
+{
+    public string Kind { get; set; } = "text";
+    public string Text { get; set; } = "";
+    public ClipboardImagePayload? Image { get; set; }
+    public List<ClipboardFilePayload> Files { get; set; } = [];
+
+    public string Signature
+    {
+        get
+        {
+            var source = Kind switch
+            {
+                "image" => $"image:{Image?.DataBase64}",
+                "files" => "files:" + string.Join("|", Files.Select(item => $"{item.Name}:{item.Size}:{item.DataBase64}")),
+                _ => $"text:{Text}"
+            };
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
+        }
+    }
+
+    public string HistoryTitle
+    {
+        get
+        {
+            return Kind switch
+            {
+                "image" => $"Image: {FormatBytes(Image?.Size ?? 0)}",
+                "files" => FormatFileTitle(),
+                _ => FormatTextTitle()
+            };
+        }
+    }
+
+    public SyncMessage ToMessage(string origin)
+    {
+        return new SyncMessage
+        {
+            Type = "clipboard",
+            Origin = origin,
+            Kind = Kind,
+            Text = Kind == "text" ? Text : "",
+            Image = Kind == "image" ? Image : null,
+            Files = Kind == "files" ? Files : null,
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        };
+    }
+
+    public static ClipboardContent? FromMessage(SyncMessage message)
+    {
+        if (message.Type != "clipboard")
+        {
+            return null;
+        }
+
+        var kind = string.IsNullOrWhiteSpace(message.Kind)
+            ? string.IsNullOrEmpty(message.Text) ? "" : "text"
+            : message.Kind;
+
+        return kind switch
+        {
+            "text" => new ClipboardContent { Kind = "text", Text = message.Text ?? "" },
+            "image" when message.Image is not null => new ClipboardContent { Kind = "image", Image = message.Image },
+            "files" when message.Files is { Count: > 0 } => new ClipboardContent { Kind = "files", Files = message.Files },
+            _ => null
+        };
+    }
+
+    public static ClipboardContent TextContent(string text)
+    {
+        return new ClipboardContent { Kind = "text", Text = text };
+    }
+
+    public static ClipboardContent ImageContent(ClipboardImagePayload image)
+    {
+        return new ClipboardContent { Kind = "image", Image = image };
+    }
+
+    public static ClipboardContent FileContent(List<ClipboardFilePayload> files)
+    {
+        return new ClipboardContent { Kind = "files", Files = files };
+    }
+
+    private string FormatTextTitle()
+    {
+        var compact = Text.ReplaceLineEndings(" ");
+        return string.IsNullOrEmpty(compact)
+            ? "Text"
+            : $"Text: {compact[..Math.Min(compact.Length, 42)]}";
+    }
+
+    private string FormatFileTitle()
+    {
+        var names = string.Join(", ", Files.Take(2).Select(item => item.Name));
+        var suffix = Files.Count > 2 ? $" +{Files.Count - 2}" : "";
+        return $"Files: {names}{suffix}";
+    }
+
+    private static string FormatBytes(int bytes)
+    {
+        return bytes >= 1024 * 1024
+            ? $"{bytes / 1024d / 1024d:0.#} MB"
+            : $"{Math.Max(1, bytes / 1024d):0.#} KB";
+    }
+}
+
+internal sealed class ClipboardHistoryEntry
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public ClipboardContent Content { get; init; } = new();
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
 }
 
 internal static class ConfigStore

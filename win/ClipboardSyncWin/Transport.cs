@@ -140,6 +140,10 @@ internal sealed class ClientTransport : ISyncTransport
                     return;
                 }
                 message.Write(buffer, 0, result.Count);
+                if (message.Length > ClipboardLimits.MaxWebSocketMessageBytes)
+                {
+                    return;
+                }
             } while (!result.EndOfMessage);
 
             if (result.MessageType == WebSocketMessageType.Text)
@@ -404,7 +408,7 @@ internal sealed class ServerPeer
             length = BinaryPrimitives.ReadUInt64BigEndian(lengthBytes);
         }
 
-        if (length > 1_048_576)
+        if (length > ClipboardLimits.MaxWebSocketMessageBytes)
         {
             return FrameResult.Close;
         }
