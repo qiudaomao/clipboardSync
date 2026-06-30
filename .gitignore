@@ -1,0 +1,10 @@
+.DS_Store
+
+# Swift Package Manager
+.build/
+DerivedData/
+
+# .NET
+bin/
+obj/
+*.user
