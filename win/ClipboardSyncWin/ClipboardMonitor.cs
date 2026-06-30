@@ -6,7 +6,7 @@ namespace ClipboardSyncWin;
 
 internal sealed class ClipboardMonitor : IDisposable
 {
-    private readonly Timer timer = new() { Interval = 450 };
+    private readonly System.Windows.Forms.Timer timer = new() { Interval = 450 };
     private string? lastText;
 
     public event Action<string>? LocalTextChanged;

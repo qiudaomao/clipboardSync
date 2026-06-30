@@ -1,4 +1,6 @@
 .DS_Store
+Thumbs.db
+Desktop.ini
 
 # Swift Package Manager
 .build/
@@ -6,7 +8,27 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 
-# .NET
+# .NET / Visual Studio
 bin/
 obj/
+publish/
+TestResults/
+.vs/
+.vscode/
 *.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# Local .NET SDK/cache folders used for workspace builds
+.dotnet/
+.dotnet_home/
+.appdata/
+.localappdata/
+.nuget/
+
+# Build artifacts
+*.nupkg
+*.snupkg
+*.log

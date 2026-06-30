@@ -467,14 +467,14 @@ internal sealed class ServerPeer
             else if (payload.Length <= ushort.MaxValue)
             {
                 frame.WriteByte(126);
-                Span<byte> lengthBytes = stackalloc byte[2];
+                var lengthBytes = new byte[2];
                 BinaryPrimitives.WriteUInt16BigEndian(lengthBytes, (ushort)payload.Length);
                 frame.Write(lengthBytes);
             }
             else
             {
                 frame.WriteByte(127);
-                Span<byte> lengthBytes = stackalloc byte[8];
+                var lengthBytes = new byte[8];
                 BinaryPrimitives.WriteUInt64BigEndian(lengthBytes, (ulong)payload.Length);
                 frame.Write(lengthBytes);
             }
