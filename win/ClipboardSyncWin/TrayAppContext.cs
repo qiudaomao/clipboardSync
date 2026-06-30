@@ -1,4 +1,6 @@
 using System;
+using System.Drawing;
+using System.IO;
 using System.Threading;
 using System.Text.Json;
 using System.Windows.Forms;
@@ -18,6 +20,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem serverModeItem;
     private readonly ClipboardMonitor clipboardMonitor;
     private readonly SynchronizationContext uiContext;
+    private readonly Icon trayIcon;
 
     private AppConfig config;
     private ISyncTransport? transport;
@@ -31,10 +34,11 @@ internal sealed class TrayAppContext : ApplicationContext
         statusItem = new ToolStripMenuItem("Status: stopped") { Enabled = false };
         clientModeItem = new ToolStripMenuItem("Client mode", null, (_, _) => SetMode(SyncMode.Client));
         serverModeItem = new ToolStripMenuItem("Server mode", null, (_, _) => SetMode(SyncMode.Server));
+        trayIcon = LoadTrayIcon();
 
         notifyIcon = new NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = trayIcon,
             Text = "Clipboard Sync",
             Visible = true,
             ContextMenuStrip = BuildMenu()
@@ -54,6 +58,7 @@ internal sealed class TrayAppContext : ApplicationContext
             transport?.Dispose();
             clipboardMonitor.Dispose();
             notifyIcon.Dispose();
+            trayIcon.Dispose();
         }
 
         base.Dispose(disposing);
@@ -73,6 +78,12 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
         return menu;
+    }
+
+    private static Icon LoadTrayIcon()
+    {
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "clipboard-sync-icon.ico");
+        return File.Exists(iconPath) ? new Icon(iconPath) : SystemIcons.Application;
     }
 
     private void UpdateMenu()
