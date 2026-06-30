@@ -42,7 +42,7 @@ final class WebSocketServerTransport: Transport {
 
                 self.listener = listener
                 listener.start(queue: queue)
-                onStatus?("starting server :\(port)")
+                onStatus?("starting server \(NetworkAddress.serverURL(port: port))")
             } catch {
                 onStatus?("server error: \(error.localizedDescription)")
             }
@@ -96,7 +96,7 @@ final class WebSocketServerTransport: Transport {
     }
 
     private func pushStatus() {
-        onStatus?("server :\(port), \(peers.count) peer(s)")
+        onStatus?("server \(NetworkAddress.serverURL(port: port)), \(peers.count) peer(s)")
     }
 }
 

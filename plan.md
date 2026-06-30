@@ -17,5 +17,5 @@ shows a different icon when receive a clipboard updates
 
 current implementation focus:
 - Shared JSON protocol documented in docs/protocol.md.
-- macOS Swift package under mac/.
+- macOS Xcode app project under mac/.
 - Windows .NET WinForms project under win/ClipboardSyncWin/.

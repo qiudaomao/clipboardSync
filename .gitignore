@@ -3,6 +3,8 @@
 # Swift Package Manager
 .build/
 DerivedData/
+xcuserdata/
+*.xcuserstate
 
 # .NET
 bin/

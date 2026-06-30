@@ -42,7 +42,18 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private func setupMenu() {
-        statusItem.button?.title = "Clip"
+        if let image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: "Clipboard Sync") {
+            image.isTemplate = true
+            statusItem.button?.image = image
+            statusItem.button?.imagePosition = .imageOnly
+        } else if let image = NSImage(named: "MenuBarIcon") {
+            image.isTemplate = true
+            statusItem.button?.image = image
+            statusItem.button?.imagePosition = .imageOnly
+        } else {
+            statusItem.button?.title = "Clip"
+        }
+        statusItem.button?.toolTip = "Clipboard Sync"
 
         let menu = NSMenu()
         statusMenuItem = NSMenuItem(title: "Status: stopped", action: nil, keyEquivalent: "")
@@ -130,6 +141,14 @@ final class AppController: NSObject, NSApplicationDelegate {
         let nextTransport: Transport
         switch config.mode {
         case .client:
+            guard !config.host.isEmpty else {
+                statusText = "set server LAN IP"
+                return
+            }
+            guard !NetworkAddress.isLoopbackHost(config.host) else {
+                statusText = "use LAN IP, not 127.0.0.1"
+                return
+            }
             nextTransport = WebSocketClientTransport(host: config.host, port: config.port)
         case .server:
             nextTransport = WebSocketServerTransport(port: config.port)

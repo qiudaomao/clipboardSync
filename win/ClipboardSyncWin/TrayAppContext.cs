@@ -108,6 +108,22 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         transport?.Dispose();
 
+        if (config.Mode == SyncMode.Client && string.IsNullOrWhiteSpace(config.Host))
+        {
+            transport = null;
+            status = "set server LAN IP";
+            UpdateMenu();
+            return;
+        }
+
+        if (config.Mode == SyncMode.Client && NetworkAddress.IsLoopbackHost(config.Host))
+        {
+            transport = null;
+            status = "use LAN IP, not 127.0.0.1";
+            UpdateMenu();
+            return;
+        }
+
         transport = config.Mode == SyncMode.Server
             ? new ServerTransport(config.Port)
             : new ClientTransport(config.Host, config.Port);

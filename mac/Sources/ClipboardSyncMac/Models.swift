@@ -10,7 +10,7 @@ struct AppConfig: Codable {
     var host: String
     var port: Int
 
-    static let defaults = AppConfig(mode: .client, host: "127.0.0.1", port: 8787)
+    static let defaults = AppConfig(mode: .client, host: "", port: 8787)
     private static let storageKey = "ClipboardSyncMac.config"
 
     static func load() -> AppConfig {
@@ -32,7 +32,7 @@ struct AppConfig: Codable {
     private func normalized() -> AppConfig {
         AppConfig(
             mode: mode,
-            host: host.isEmpty ? Self.defaults.host : host,
+            host: host.trimmingCharacters(in: .whitespacesAndNewlines),
             port: min(max(port, 1), 65_535)
         )
     }

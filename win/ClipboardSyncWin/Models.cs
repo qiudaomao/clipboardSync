@@ -13,17 +13,13 @@ internal enum SyncMode
 internal sealed class AppConfig
 {
     public SyncMode Mode { get; set; } = SyncMode.Client;
-    public string Host { get; set; } = "127.0.0.1";
+    public string Host { get; set; } = "";
     public int Port { get; set; } = 8787;
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
 
     public void Normalize()
     {
-        if (string.IsNullOrWhiteSpace(Host))
-        {
-            Host = "127.0.0.1";
-        }
-
+        Host = Host?.Trim() ?? "";
         Port = Math.Clamp(Port, 1, 65_535);
 
         if (string.IsNullOrWhiteSpace(DeviceId))

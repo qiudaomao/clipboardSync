@@ -173,7 +173,7 @@ internal sealed class ServerTransport : ISyncTransport
             cts = new CancellationTokenSource();
             listener = new TcpListener(IPAddress.Any, port);
             listener.Start();
-            StatusChanged?.Invoke($"server :{port}, 0 peer(s)");
+            StatusChanged?.Invoke($"server {NetworkAddress.ServerUrl(port)}, 0 peer(s)");
             _ = AcceptLoopAsync(cts.Token);
         }
         catch (Exception ex)
@@ -263,7 +263,7 @@ internal sealed class ServerTransport : ISyncTransport
 
     private void PushStatus()
     {
-        StatusChanged?.Invoke($"server :{port}, {peers.Count} peer(s)");
+        StatusChanged?.Invoke($"server {NetworkAddress.ServerUrl(port)}, {peers.Count} peer(s)");
     }
 }
 

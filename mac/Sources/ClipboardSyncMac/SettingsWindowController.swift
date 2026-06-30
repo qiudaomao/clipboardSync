@@ -1,6 +1,6 @@
 import AppKit
 
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     var onSave: ((AppConfig) -> Void)?
 
     private let modeControl = NSSegmentedControl(labels: ["Client", "Server"], trackingMode: .selectOne, target: nil, action: nil)
@@ -12,6 +12,7 @@ final class SettingsWindowController: NSWindowController {
     private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
 
     private var currentConfig = AppConfig.defaults
+    private var clientHostDraft = ""
 
     init() {
         let window = NSWindow(
@@ -35,8 +36,9 @@ final class SettingsWindowController: NSWindowController {
 
     func show(config: AppConfig) {
         currentConfig = config
+        clientHostDraft = NetworkAddress.isLoopbackHost(config.host) ? "" : config.host
         modeControl.selectedSegment = config.mode == .client ? 0 : 1
-        hostField.stringValue = config.host
+        hostField.stringValue = clientHostDraft
         portField.stringValue = String(config.port)
         validationLabel.stringValue = ""
         validationLabel.isHidden = true
@@ -64,13 +66,14 @@ final class SettingsWindowController: NSWindowController {
         modeControl.action = #selector(modeChanged)
         modeControl.segmentStyle = .rounded
 
-        hostField.placeholderString = "127.0.0.1"
+        hostField.placeholderString = "192.168.1.10"
         hostField.controlSize = .large
         hostField.font = .systemFont(ofSize: NSFont.systemFontSize)
 
         portField.placeholderString = "8787"
         portField.controlSize = .large
         portField.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        portField.delegate = self
 
         hostHintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         hostHintLabel.textColor = .secondaryLabelColor
@@ -163,17 +166,38 @@ final class SettingsWindowController: NSWindowController {
 
     private func updateModeState() {
         let isClient = modeControl.selectedSegment == 0
-        hostField.isEnabled = isClient
-        hostHintLabel.stringValue = isClient ? "Used only in client mode." : "Server mode listens on all network interfaces."
+        if isClient {
+            hostField.isEnabled = true
+            hostField.isEditable = true
+            hostField.isSelectable = true
+            hostField.stringValue = clientHostDraft
+            hostField.placeholderString = "192.168.1.10"
+            hostHintLabel.stringValue = "Enter the LAN IP shown on the server Mac."
+        } else {
+            if hostField.isEnabled {
+                clientHostDraft = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            hostField.isEnabled = true
+            hostField.isEditable = false
+            hostField.isSelectable = true
+            hostField.stringValue = NetworkAddress.serverURL(port: currentPortValue())
+            hostHintLabel.stringValue = "Share this address with clients on the same LAN."
+        }
     }
 
     @objc private func save() {
         let mode: SyncMode = modeControl.selectedSegment == 1 ? .server : .client
-        let host = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let host = mode == .client ? hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : currentConfig.host
         let portText = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if mode == .client && host.isEmpty {
             showValidation("Enter a server host for client mode.")
+            window?.makeFirstResponder(hostField)
+            return
+        }
+
+        if mode == .client && NetworkAddress.isLoopbackHost(host) {
+            showValidation("Use the server Mac's LAN IP, not 127.0.0.1.")
             window?.makeFirstResponder(hostField)
             return
         }
@@ -200,5 +224,16 @@ final class SettingsWindowController: NSWindowController {
     private func showValidation(_ message: String) {
         validationLabel.stringValue = message
         validationLabel.isHidden = false
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        if notification.object as? NSTextField === portField, modeControl.selectedSegment == 1 {
+            hostField.stringValue = NetworkAddress.serverURL(port: currentPortValue())
+        }
+    }
+
+    private func currentPortValue() -> Int {
+        let portText = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Int(portText) ?? currentConfig.port
     }
 }
