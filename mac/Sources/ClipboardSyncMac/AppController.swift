@@ -19,6 +19,13 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var statusMenuItem = NSMenuItem()
     private var serverModeItem = NSMenuItem()
     private var clientModeItem = NSMenuItem()
+    private lazy var settingsWindowController: SettingsWindowController = {
+        let controller = SettingsWindowController()
+        controller.onSave = { [weak self] nextConfig in
+            self?.applyConfig(nextConfig)
+        }
+        return controller
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
@@ -53,7 +60,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        let configureItem = NSMenuItem(title: "Configure...", action: #selector(showConfiguration), keyEquivalent: ",")
+        let configureItem = NSMenuItem(title: "Settings...", action: #selector(showConfiguration), keyEquivalent: ",")
         configureItem.target = self
         menu.addItem(configureItem)
 
@@ -108,55 +115,13 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showConfiguration() {
-        NSApp.activate(ignoringOtherApps: true)
-
-        let alert = NSAlert()
-        alert.messageText = "Clipboard Sync"
-        alert.informativeText = "Configure the sync role and endpoint."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-
-        let modePopup = NSPopUpButton()
-        modePopup.addItems(withTitles: ["Client", "Server"])
-        modePopup.selectItem(withTitle: config.mode == .client ? "Client" : "Server")
-
-        let hostField = NSTextField(string: config.host)
-        hostField.placeholderString = "127.0.0.1"
-
-        let portField = NSTextField(string: String(config.port))
-        portField.placeholderString = "8787"
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.addArrangedSubview(row(label: "Mode", control: modePopup))
-        stack.addArrangedSubview(row(label: "Host", control: hostField))
-        stack.addArrangedSubview(row(label: "Port", control: portField))
-        stack.widthAnchor.constraint(equalToConstant: 280).isActive = true
-
-        alert.accessoryView = stack
-
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return
-        }
-
-        let selectedMode: SyncMode = modePopup.titleOfSelectedItem == "Server" ? .server : .client
-        let selectedPort = Int(portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)) ?? AppConfig.defaults.port
-        config = AppConfig(mode: selectedMode, host: hostField.stringValue, port: selectedPort)
-        config.save()
-        restartTransport()
+        settingsWindowController.show(config: config)
     }
 
-    private func row(label: String, control: NSView) -> NSStackView {
-        let labelView = NSTextField(labelWithString: label)
-        labelView.widthAnchor.constraint(equalToConstant: 56).isActive = true
-
-        let row = NSStackView(views: [labelView, control])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 8
-        return row
+    private func applyConfig(_ nextConfig: AppConfig) {
+        config = nextConfig
+        config.save()
+        restartTransport()
     }
 
     private func restartTransport() {
