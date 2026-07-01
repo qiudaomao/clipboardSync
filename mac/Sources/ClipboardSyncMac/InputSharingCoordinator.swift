@@ -21,6 +21,8 @@ final class InputSharingCoordinator {
     private var eventSource: CFRunLoopSource?
     private var lastModifierKeys: Set<String> = []
     private var suppressUntil = Date.distantPast
+    private var didRequestAccessibility = false
+    private var didRequestInputMonitoring = false
 
     init(deviceId: String) {
         self.deviceId = deviceId
@@ -100,7 +102,7 @@ final class InputSharingCoordinator {
     }
 
     private var canReceiveRemoteInput: Bool {
-        guard config.inputSharingEnabled, peerCount == 1, AXIsProcessTrusted() else {
+        guard config.inputSharingEnabled, peerCount == 1, hasAccessibilityPermission else {
             return false
         }
         switch (role, config.inputSharingDirection) {
@@ -112,7 +114,11 @@ final class InputSharingCoordinator {
     }
 
     private func updateInputState() {
-        if isController, AXIsProcessTrusted() {
+        if config.inputSharingEnabled {
+            requestMissingPermissionsIfNeeded()
+        }
+
+        if isController, hasAccessibilityPermission, hasInputMonitoringPermission {
             ensureEventTap()
         } else {
             removeEventTap()
@@ -129,8 +135,10 @@ final class InputSharingCoordinator {
             status = "Input Sharing: disabled, multiple peers"
         } else if peerCount == 0 {
             status = "Input Sharing: waiting for peer"
-        } else if !AXIsProcessTrusted() {
-            status = "Input Sharing: grant Accessibility/Input Monitoring"
+        } else if !hasAccessibilityPermission {
+            status = "Input Sharing: grant Accessibility"
+        } else if isController && !hasInputMonitoringPermission {
+            status = "Input Sharing: grant Input Monitoring"
         } else if isController && remoteInputEnabled == false {
             status = "Input Sharing: peer disabled"
         } else if isController && (remoteScreen == nil || remoteInputEnabled == nil) {
@@ -145,6 +153,12 @@ final class InputSharingCoordinator {
 
     private func ensureEventTap() {
         guard eventTap == nil else {
+            return
+        }
+
+        guard hasInputMonitoringPermission else {
+            onStatus?("Input Sharing: grant Input Monitoring")
+            requestInputMonitoringPermission()
             return
         }
 
@@ -174,6 +188,7 @@ final class InputSharingCoordinator {
             userInfo: userInfo
         ) else {
             onStatus?("Input Sharing: grant Accessibility/Input Monitoring")
+            requestMissingPermissionsIfNeeded()
             return
         }
 
@@ -211,7 +226,7 @@ final class InputSharingCoordinator {
     }
 
     private func handleLocalEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        guard isController, AXIsProcessTrusted(), Date() >= suppressUntil else {
+        guard isController, hasAccessibilityPermission, hasInputMonitoringPermission, Date() >= suppressUntil else {
             return Unmanaged.passUnretained(event)
         }
 
@@ -617,6 +632,44 @@ final class InputSharingCoordinator {
             height: Double(bounds.height),
             scale: Double(NSScreen.main?.backingScaleFactor ?? 1)
         )
+    }
+
+    private var hasAccessibilityPermission: Bool {
+        AXIsProcessTrusted()
+    }
+
+    private var hasInputMonitoringPermission: Bool {
+        CGPreflightListenEventAccess()
+    }
+
+    private func requestMissingPermissionsIfNeeded() {
+        if !hasAccessibilityPermission {
+            requestAccessibilityPermission()
+        }
+        if isController, !hasInputMonitoringPermission {
+            requestInputMonitoringPermission()
+        }
+    }
+
+    private func requestAccessibilityPermission() {
+        guard !didRequestAccessibility else {
+            return
+        }
+        didRequestAccessibility = true
+        let options = [
+            kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true
+        ] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+    }
+
+    private func requestInputMonitoringPermission() {
+        guard !didRequestInputMonitoring else {
+            return
+        }
+        didRequestInputMonitoring = true
+        DispatchQueue.main.async {
+            _ = CGRequestListenEventAccess()
+        }
     }
 
     private static func modifiers(from flags: CGEventFlags) -> [String] {
