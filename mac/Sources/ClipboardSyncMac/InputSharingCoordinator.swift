@@ -300,7 +300,7 @@ final class InputSharingCoordinator {
         guard remoteScreen != nil, remoteInputEnabled == true else {
             return false
         }
-        let bounds = CGDisplayBounds(CGMainDisplayID())
+        let bounds = Self.desktopBounds()
         let threshold = 2.0
         switch config.peerEdge {
         case .right:
@@ -331,7 +331,7 @@ final class InputSharingCoordinator {
     }
 
     private func entryPosition(on screen: ScreenMetrics, edge: ScreenEdge, location: CGPoint) -> CGPoint {
-        let bounds = CGDisplayBounds(CGMainDisplayID())
+        let bounds = Self.desktopBounds()
         let normalizedX = Double(location.x - bounds.minX) / max(Double(bounds.width), 1)
         let normalizedY = Double(location.y - bounds.minY) / max(Double(bounds.height), 1)
         switch edge {
@@ -347,7 +347,7 @@ final class InputSharingCoordinator {
     }
 
     private func warpLocalCursorToReturnPoint() {
-        let bounds = CGDisplayBounds(CGMainDisplayID())
+        let bounds = Self.desktopBounds()
         let localX: CGFloat
         let localY: CGFloat
         switch config.peerEdge {
@@ -593,7 +593,7 @@ final class InputSharingCoordinator {
     }
 
     private func warpTo(normalizedX: Double, normalizedY: Double) {
-        let bounds = CGDisplayBounds(CGMainDisplayID())
+        let bounds = Self.desktopBounds()
         let point = CGPoint(
             x: bounds.minX + CGFloat(min(max(normalizedX, 0), 1)) * bounds.width,
             y: bounds.minY + CGFloat(min(max(normalizedY, 0), 1)) * bounds.height
@@ -626,12 +626,33 @@ final class InputSharingCoordinator {
     }
 
     static func currentScreenMetrics() -> ScreenMetrics {
-        let bounds = CGDisplayBounds(CGMainDisplayID())
+        let bounds = desktopBounds()
         return ScreenMetrics(
             width: Double(bounds.width),
             height: Double(bounds.height),
             scale: Double(NSScreen.main?.backingScaleFactor ?? 1)
         )
+    }
+
+    private static func desktopBounds() -> CGRect {
+        var displayCount: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &displayCount) == .success, displayCount > 0 else {
+            return CGDisplayBounds(CGMainDisplayID())
+        }
+
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(displayCount))
+        let error = displays.withUnsafeMutableBufferPointer { buffer in
+            CGGetActiveDisplayList(displayCount, buffer.baseAddress, &displayCount)
+        }
+        guard error == .success else {
+            return CGDisplayBounds(CGMainDisplayID())
+        }
+
+        let bounds = displays.prefix(Int(displayCount)).reduce(CGRect.null) { result, display in
+            let displayBounds = CGDisplayBounds(display)
+            return result.isNull ? displayBounds : result.union(displayBounds)
+        }
+        return bounds.isNull ? CGDisplayBounds(CGMainDisplayID()) : bounds
     }
 
     private var hasAccessibilityPermission: Bool {

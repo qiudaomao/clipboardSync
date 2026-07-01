@@ -60,4 +60,4 @@ Input Sharing is off by default. Enable it from Configure or the tray menu, choo
 ## Notes
 
 The WebSocket endpoint is still plain `ws://`, but clipboard and input-sharing message bodies are encrypted and authenticated with the configured shared password.
-Input sharing v1 supports one peer and the primary screen only.
+Input sharing v1 supports one peer and treats all local monitors as one virtual desktop.

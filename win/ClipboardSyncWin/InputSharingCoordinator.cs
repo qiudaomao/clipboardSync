@@ -289,7 +289,7 @@ internal sealed class InputSharingCoordinator : IDisposable
 
             remoteActive = true;
             remotePosition = EntryPosition(remoteScreen, config.PeerEdge, point);
-            localAnchor = CenterOfPrimaryScreen();
+            localAnchor = CenterOfScreenContaining(point);
             SendCapture("start");
             SendMouseMove();
             SetCursorPos(localAnchor.X, localAnchor.Y);
@@ -333,7 +333,7 @@ internal sealed class InputSharingCoordinator : IDisposable
             return false;
         }
 
-        var bounds = PrimaryBounds();
+        var bounds = DesktopBounds();
         const int threshold = 2;
         return config.PeerEdge switch
         {
@@ -362,7 +362,7 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private PointF EntryPosition(ScreenMetrics screen, ScreenEdge edge, POINT point)
     {
-        var bounds = PrimaryBounds();
+        var bounds = DesktopBounds();
         var normalizedX = (point.X - bounds.Left) / Math.Max((double)bounds.Width, 1);
         var normalizedY = (point.Y - bounds.Top) / Math.Max((double)bounds.Height, 1);
         return edge switch
@@ -376,7 +376,7 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private Point ReturnPoint()
     {
-        var bounds = PrimaryBounds();
+        var bounds = DesktopBounds();
         return config.PeerEdge switch
         {
             ScreenEdge.Left => new Point(bounds.Left + 2, bounds.Top + (int)(bounds.Height * NormalizedRemoteY())),
@@ -565,7 +565,7 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private static void WarpTo(double normalizedX, double normalizedY)
     {
-        var bounds = PrimaryBounds();
+        var bounds = DesktopBounds();
         var x = bounds.Left + (int)(Math.Clamp(normalizedX, 0, 1) * bounds.Width);
         var y = bounds.Top + (int)(Math.Clamp(normalizedY, 0, 1) * bounds.Height);
         SetCursorPos(x, y);
@@ -583,18 +583,18 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private static ScreenMetrics CurrentScreenMetrics()
     {
-        var bounds = PrimaryBounds();
+        var bounds = DesktopBounds();
         return new ScreenMetrics { Width = bounds.Width, Height = bounds.Height, Scale = 1 };
     }
 
-    private static Rectangle PrimaryBounds()
+    private static Rectangle DesktopBounds()
     {
-        return Screen.PrimaryScreen?.Bounds ?? SystemInformation.VirtualScreen;
+        return SystemInformation.VirtualScreen;
     }
 
-    private static Point CenterOfPrimaryScreen()
+    private static Point CenterOfScreenContaining(POINT point)
     {
-        var bounds = PrimaryBounds();
+        var bounds = Screen.FromPoint(new Point(point.X, point.Y)).Bounds;
         return new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2);
     }
 

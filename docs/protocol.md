@@ -101,7 +101,7 @@ mouse and basic keyboard sharing.
   "target": null,
   "kind": "hello",
   "role": "server",
-  "screen": { "width": 1920, "height": 1080, "scale": 1.0 },
+  "screen": { "width": 3840, "height": 1080, "scale": 1.0 },
   "enabled": true,
   "direction": "serverControlsClient",
   "peerEdge": "right",
@@ -187,7 +187,7 @@ Input message fields:
 - `target`: optional receiver device id. Messages with another target are ignored.
 - `kind`: `hello`, `capture`, `mouseMove`, `mouseButton`, `mouseWheel`, or `key`.
 - `role`: sender role for `hello`, either `server` or `client`.
-- `screen`: primary screen size and scale for `hello`.
+- `screen`: virtual desktop size and scale for `hello`.
 - `enabled`: sender input-sharing runtime state for `hello`.
 - `direction`: `serverControlsClient` or `clientControlsServer`.
 - `peerEdge`: peer position relative to the controlling side: `left`, `right`, `top`, or `bottom`.
@@ -219,7 +219,7 @@ Encrypted envelope fields:
 - A server applies remote messages locally only when it is configured with the same password.
 - Input sharing is off by default and must be enabled in settings or the tray/menu.
 - The configured direction is either server controls client or client controls server. On reconnect conflicts, the server's direction and peer-edge settings win.
-- The peer edge defines where the remote primary screen sits relative to the controller's primary screen.
+- The peer edge defines where the remote virtual desktop sits relative to the controller's virtual desktop.
 - The controller starts remote capture when the local pointer reaches the configured edge and ends capture when the remote pointer crosses back over the opposite edge.
 - macOS requires Accessibility/Input Monitoring permission for input capture and injection.
 - Windows uses low-level mouse/keyboard hooks and `SendInput` for capture and injection.
