@@ -18,6 +18,7 @@
 		A00000000000000000000022 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* Assets.xcassets */; };
 		A00000000000000000000024 /* NetworkAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* NetworkAddress.swift */; };
 		A00000000000000000000026 /* CryptoBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000027 /* CryptoBox.swift */; };
+		A00000000000000000000028 /* InputSharingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000029 /* InputSharingCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,6 +35,7 @@
 		A00000000000000000000023 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A00000000000000000000025 /* NetworkAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkAddress.swift; sourceTree = "<group>"; };
 		A00000000000000000000027 /* CryptoBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoBox.swift; sourceTree = "<group>"; };
+		A00000000000000000000029 /* InputSharingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSharingCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -72,6 +74,7 @@
 				A0000000000000000000000A /* ClipboardCoordinator.swift */,
 				A0000000000000000000000B /* Models.swift */,
 				A00000000000000000000027 /* CryptoBox.swift */,
+				A00000000000000000000029 /* InputSharingCoordinator.swift */,
 				A0000000000000000000000C /* Transport.swift */,
 				A0000000000000000000000D /* WebSocketClientTransport.swift */,
 				A0000000000000000000000E /* WebSocketServerTransport.swift */,
@@ -169,6 +172,7 @@
 				A00000000000000000000020 /* SettingsWindowController.swift in Sources */,
 				A00000000000000000000024 /* NetworkAddress.swift in Sources */,
 				A00000000000000000000026 /* CryptoBox.swift in Sources */,
+				A00000000000000000000028 /* InputSharingCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

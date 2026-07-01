@@ -7,9 +7,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     private let deviceId = DeviceIdentity.current
     private let jsonEncoder = JSONEncoder()
     private let jsonDecoder = JSONDecoder()
+    private lazy var inputCoordinator = InputSharingCoordinator(deviceId: deviceId)
 
     private var config = AppConfig.load()
     private var transport: Transport?
+    private var peerCount = 0
     private var statusText = "stopped" {
         didSet {
             updateMenu()
@@ -19,6 +21,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var statusMenuItem = NSMenuItem()
     private var serverModeItem = NSMenuItem()
     private var clientModeItem = NSMenuItem()
+    private var inputStatusMenuItem = NSMenuItem()
+    private var inputSharingItem = NSMenuItem()
+    private var serverControlsClientItem = NSMenuItem()
+    private var clientControlsServerItem = NSMenuItem()
+    private var peerEdgeItems: [ScreenEdge: NSMenuItem] = [:]
     private var historyMenu = NSMenu(title: "History")
     private var historyMenuItem = NSMenuItem(title: "History", action: nil, keyEquivalent: "")
     private var history: [ClipboardHistoryEntry] = []
@@ -38,12 +45,25 @@ final class AppController: NSObject, NSApplicationDelegate {
         clipboard.onLocalSkipped = { [weak self] reason in
             self?.statusText = reason
         }
+        inputCoordinator.onMessage = { [weak self] message in
+            DispatchQueue.main.async {
+                self?.publishInput(message)
+            }
+        }
+        inputCoordinator.onStatus = { [weak self] status in
+            DispatchQueue.main.async {
+                self?.inputStatusMenuItem.title = status
+            }
+        }
         clipboard.start()
+        inputCoordinator.start()
+        updateInputCoordinator()
         restartTransport()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         clipboard.stop()
+        inputCoordinator.stop()
         transport?.stop()
     }
 
@@ -74,6 +94,40 @@ final class AppController: NSObject, NSApplicationDelegate {
         let sendFilesItem = NSMenuItem(title: "Send Files from Clipboard", action: #selector(sendFilesFromClipboard), keyEquivalent: "")
         sendFilesItem.target = self
         menu.addItem(sendFilesItem)
+        menu.addItem(NSMenuItem.separator())
+
+        inputStatusMenuItem = NSMenuItem(title: "Input Sharing: off", action: nil, keyEquivalent: "")
+        inputStatusMenuItem.isEnabled = false
+        menu.addItem(inputStatusMenuItem)
+
+        inputSharingItem = NSMenuItem(title: "Enable Input Sharing", action: #selector(toggleInputSharing), keyEquivalent: "")
+        inputSharingItem.target = self
+        menu.addItem(inputSharingItem)
+
+        let directionMenu = NSMenu(title: "Control Direction")
+        serverControlsClientItem = NSMenuItem(title: "Server -> Client", action: #selector(setInputDirection), keyEquivalent: "")
+        serverControlsClientItem.target = self
+        serverControlsClientItem.representedObject = InputSharingDirection.serverControlsClient.rawValue
+        directionMenu.addItem(serverControlsClientItem)
+        clientControlsServerItem = NSMenuItem(title: "Client -> Server", action: #selector(setInputDirection), keyEquivalent: "")
+        clientControlsServerItem.target = self
+        clientControlsServerItem.representedObject = InputSharingDirection.clientControlsServer.rawValue
+        directionMenu.addItem(clientControlsServerItem)
+        let directionItem = NSMenuItem(title: "Control Direction", action: nil, keyEquivalent: "")
+        directionItem.submenu = directionMenu
+        menu.addItem(directionItem)
+
+        let edgeMenu = NSMenu(title: "Peer Position")
+        for edge in ScreenEdge.allCases {
+            let item = NSMenuItem(title: edge.title, action: #selector(setPeerEdge), keyEquivalent: "")
+            item.target = self
+            item.representedObject = edge.rawValue
+            edgeMenu.addItem(item)
+            peerEdgeItems[edge] = item
+        }
+        let edgeItem = NSMenuItem(title: "Peer Position", action: nil, keyEquivalent: "")
+        edgeItem.submenu = edgeMenu
+        menu.addItem(edgeItem)
         menu.addItem(NSMenuItem.separator())
 
         clientModeItem = NSMenuItem(title: "Client mode", action: #selector(setClientMode), keyEquivalent: "")
@@ -112,6 +166,12 @@ final class AppController: NSObject, NSApplicationDelegate {
         statusMenuItem.title = "Status: \(statusText)"
         clientModeItem.state = config.mode == .client ? .on : .off
         serverModeItem.state = config.mode == .server ? .on : .off
+        inputSharingItem.state = config.inputSharingEnabled ? .on : .off
+        serverControlsClientItem.state = config.inputSharingDirection == .serverControlsClient ? .on : .off
+        clientControlsServerItem.state = config.inputSharingDirection == .clientControlsServer ? .on : .off
+        for (edge, item) in peerEdgeItems {
+            item.state = config.peerEdge == edge ? .on : .off
+        }
         refreshHistoryMenu()
     }
 
@@ -134,6 +194,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     @objc private func stopTransport() {
         transport?.stop()
         transport = nil
+        peerCount = 0
+        updateInputCoordinator()
         statusText = "stopped"
     }
 
@@ -143,6 +205,36 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     @objc private func showConfiguration() {
         settingsWindowController.show(config: config)
+    }
+
+    @objc private func toggleInputSharing() {
+        config.inputSharingEnabled.toggle()
+        config.save()
+        updateInputCoordinator(sendHello: true)
+    }
+
+    @objc private func setInputDirection(_ sender: NSMenuItem) {
+        guard
+            let rawValue = sender.representedObject as? String,
+            let direction = InputSharingDirection(rawValue: rawValue)
+        else {
+            return
+        }
+        config.inputSharingDirection = direction
+        config.save()
+        updateInputCoordinator(sendHello: true)
+    }
+
+    @objc private func setPeerEdge(_ sender: NSMenuItem) {
+        guard
+            let rawValue = sender.representedObject as? String,
+            let edge = ScreenEdge(rawValue: rawValue)
+        else {
+            return
+        }
+        config.peerEdge = edge
+        config.save()
+        updateInputCoordinator(sendHello: true)
     }
 
     @objc private func sendFilesFromClipboard() {
@@ -166,11 +258,14 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func applyConfig(_ nextConfig: AppConfig) {
         config = nextConfig
         config.save()
+        updateInputCoordinator(sendHello: true)
         restartTransport()
     }
 
     private func restartTransport() {
         transport?.stop()
+        peerCount = 0
+        updateInputCoordinator()
 
         guard !config.password.isEmpty else {
             transport = nil
@@ -204,6 +299,15 @@ final class AppController: NSObject, NSApplicationDelegate {
                 self?.handleMessage(message)
             }
         }
+        nextTransport.onPeerCount = { [weak self] count in
+            DispatchQueue.main.async {
+                guard let self else {
+                    return
+                }
+                self.peerCount = count
+                self.updateInputCoordinator(sendHello: true)
+            }
+        }
 
         transport = nextTransport
         nextTransport.start()
@@ -213,6 +317,22 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func publish(_ content: ClipboardContent, recordHistory: Bool = true) -> Bool {
         let message = content.makeMessage(origin: deviceId)
 
+        guard sendEncrypted(message) else {
+            return false
+        }
+
+        if recordHistory {
+            addHistory(content)
+        }
+        return true
+    }
+
+    private func publishInput(_ message: InputMessage) {
+        _ = sendEncrypted(message)
+    }
+
+    @discardableResult
+    private func sendEncrypted<T: Encodable>(_ message: T) -> Bool {
         guard
             let data = try? jsonEncoder.encode(message),
             let envelope = try? CryptoBox.encrypt(data, password: config.password),
@@ -228,9 +348,6 @@ final class AppController: NSObject, NSApplicationDelegate {
             return false
         }
 
-        if recordHistory {
-            addHistory(content)
-        }
         transport?.send(payload)
         return true
     }
@@ -240,6 +357,23 @@ final class AppController: NSObject, NSApplicationDelegate {
             let envelopeData = payload.data(using: .utf8),
             let envelope = try? jsonDecoder.decode(EncryptedEnvelope.self, from: envelopeData),
             let data = try? CryptoBox.decrypt(envelope, password: config.password),
+            let header = try? jsonDecoder.decode(MessageHeader.self, from: data)
+        else {
+            return
+        }
+
+        switch header.type {
+        case "clipboard":
+            handleClipboardMessage(data)
+        case "input":
+            handleInputMessage(data)
+        default:
+            break
+        }
+    }
+
+    private func handleClipboardMessage(_ data: Data) {
+        guard
             let message = try? jsonDecoder.decode(SyncMessage.self, from: data),
             message.type == "clipboard",
             message.origin != deviceId,
@@ -247,10 +381,55 @@ final class AppController: NSObject, NSApplicationDelegate {
         else {
             return
         }
-
         if clipboard.applyContent(content) {
             addHistory(content)
         }
+    }
+
+    private func handleInputMessage(_ data: Data) {
+        guard
+            let message = try? jsonDecoder.decode(InputMessage.self, from: data),
+            message.type == "input",
+            message.origin != deviceId
+        else {
+            return
+        }
+
+        if message.kind == "hello", config.mode == .client, message.role == SyncMode.server.rawValue {
+            var changed = false
+            if let direction = message.direction.flatMap(InputSharingDirection.init(rawValue:)), config.inputSharingDirection != direction {
+                config.inputSharingDirection = direction
+                changed = true
+            }
+            if let edge = message.peerEdge.flatMap(ScreenEdge.init(rawValue:)), config.peerEdge != edge {
+                config.peerEdge = edge
+                changed = true
+            }
+            if changed {
+                config.save()
+                updateInputCoordinator()
+            }
+        }
+
+        inputCoordinator.handle(message)
+        if message.kind == "hello", config.mode == .server {
+            sendInputHello()
+        }
+    }
+
+    private func updateInputCoordinator(sendHello: Bool = false) {
+        inputCoordinator.update(config: config, role: config.mode, peerCount: peerCount)
+        updateMenu()
+        if sendHello {
+            sendInputHello()
+        }
+    }
+
+    private func sendInputHello() {
+        guard transport != nil, !config.password.isEmpty else {
+            return
+        }
+        publishInput(inputCoordinator.makeHello())
     }
 
     private func addHistory(_ content: ClipboardContent) {

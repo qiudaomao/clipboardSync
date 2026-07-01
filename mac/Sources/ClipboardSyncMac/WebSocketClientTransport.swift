@@ -3,6 +3,7 @@ import Foundation
 final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     var onStatus: ((String) -> Void)?
     var onMessage: ((String) -> Void)?
+    var onPeerCount: ((Int) -> Void)?
 
     private let host: String
     private let port: Int
@@ -29,6 +30,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         session?.invalidateAndCancel()
         task = nil
         session = nil
+        onPeerCount?(0)
         onStatus?("stopped")
     }
 
@@ -72,6 +74,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
                 }
             case .failure(let error):
                 if self.shouldRun {
+                    self.onPeerCount?(0)
                     self.onStatus?("disconnected: \(error.localizedDescription)")
                     self.scheduleReconnect()
                 }
@@ -108,6 +111,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         webSocketTask: URLSessionWebSocketTask,
         didOpenWithProtocol protocol: String?
     ) {
+        onPeerCount?(1)
         onStatus?("connected \(host):\(port)")
     }
 
@@ -118,6 +122,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         reason: Data?
     ) {
         if shouldRun {
+            onPeerCount?(0)
             onStatus?("disconnected; retrying")
             scheduleReconnect()
         }

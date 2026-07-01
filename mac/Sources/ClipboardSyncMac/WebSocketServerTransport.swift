@@ -5,6 +5,7 @@ import Network
 final class WebSocketServerTransport: Transport {
     var onStatus: ((String) -> Void)?
     var onMessage: ((String) -> Void)?
+    var onPeerCount: ((Int) -> Void)?
 
     private let port: Int
     private let queue = DispatchQueue(label: "ClipboardSyncMac.server")
@@ -55,6 +56,7 @@ final class WebSocketServerTransport: Transport {
             self.listener = nil
             self.peers.values.forEach { $0.close() }
             self.peers.removeAll()
+            self.onPeerCount?(0)
             self.onStatus?("stopped")
         }
     }
@@ -96,6 +98,7 @@ final class WebSocketServerTransport: Transport {
     }
 
     private func pushStatus() {
+        onPeerCount?(peers.count)
         onStatus?("server \(NetworkAddress.serverURL(port: port)), \(peers.count) peer(s)")
     }
 }

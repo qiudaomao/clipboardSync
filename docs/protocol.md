@@ -31,13 +31,16 @@ The AES key is derived from the configured sync password with PBKDF2-HMAC-SHA256
 uses a per-message 12-byte nonce and 16-byte authentication tag. Devices must
 use the same password; messages encrypted with a different password are ignored.
 
-## Clipboard Plaintext
+## Plaintext Messages
 
-After decryption, clipboard updates use `type: "clipboard"` and a `kind` discriminator.
+After decryption, messages use a `type` discriminator. Clipboard updates use
+`type: "clipboard"` and input-sharing updates use `type: "input"`.
 
-The plaintext structure is never sent directly.
+Plaintext structures are never sent directly.
 
-### Text
+## Clipboard Message
+
+### Clipboard Text
 
 ```json
 {
@@ -49,7 +52,7 @@ The plaintext structure is never sent directly.
 }
 ```
 
-### Image
+### Clipboard Image
 
 ```json
 {
@@ -66,7 +69,7 @@ The plaintext structure is never sent directly.
 }
 ```
 
-### Files
+### Clipboard Files
 
 ```json
 {
@@ -84,6 +87,88 @@ The plaintext structure is never sent directly.
 }
 ```
 
+## Input Message
+
+Input sharing uses the same encrypted envelope. Version 1 supports one peer for
+mouse and basic keyboard sharing.
+
+### Hello
+
+```json
+{
+  "type": "input",
+  "origin": "device-id",
+  "target": null,
+  "kind": "hello",
+  "role": "server",
+  "screen": { "width": 1920, "height": 1080, "scale": 1.0 },
+  "enabled": true,
+  "direction": "serverControlsClient",
+  "peerEdge": "right",
+  "sentAt": 1782835200.0
+}
+```
+
+### Capture
+
+```json
+{
+  "type": "input",
+  "origin": "device-id",
+  "target": "peer-device-id",
+  "kind": "capture",
+  "capture": {
+    "action": "start",
+    "edge": "right",
+    "normalizedX": 0.0,
+    "normalizedY": 0.42
+  },
+  "sentAt": 1782835200.0
+}
+```
+
+### Mouse
+
+```json
+{
+  "type": "input",
+  "origin": "device-id",
+  "target": "peer-device-id",
+  "kind": "mouseMove",
+  "mouse": {
+    "action": "move",
+    "normalizedX": 0.5,
+    "normalizedY": 0.5,
+    "deltaX": null,
+    "deltaY": null
+  },
+  "sentAt": 1782835200.0
+}
+```
+
+`kind: "mouseButton"` uses `mouse.action` as `down` or `up` and `mouse.button`
+as `left`, `right`, or `middle`. `kind: "mouseWheel"` uses `deltaX` and `deltaY`.
+
+### Keyboard
+
+```json
+{
+  "type": "input",
+  "origin": "device-id",
+  "target": "peer-device-id",
+  "kind": "key",
+  "key": {
+    "action": "down",
+    "key": "KeyA",
+    "modifiers": ["Shift"]
+  },
+  "sentAt": 1782835200.0
+}
+```
+
+Keyboard codes are canonical physical-key names such as `KeyA`, `Digit1`,
+`Enter`, `Escape`, `ArrowLeft`, `Shift`, `Control`, `Alt`, and `Meta`.
+
 ## Fields
 
 - `type`: always `clipboard`.
@@ -95,6 +180,18 @@ The plaintext structure is never sent directly.
 - `dataBase64`: base64-encoded binary bytes.
 - `size`: raw byte count before base64 encoding.
 - `sentAt`: sender timestamp in Unix seconds.
+Input message fields:
+
+- `type`: always `input`.
+- `origin`: sender device id.
+- `target`: optional receiver device id. Messages with another target are ignored.
+- `kind`: `hello`, `capture`, `mouseMove`, `mouseButton`, `mouseWheel`, or `key`.
+- `role`: sender role for `hello`, either `server` or `client`.
+- `screen`: primary screen size and scale for `hello`.
+- `enabled`: sender input-sharing runtime state for `hello`.
+- `direction`: `serverControlsClient` or `clientControlsServer`.
+- `peerEdge`: peer position relative to the controlling side: `left`, `right`, `top`, or `bottom`.
+- `normalizedX` / `normalizedY`: screen coordinates normalized to `0...1`.
 Encrypted envelope fields:
 
 - `type`: always `encrypted`.
@@ -109,6 +206,7 @@ Encrypted envelope fields:
 - Clipboard history keeps the latest 10 unique items in memory.
 - Each image or file payload is capped at 10 MB raw bytes.
 - WebSocket JSON messages are capped at 16 MB to allow for base64 expansion.
+- Input sharing v1 supports one peer. If multiple clients connect, clipboard sync continues and input sharing is disabled.
 
 ## Behavior
 
@@ -119,4 +217,11 @@ Encrypted envelope fields:
 - A receiver ignores messages where `origin` matches its own device id.
 - A server broadcasts the encrypted envelope from one client to other clients.
 - A server applies remote messages locally only when it is configured with the same password.
+- Input sharing is off by default and must be enabled in settings or the tray/menu.
+- The configured direction is either server controls client or client controls server. On reconnect conflicts, the server's direction and peer-edge settings win.
+- The peer edge defines where the remote primary screen sits relative to the controller's primary screen.
+- The controller starts remote capture when the local pointer reaches the configured edge and ends capture when the remote pointer crosses back over the opposite edge.
+- macOS requires Accessibility/Input Monitoring permission for input capture and injection.
+- Windows uses low-level mouse/keyboard hooks and `SendInput` for capture and injection.
+- Input sharing covers mouse move, button, wheel, and basic physical keyboard events. IME, media keys, and system-reserved shortcuts are not guaranteed.
 - Binary WebSocket messages are ignored.

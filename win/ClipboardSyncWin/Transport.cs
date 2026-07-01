@@ -16,6 +16,7 @@ internal interface ISyncTransport : IDisposable
 {
     event Action<string>? StatusChanged;
     event Action<string>? MessageReceived;
+    event Action<int>? PeerCountChanged;
 
     void Start();
     void Stop();
@@ -32,6 +33,7 @@ internal sealed class ClientTransport : ISyncTransport
 
     public event Action<string>? StatusChanged;
     public event Action<string>? MessageReceived;
+    public event Action<int>? PeerCountChanged;
 
     public ClientTransport(string host, int port)
     {
@@ -52,6 +54,7 @@ internal sealed class ClientTransport : ISyncTransport
         socket?.Abort();
         socket?.Dispose();
         socket = null;
+        PeerCountChanged?.Invoke(0);
         StatusChanged?.Invoke("stopped");
     }
 
@@ -96,6 +99,7 @@ internal sealed class ClientTransport : ISyncTransport
                 socket = ws;
                 StatusChanged?.Invoke($"connecting {host}:{port}");
                 await ws.ConnectAsync(new Uri($"ws://{host}:{port}/"), token).ConfigureAwait(false);
+                PeerCountChanged?.Invoke(1);
                 StatusChanged?.Invoke($"connected {host}:{port}");
                 await ReceiveLoopAsync(ws, token).ConfigureAwait(false);
             }
@@ -107,6 +111,7 @@ internal sealed class ClientTransport : ISyncTransport
             {
                 if (!token.IsCancellationRequested)
                 {
+                    PeerCountChanged?.Invoke(0);
                     StatusChanged?.Invoke("disconnected; retrying");
                 }
             }
@@ -163,6 +168,7 @@ internal sealed class ServerTransport : ISyncTransport
 
     public event Action<string>? StatusChanged;
     public event Action<string>? MessageReceived;
+    public event Action<int>? PeerCountChanged;
 
     public ServerTransport(int port)
     {
@@ -177,6 +183,7 @@ internal sealed class ServerTransport : ISyncTransport
             cts = new CancellationTokenSource();
             listener = new TcpListener(IPAddress.Any, port);
             listener.Start();
+            PeerCountChanged?.Invoke(0);
             StatusChanged?.Invoke($"server {NetworkAddress.ServerUrl(port)}, 0 peer(s)");
             _ = AcceptLoopAsync(cts.Token);
         }
@@ -195,6 +202,7 @@ internal sealed class ServerTransport : ISyncTransport
             peer.Close();
         }
         peers.Clear();
+        PeerCountChanged?.Invoke(0);
         StatusChanged?.Invoke("stopped");
     }
 
@@ -267,6 +275,7 @@ internal sealed class ServerTransport : ISyncTransport
 
     private void PushStatus()
     {
+        PeerCountChanged?.Invoke(peers.Count);
         StatusChanged?.Invoke($"server {NetworkAddress.ServerUrl(port)}, {peers.Count} peer(s)");
     }
 }

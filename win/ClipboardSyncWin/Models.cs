@@ -21,12 +21,29 @@ internal enum SyncMode
     Server
 }
 
+internal enum InputSharingDirection
+{
+    ServerControlsClient,
+    ClientControlsServer
+}
+
+internal enum ScreenEdge
+{
+    Left,
+    Right,
+    Top,
+    Bottom
+}
+
 internal sealed class AppConfig
 {
     public SyncMode Mode { get; set; } = SyncMode.Client;
     public string Host { get; set; } = "";
     public int Port { get; set; } = 8787;
     public string Password { get; set; } = "";
+    public bool InputSharingEnabled { get; set; }
+    public InputSharingDirection InputSharingDirection { get; set; } = InputSharingDirection.ServerControlsClient;
+    public ScreenEdge PeerEdge { get; set; } = ScreenEdge.Right;
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
 
     public void Normalize()
@@ -48,6 +65,9 @@ internal sealed class AppConfig
             Host = Host,
             Port = Port,
             Password = Password,
+            InputSharingEnabled = InputSharingEnabled,
+            InputSharingDirection = InputSharingDirection,
+            PeerEdge = PeerEdge,
             DeviceId = DeviceId
         };
     }
@@ -63,6 +83,12 @@ internal sealed class EncryptedEnvelope
     public string Tag { get; set; } = "";
 }
 
+internal sealed class MessageHeader
+{
+    public string Type { get; set; } = "";
+    public string? Origin { get; set; }
+}
+
 internal sealed class SyncMessage
 {
     public string Type { get; set; } = "clipboard";
@@ -72,6 +98,116 @@ internal sealed class SyncMessage
     public ClipboardImagePayload? Image { get; set; }
     public List<ClipboardFilePayload>? Files { get; set; }
     public double SentAt { get; set; }
+}
+
+internal sealed class InputMessage
+{
+    public string Type { get; set; } = "input";
+    public string Origin { get; set; } = "";
+    public string? Target { get; set; }
+    public string Kind { get; set; } = "";
+    public string? Role { get; set; }
+    public ScreenMetrics? Screen { get; set; }
+    public bool? Enabled { get; set; }
+    public string? Direction { get; set; }
+    public string? PeerEdge { get; set; }
+    public InputCapturePayload? Capture { get; set; }
+    public InputMousePayload? Mouse { get; set; }
+    public InputKeyPayload? Key { get; set; }
+    public double SentAt { get; set; }
+
+    public static InputMessage Hello(
+        string origin,
+        SyncMode role,
+        ScreenMetrics screen,
+        bool enabled,
+        InputSharingDirection direction,
+        ScreenEdge peerEdge)
+    {
+        return new InputMessage
+        {
+            Type = "input",
+            Origin = origin,
+            Kind = "hello",
+            Role = role == SyncMode.Server ? "server" : "client",
+            Screen = screen,
+            Enabled = enabled,
+            Direction = InputSharingWire.DirectionValue(direction),
+            PeerEdge = InputSharingWire.EdgeValue(peerEdge),
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        };
+    }
+}
+
+internal sealed class ScreenMetrics
+{
+    public double Width { get; set; }
+    public double Height { get; set; }
+    public double Scale { get; set; } = 1;
+}
+
+internal sealed class InputCapturePayload
+{
+    public string Action { get; set; } = "";
+    public string Edge { get; set; } = "";
+    public double NormalizedX { get; set; }
+    public double NormalizedY { get; set; }
+}
+
+internal sealed class InputMousePayload
+{
+    public string Action { get; set; } = "";
+    public string? Button { get; set; }
+    public double? NormalizedX { get; set; }
+    public double? NormalizedY { get; set; }
+    public double? DeltaX { get; set; }
+    public double? DeltaY { get; set; }
+}
+
+internal sealed class InputKeyPayload
+{
+    public string Action { get; set; } = "";
+    public string Key { get; set; } = "";
+    public List<string> Modifiers { get; set; } = [];
+}
+
+internal static class InputSharingWire
+{
+    public static string DirectionValue(InputSharingDirection direction)
+    {
+        return direction == InputSharingDirection.ClientControlsServer
+            ? "clientControlsServer"
+            : "serverControlsClient";
+    }
+
+    public static InputSharingDirection ParseDirection(string? value)
+    {
+        return string.Equals(value, "clientControlsServer", StringComparison.OrdinalIgnoreCase)
+            ? InputSharingDirection.ClientControlsServer
+            : InputSharingDirection.ServerControlsClient;
+    }
+
+    public static string EdgeValue(ScreenEdge edge)
+    {
+        return edge switch
+        {
+            ScreenEdge.Left => "left",
+            ScreenEdge.Top => "top",
+            ScreenEdge.Bottom => "bottom",
+            _ => "right"
+        };
+    }
+
+    public static ScreenEdge ParseEdge(string? value)
+    {
+        return value?.ToLowerInvariant() switch
+        {
+            "left" => ScreenEdge.Left,
+            "top" => ScreenEdge.Top,
+            "bottom" => ScreenEdge.Bottom,
+            _ => ScreenEdge.Right
+        };
+    }
 }
 
 internal sealed class ClipboardImagePayload

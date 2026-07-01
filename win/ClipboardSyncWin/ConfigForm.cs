@@ -20,6 +20,9 @@ internal sealed class ConfigForm : Form
         Value = 8787
     };
     private readonly TextBox passwordBox = new() { UseSystemPasswordChar = true };
+    private readonly CheckBox inputSharingBox = new() { Text = "Enable Input Sharing", AutoSize = true };
+    private readonly ComboBox directionBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox peerEdgeBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private string clientHostDraft = "";
 
     public AppConfig Config { get; private set; }
@@ -34,7 +37,7 @@ internal sealed class ConfigForm : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(380, 224);
+        ClientSize = new Size(430, 324);
 
         modeBox.Items.AddRange(new object[] { "Client", "Server" });
         modeBox.SelectedIndex = Config.Mode == SyncMode.Client ? 0 : 1;
@@ -42,6 +45,18 @@ internal sealed class ConfigForm : Form
         hostBox.Text = clientHostDraft;
         portBox.Value = Math.Clamp(Config.Port, 1, 65_535);
         passwordBox.Text = Config.Password;
+        inputSharingBox.Checked = Config.InputSharingEnabled;
+        directionBox.Items.AddRange(new object[] { "Server -> Client", "Client -> Server" });
+        directionBox.SelectedIndex = Config.InputSharingDirection == InputSharingDirection.ClientControlsServer ? 1 : 0;
+        peerEdgeBox.Items.AddRange(new object[] { "Right", "Left", "Top", "Bottom" });
+        peerEdgeBox.SelectedIndex = Config.PeerEdge switch
+        {
+            ScreenEdge.Left => 1,
+            ScreenEdge.Top => 2,
+            ScreenEdge.Bottom => 3,
+            _ => 0
+        };
+        inputSharingBox.CheckedChanged += (_, _) => UpdateInputSharingState();
         hostBox.TextChanged += (_, _) =>
         {
             if (modeBox.SelectedIndex != 1)
@@ -57,12 +72,15 @@ internal sealed class ConfigForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
             ColumnCount = 2,
-            RowCount = 6
+            RowCount = 9
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -72,6 +90,9 @@ internal sealed class ConfigForm : Form
         AddRow(layout, 1, "Host", BuildHostControl());
         AddRow(layout, 2, "Port", portBox);
         AddRow(layout, 3, "Password", passwordBox);
+        AddRow(layout, 4, "Input", inputSharingBox);
+        AddRow(layout, 5, "Direction", directionBox);
+        AddRow(layout, 6, "Peer", peerEdgeBox);
 
         var buttons = new FlowLayoutPanel
         {
@@ -84,13 +105,14 @@ internal sealed class ConfigForm : Form
         okButton.Click += (_, _) => Save();
         buttons.Controls.Add(okButton);
         buttons.Controls.Add(cancelButton);
-        layout.Controls.Add(buttons, 0, 5);
+        layout.Controls.Add(buttons, 0, 8);
         layout.SetColumnSpan(buttons, 2);
 
         AcceptButton = okButton;
         CancelButton = cancelButton;
         Controls.Add(layout);
         UpdateModeState();
+        UpdateInputSharingState();
     }
 
     private static void AddRow(TableLayoutPanel layout, int row, string label, Control control)
@@ -143,6 +165,12 @@ internal sealed class ConfigForm : Form
             : "Share this address with clients on the same LAN.";
     }
 
+    private void UpdateInputSharingState()
+    {
+        directionBox.Enabled = inputSharingBox.Checked;
+        peerEdgeBox.Enabled = inputSharingBox.Checked;
+    }
+
     private void Save()
     {
         Config.Mode = modeBox.SelectedIndex == 1 ? SyncMode.Server : SyncMode.Client;
@@ -173,6 +201,17 @@ internal sealed class ConfigForm : Form
         Config.Host = host;
         Config.Port = (int)portBox.Value;
         Config.Password = password;
+        Config.InputSharingEnabled = inputSharingBox.Checked;
+        Config.InputSharingDirection = directionBox.SelectedIndex == 1
+            ? InputSharingDirection.ClientControlsServer
+            : InputSharingDirection.ServerControlsClient;
+        Config.PeerEdge = peerEdgeBox.SelectedIndex switch
+        {
+            1 => ScreenEdge.Left,
+            2 => ScreenEdge.Top,
+            3 => ScreenEdge.Bottom,
+            _ => ScreenEdge.Right
+        };
         Config.Normalize();
         DialogResult = DialogResult.OK;
         Close();

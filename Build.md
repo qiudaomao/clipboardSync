@@ -40,6 +40,7 @@ In server mode the settings window shows the LAN WebSocket address, such as `ws:
 Text and image clipboard changes sync automatically. File clipboard contents are not sent by the poller; copy files in Finder, then click `Send Files from Clipboard` from the menu bar. Each file must be 10 MB or smaller.
 The `History` submenu keeps the latest 10 clipboard items and can restore/resend an item.
 Set the same sync password on every device before starting. Clipboard payloads are encrypted with AES-GCM over the existing WebSocket connection.
+Input Sharing is off by default. Enable it from Settings or the menu, choose `Server -> Client` or `Client -> Server`, and set the peer position edge. macOS needs Accessibility/Input Monitoring permission before keyboard and mouse sharing can run.
 
 The Swift Package in `mac/Package.swift` is kept as a lightweight compiler check, but the Xcode project is the native app bundle build.
 
@@ -54,7 +55,9 @@ The Windows server also binds to the LAN and shows a `ws://LAN-IP:port/` address
 Text and image clipboard changes sync automatically. File clipboard contents are only sent from `Send Files from Clipboard` in the tray menu, with a 10 MB limit per file.
 The `History` submenu keeps the latest 10 clipboard items and can restore/resend an item.
 Set the same sync password on every device before starting. Clipboard payloads are encrypted with AES-GCM over the existing WebSocket connection.
+Input Sharing is off by default. Enable it from Configure or the tray menu, choose `Server -> Client` or `Client -> Server`, and set the peer position edge.
 
 ## Notes
 
-The WebSocket endpoint is still plain `ws://`, but clipboard message bodies are encrypted and authenticated with the configured shared password.
+The WebSocket endpoint is still plain `ws://`, but clipboard and input-sharing message bodies are encrypted and authenticated with the configured shared password.
+Input sharing v1 supports one peer and the primary screen only.

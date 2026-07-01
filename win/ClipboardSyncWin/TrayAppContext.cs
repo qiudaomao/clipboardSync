@@ -20,15 +20,22 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly NotifyIcon notifyIcon;
     private readonly ToolStripMenuItem statusItem;
     private readonly ToolStripMenuItem historyItem;
+    private readonly ToolStripMenuItem inputStatusItem;
+    private readonly ToolStripMenuItem inputSharingItem;
+    private readonly ToolStripMenuItem serverControlsClientItem;
+    private readonly ToolStripMenuItem clientControlsServerItem;
+    private readonly Dictionary<ScreenEdge, ToolStripMenuItem> peerEdgeItems = [];
     private readonly ToolStripMenuItem clientModeItem;
     private readonly ToolStripMenuItem serverModeItem;
     private readonly ClipboardMonitor clipboardMonitor;
+    private readonly InputSharingCoordinator inputCoordinator;
     private readonly SynchronizationContext uiContext;
     private readonly Icon trayIcon;
     private readonly List<ClipboardHistoryEntry> history = [];
 
     private AppConfig config;
     private ISyncTransport? transport;
+    private int peerCount;
     private string status = "stopped";
 
     public TrayAppContext()
@@ -38,9 +45,14 @@ internal sealed class TrayAppContext : ApplicationContext
 
         statusItem = new ToolStripMenuItem("Status: stopped") { Enabled = false };
         historyItem = new ToolStripMenuItem("History");
+        inputStatusItem = new ToolStripMenuItem("Input Sharing: off") { Enabled = false };
+        inputSharingItem = new ToolStripMenuItem("Enable Input Sharing", null, (_, _) => ToggleInputSharing());
+        serverControlsClientItem = new ToolStripMenuItem("Server -> Client", null, (_, _) => SetInputDirection(InputSharingDirection.ServerControlsClient));
+        clientControlsServerItem = new ToolStripMenuItem("Client -> Server", null, (_, _) => SetInputDirection(InputSharingDirection.ClientControlsServer));
         clientModeItem = new ToolStripMenuItem("Client mode", null, (_, _) => SetMode(SyncMode.Client));
         serverModeItem = new ToolStripMenuItem("Server mode", null, (_, _) => SetMode(SyncMode.Server));
         trayIcon = LoadTrayIcon();
+        inputCoordinator = new InputSharingCoordinator(config.DeviceId);
 
         notifyIcon = new NotifyIcon
         {
@@ -57,7 +69,11 @@ internal sealed class TrayAppContext : ApplicationContext
             status = reason;
             UpdateMenu();
         });
+        inputCoordinator.MessageReady += message => OnUi(() => PublishInput(message));
+        inputCoordinator.StatusChanged += text => OnUi(() => inputStatusItem.Text = text);
         clipboardMonitor.Start();
+        inputCoordinator.Start();
+        UpdateInputCoordinator();
 
         RestartTransport();
     }
@@ -67,6 +83,7 @@ internal sealed class TrayAppContext : ApplicationContext
         if (disposing)
         {
             transport?.Dispose();
+            inputCoordinator.Dispose();
             clipboardMonitor.Dispose();
             notifyIcon.Dispose();
             trayIcon.Dispose();
@@ -84,6 +101,11 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Send Files from Clipboard", null, (_, _) => SendFilesFromClipboard()));
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(inputStatusItem);
+        menu.Items.Add(inputSharingItem);
+        menu.Items.Add(BuildDirectionMenu());
+        menu.Items.Add(BuildPeerEdgeMenu());
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(clientModeItem);
         menu.Items.Add(serverModeItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -93,6 +115,31 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
         return menu;
+    }
+
+    private ToolStripMenuItem BuildDirectionMenu()
+    {
+        var menu = new ToolStripMenuItem("Control Direction");
+        menu.DropDownItems.Add(serverControlsClientItem);
+        menu.DropDownItems.Add(clientControlsServerItem);
+        return menu;
+    }
+
+    private ToolStripMenuItem BuildPeerEdgeMenu()
+    {
+        var menu = new ToolStripMenuItem("Peer Position");
+        AddPeerEdgeItem(menu, ScreenEdge.Right, "Right");
+        AddPeerEdgeItem(menu, ScreenEdge.Left, "Left");
+        AddPeerEdgeItem(menu, ScreenEdge.Top, "Top");
+        AddPeerEdgeItem(menu, ScreenEdge.Bottom, "Bottom");
+        return menu;
+    }
+
+    private void AddPeerEdgeItem(ToolStripMenuItem menu, ScreenEdge edge, string title)
+    {
+        var item = new ToolStripMenuItem(title, null, (_, _) => SetPeerEdge(edge));
+        peerEdgeItems[edge] = item;
+        menu.DropDownItems.Add(item);
     }
 
     private static Icon LoadTrayIcon()
@@ -106,6 +153,13 @@ internal sealed class TrayAppContext : ApplicationContext
         statusItem.Text = $"Status: {status}";
         clientModeItem.Checked = config.Mode == SyncMode.Client;
         serverModeItem.Checked = config.Mode == SyncMode.Server;
+        inputSharingItem.Checked = config.InputSharingEnabled;
+        serverControlsClientItem.Checked = config.InputSharingDirection == InputSharingDirection.ServerControlsClient;
+        clientControlsServerItem.Checked = config.InputSharingDirection == InputSharingDirection.ClientControlsServer;
+        foreach (var item in peerEdgeItems)
+        {
+            item.Value.Checked = config.PeerEdge == item.Key;
+        }
         RefreshHistoryMenu();
     }
 
@@ -114,6 +168,27 @@ internal sealed class TrayAppContext : ApplicationContext
         config.Mode = mode;
         ConfigStore.Save(config);
         RestartTransport();
+    }
+
+    private void ToggleInputSharing()
+    {
+        config.InputSharingEnabled = !config.InputSharingEnabled;
+        ConfigStore.Save(config);
+        UpdateInputCoordinator(sendHello: true);
+    }
+
+    private void SetInputDirection(InputSharingDirection direction)
+    {
+        config.InputSharingDirection = direction;
+        ConfigStore.Save(config);
+        UpdateInputCoordinator(sendHello: true);
+    }
+
+    private void SetPeerEdge(ScreenEdge edge)
+    {
+        config.PeerEdge = edge;
+        ConfigStore.Save(config);
+        UpdateInputCoordinator(sendHello: true);
     }
 
     private void ShowConfiguration()
@@ -128,12 +203,15 @@ internal sealed class TrayAppContext : ApplicationContext
         nextConfig.DeviceId = config.DeviceId;
         config = nextConfig;
         ConfigStore.Save(config);
+        UpdateInputCoordinator(sendHello: true);
         RestartTransport();
     }
 
     private void RestartTransport()
     {
         transport?.Dispose();
+        peerCount = 0;
+        UpdateInputCoordinator();
 
         if (string.IsNullOrEmpty(config.Password))
         {
@@ -169,6 +247,11 @@ internal sealed class TrayAppContext : ApplicationContext
             UpdateMenu();
         });
         transport.MessageReceived += payload => OnUi(() => HandleMessage(payload));
+        transport.PeerCountChanged += count => OnUi(() =>
+        {
+            peerCount = count;
+            UpdateInputCoordinator(sendHello: true);
+        });
         transport.Start();
         UpdateMenu();
     }
@@ -177,6 +260,8 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         transport?.Dispose();
         transport = null;
+        peerCount = 0;
+        UpdateInputCoordinator();
         status = "stopped";
         UpdateMenu();
     }
@@ -211,6 +296,26 @@ internal sealed class TrayAppContext : ApplicationContext
     private bool Publish(ClipboardContent content, bool recordHistory = true)
     {
         var message = content.ToMessage(config.DeviceId);
+        if (!SendEncrypted(message))
+        {
+            return false;
+        }
+
+        if (recordHistory)
+        {
+            AddHistory(content);
+        }
+
+        return true;
+    }
+
+    private void PublishInput(InputMessage message)
+    {
+        _ = SendEncrypted(message);
+    }
+
+    private bool SendEncrypted<T>(T message)
+    {
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(message, MessageJsonOptions);
         EncryptedEnvelope envelope;
         byte[] envelopeBytes;
@@ -233,11 +338,6 @@ internal sealed class TrayAppContext : ApplicationContext
             return false;
         }
 
-        if (recordHistory)
-        {
-            AddHistory(content);
-        }
-
         var payload = System.Text.Encoding.UTF8.GetString(envelopeBytes);
         _ = transport?.SendAsync(payload);
         return true;
@@ -245,7 +345,8 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void HandleMessage(string payload)
     {
-        SyncMessage? message;
+        byte[] plaintext;
+        MessageHeader? header;
         try
         {
             var envelope = JsonSerializer.Deserialize<EncryptedEnvelope>(payload, MessageJsonOptions);
@@ -253,7 +354,30 @@ internal sealed class TrayAppContext : ApplicationContext
             {
                 return;
             }
-            var plaintext = CryptoBox.Decrypt(envelope, config.Password);
+            plaintext = CryptoBox.Decrypt(envelope, config.Password);
+            header = JsonSerializer.Deserialize<MessageHeader>(plaintext, MessageJsonOptions);
+        }
+        catch
+        {
+            return;
+        }
+
+        switch (header?.Type)
+        {
+            case "clipboard":
+                HandleClipboardMessage(plaintext);
+                break;
+            case "input":
+                HandleInputMessage(plaintext);
+                break;
+        }
+    }
+
+    private void HandleClipboardMessage(byte[] plaintext)
+    {
+        SyncMessage? message;
+        try
+        {
             message = JsonSerializer.Deserialize<SyncMessage>(plaintext, MessageJsonOptions);
         }
         catch
@@ -271,6 +395,73 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             AddHistory(content);
         }
+    }
+
+    private void HandleInputMessage(byte[] plaintext)
+    {
+        InputMessage? message;
+        try
+        {
+            message = JsonSerializer.Deserialize<InputMessage>(plaintext, MessageJsonOptions);
+        }
+        catch
+        {
+            return;
+        }
+
+        if (message?.Type != "input" || message.Origin == config.DeviceId)
+        {
+            return;
+        }
+
+        if (message.Kind == "hello" && config.Mode == SyncMode.Client && message.Role == "server")
+        {
+            var changed = false;
+            var direction = InputSharingWire.ParseDirection(message.Direction);
+            if (config.InputSharingDirection != direction)
+            {
+                config.InputSharingDirection = direction;
+                changed = true;
+            }
+
+            var edge = InputSharingWire.ParseEdge(message.PeerEdge);
+            if (config.PeerEdge != edge)
+            {
+                config.PeerEdge = edge;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                ConfigStore.Save(config);
+                UpdateInputCoordinator();
+            }
+        }
+
+        inputCoordinator.Handle(message);
+        if (message.Kind == "hello" && config.Mode == SyncMode.Server)
+        {
+            SendInputHello();
+        }
+    }
+
+    private void UpdateInputCoordinator(bool sendHello = false)
+    {
+        inputCoordinator.Update(config, config.Mode, peerCount);
+        UpdateMenu();
+        if (sendHello)
+        {
+            SendInputHello();
+        }
+    }
+
+    private void SendInputHello()
+    {
+        if (transport is null || string.IsNullOrEmpty(config.Password))
+        {
+            return;
+        }
+        PublishInput(inputCoordinator.MakeHello());
     }
 
     private void AddHistory(ClipboardContent content)

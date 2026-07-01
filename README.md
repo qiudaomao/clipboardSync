@@ -15,6 +15,8 @@ key features:
 
 5. password-based encryption
 
+6. mouse and keyboard sharing
+
 ![mac](assets/mac.png)
 
 ![win](assets/win.png)

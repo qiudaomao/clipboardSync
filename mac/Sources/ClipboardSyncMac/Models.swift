@@ -11,20 +11,80 @@ enum SyncMode: String, Codable {
     case server
 }
 
+enum InputSharingDirection: String, Codable {
+    case serverControlsClient
+    case clientControlsServer
+
+    var title: String {
+        switch self {
+        case .serverControlsClient:
+            return "Server -> Client"
+        case .clientControlsServer:
+            return "Client -> Server"
+        }
+    }
+}
+
+enum ScreenEdge: String, Codable, CaseIterable {
+    case left
+    case right
+    case top
+    case bottom
+
+    var title: String {
+        rawValue.prefix(1).uppercased() + rawValue.dropFirst()
+    }
+
+    var opposite: ScreenEdge {
+        switch self {
+        case .left:
+            return .right
+        case .right:
+            return .left
+        case .top:
+            return .bottom
+        case .bottom:
+            return .top
+        }
+    }
+}
+
 struct AppConfig: Codable {
     var mode: SyncMode
     var host: String
     var port: Int
     var password: String
+    var inputSharingEnabled: Bool
+    var inputSharingDirection: InputSharingDirection
+    var peerEdge: ScreenEdge
 
-    static let defaults = AppConfig(mode: .client, host: "", port: 8787, password: "")
+    static let defaults = AppConfig(
+        mode: .client,
+        host: "",
+        port: 8787,
+        password: "",
+        inputSharingEnabled: false,
+        inputSharingDirection: .serverControlsClient,
+        peerEdge: .right
+    )
     private static let storageKey = "ClipboardSyncMac.config"
 
-    init(mode: SyncMode, host: String, port: Int, password: String) {
+    init(
+        mode: SyncMode,
+        host: String,
+        port: Int,
+        password: String,
+        inputSharingEnabled: Bool,
+        inputSharingDirection: InputSharingDirection,
+        peerEdge: ScreenEdge
+    ) {
         self.mode = mode
         self.host = host
         self.port = port
         self.password = password
+        self.inputSharingEnabled = inputSharingEnabled
+        self.inputSharingDirection = inputSharingDirection
+        self.peerEdge = peerEdge
     }
 
     init(from decoder: Decoder) throws {
@@ -33,6 +93,9 @@ struct AppConfig: Codable {
         host = try container.decodeIfPresent(String.self, forKey: .host) ?? Self.defaults.host
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? Self.defaults.port
         password = try container.decodeIfPresent(String.self, forKey: .password) ?? Self.defaults.password
+        inputSharingEnabled = try container.decodeIfPresent(Bool.self, forKey: .inputSharingEnabled) ?? Self.defaults.inputSharingEnabled
+        inputSharingDirection = try container.decodeIfPresent(InputSharingDirection.self, forKey: .inputSharingDirection) ?? Self.defaults.inputSharingDirection
+        peerEdge = try container.decodeIfPresent(ScreenEdge.self, forKey: .peerEdge) ?? Self.defaults.peerEdge
     }
 
     static func load() -> AppConfig {
@@ -56,7 +119,10 @@ struct AppConfig: Codable {
             mode: mode,
             host: host.trimmingCharacters(in: .whitespacesAndNewlines),
             port: min(max(port, 1), 65_535),
-            password: password
+            password: password,
+            inputSharingEnabled: inputSharingEnabled,
+            inputSharingDirection: inputSharingDirection,
+            peerEdge: peerEdge
         )
     }
 }
@@ -70,6 +136,11 @@ struct EncryptedEnvelope: Codable {
     let tag: String
 }
 
+struct MessageHeader: Codable {
+    let type: String
+    let origin: String?
+}
+
 struct SyncMessage: Codable {
     let type: String
     let origin: String
@@ -78,6 +149,75 @@ struct SyncMessage: Codable {
     let image: ClipboardImagePayload?
     let files: [ClipboardFilePayload]?
     let sentAt: TimeInterval
+}
+
+struct InputMessage: Codable {
+    let type: String
+    let origin: String
+    let target: String?
+    let kind: String
+    let role: String?
+    let screen: ScreenMetrics?
+    let enabled: Bool?
+    let direction: String?
+    let peerEdge: String?
+    let capture: InputCapturePayload?
+    let mouse: InputMousePayload?
+    let key: InputKeyPayload?
+    let sentAt: TimeInterval
+
+    static func hello(
+        origin: String,
+        role: SyncMode,
+        screen: ScreenMetrics,
+        enabled: Bool,
+        direction: InputSharingDirection,
+        peerEdge: ScreenEdge
+    ) -> InputMessage {
+        InputMessage(
+            type: "input",
+            origin: origin,
+            target: nil,
+            kind: "hello",
+            role: role.rawValue,
+            screen: screen,
+            enabled: enabled,
+            direction: direction.rawValue,
+            peerEdge: peerEdge.rawValue,
+            capture: nil,
+            mouse: nil,
+            key: nil,
+            sentAt: Date().timeIntervalSince1970
+        )
+    }
+}
+
+struct ScreenMetrics: Codable {
+    let width: Double
+    let height: Double
+    let scale: Double
+}
+
+struct InputCapturePayload: Codable {
+    let action: String
+    let edge: String
+    let normalizedX: Double
+    let normalizedY: Double
+}
+
+struct InputMousePayload: Codable {
+    let action: String
+    let button: String?
+    let normalizedX: Double?
+    let normalizedY: Double?
+    let deltaX: Double?
+    let deltaY: Double?
+}
+
+struct InputKeyPayload: Codable {
+    let action: String
+    let key: String
+    let modifiers: [String]
 }
 
 struct ClipboardImagePayload: Codable, Equatable {

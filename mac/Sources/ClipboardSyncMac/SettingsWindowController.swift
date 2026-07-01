@@ -7,6 +7,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let hostField = NSTextField()
     private let portField = NSTextField()
     private let passwordField = NSSecureTextField()
+    private let inputSharingButton = NSButton(checkboxWithTitle: "Enable Input Sharing", target: nil, action: nil)
+    private let directionControl = NSSegmentedControl(labels: ["Server -> Client", "Client -> Server"], trackingMode: .selectOne, target: nil, action: nil)
+    private let peerEdgePopup = NSPopUpButton()
     private let hostHintLabel = NSTextField(labelWithString: "Used only in client mode.")
     private let validationLabel = NSTextField(labelWithString: "")
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
@@ -17,14 +20,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 336),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 438),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         window.title = "Clipboard Sync Settings"
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 420, height: 260)
+        window.minSize = NSSize(width: 480, height: 420)
 
         super.init(window: window)
 
@@ -42,6 +45,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         hostField.stringValue = clientHostDraft
         portField.stringValue = String(config.port)
         passwordField.stringValue = config.password
+        inputSharingButton.state = config.inputSharingEnabled ? .on : .off
+        directionControl.selectedSegment = config.inputSharingDirection == .serverControlsClient ? 0 : 1
+        selectPeerEdge(config.peerEdge)
         validationLabel.stringValue = ""
         validationLabel.isHidden = true
         updateModeState()
@@ -80,6 +86,17 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         passwordField.placeholderString = "Required on every device"
         passwordField.controlSize = .large
         passwordField.font = .systemFont(ofSize: NSFont.systemFontSize)
+
+        inputSharingButton.target = self
+        inputSharingButton.action = #selector(inputSharingChanged)
+
+        directionControl.segmentStyle = .rounded
+
+        for edge in ScreenEdge.allCases {
+            peerEdgePopup.addItem(withTitle: edge.title)
+            peerEdgePopup.lastItem?.representedObject = edge.rawValue
+        }
+        peerEdgePopup.controlSize = .large
 
         hostHintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         hostHintLabel.textColor = .secondaryLabelColor
@@ -123,7 +140,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             formRow(label: "Mode", control: modeControl),
             formRow(label: "Host", control: hostStack),
             formRow(label: "Port", control: portField),
-            formRow(label: "Password", control: passwordField)
+            formRow(label: "Password", control: passwordField),
+            formRow(label: "Input", control: inputSharingButton),
+            formRow(label: "Direction", control: directionControl),
+            formRow(label: "Peer", control: peerEdgePopup)
         ])
         formStack.orientation = .vertical
         formStack.alignment = .leading
@@ -151,7 +171,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             buttonStack.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
             modeControl.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             portField.widthAnchor.constraint(equalTo: hostField.widthAnchor),
-            passwordField.widthAnchor.constraint(equalTo: hostField.widthAnchor)
+            passwordField.widthAnchor.constraint(equalTo: hostField.widthAnchor),
+            inputSharingButton.widthAnchor.constraint(equalTo: hostField.widthAnchor),
+            directionControl.widthAnchor.constraint(equalTo: hostField.widthAnchor),
+            peerEdgePopup.widthAnchor.constraint(equalTo: hostField.widthAnchor)
         ])
     }
 
@@ -170,6 +193,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     @objc private func modeChanged() {
         updateModeState()
+    }
+
+    @objc private func inputSharingChanged() {
+        updateInputSharingState()
     }
 
     private func updateModeState() {
@@ -191,6 +218,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             hostField.stringValue = NetworkAddress.serverURL(port: currentPortValue())
             hostHintLabel.stringValue = "Share this address with clients on the same LAN."
         }
+        updateInputSharingState()
+    }
+
+    private func updateInputSharingState() {
+        let isEnabled = inputSharingButton.state == .on
+        directionControl.isEnabled = isEnabled
+        peerEdgePopup.isEnabled = isEnabled
     }
 
     @objc private func save() {
@@ -198,6 +232,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let host = mode == .client ? hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : currentConfig.host
         let portText = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = passwordField.stringValue
+        let inputSharingEnabled = inputSharingButton.state == .on
+        let inputSharingDirection: InputSharingDirection = directionControl.selectedSegment == 1 ? .clientControlsServer : .serverControlsClient
+        let peerEdge = selectedPeerEdge()
 
         if mode == .client && host.isEmpty {
             showValidation("Enter a server host for client mode.")
@@ -227,7 +264,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             mode: mode,
             host: host.isEmpty ? currentConfig.host : host,
             port: port,
-            password: password
+            password: password,
+            inputSharingEnabled: inputSharingEnabled,
+            inputSharingDirection: inputSharingDirection,
+            peerEdge: peerEdge
         )
         onSave?(nextConfig)
         close()
@@ -251,5 +291,24 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private func currentPortValue() -> Int {
         let portText = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         return Int(portText) ?? currentConfig.port
+    }
+
+    private func selectPeerEdge(_ edge: ScreenEdge) {
+        for item in peerEdgePopup.itemArray {
+            if item.representedObject as? String == edge.rawValue {
+                peerEdgePopup.select(item)
+                return
+            }
+        }
+    }
+
+    private func selectedPeerEdge() -> ScreenEdge {
+        guard
+            let rawValue = peerEdgePopup.selectedItem?.representedObject as? String,
+            let edge = ScreenEdge(rawValue: rawValue)
+        else {
+            return .right
+        }
+        return edge
     }
 }
