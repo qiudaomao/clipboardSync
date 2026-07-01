@@ -6,6 +6,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let modeControl = NSSegmentedControl(labels: ["Client", "Server"], trackingMode: .selectOne, target: nil, action: nil)
     private let hostField = NSTextField()
     private let portField = NSTextField()
+    private let passwordField = NSSecureTextField()
     private let hostHintLabel = NSTextField(labelWithString: "Used only in client mode.")
     private let validationLabel = NSTextField(labelWithString: "")
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
@@ -16,7 +17,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 288),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 336),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -40,6 +41,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         modeControl.selectedSegment = config.mode == .client ? 0 : 1
         hostField.stringValue = clientHostDraft
         portField.stringValue = String(config.port)
+        passwordField.stringValue = config.password
         validationLabel.stringValue = ""
         validationLabel.isHidden = true
         updateModeState()
@@ -75,6 +77,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         portField.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         portField.delegate = self
 
+        passwordField.placeholderString = "Required on every device"
+        passwordField.controlSize = .large
+        passwordField.font = .systemFont(ofSize: NSFont.systemFontSize)
+
         hostHintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         hostHintLabel.textColor = .secondaryLabelColor
 
@@ -97,7 +103,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let titleLabel = NSTextField(labelWithString: "Clipboard Sync")
         titleLabel.font = .boldSystemFont(ofSize: 17)
 
-        let subtitleLabel = NSTextField(wrappingLabelWithString: "Configure how this Mac syncs text clipboard updates.")
+        let subtitleLabel = NSTextField(wrappingLabelWithString: "Configure how this Mac syncs clipboard updates.")
         subtitleLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         subtitleLabel.textColor = .secondaryLabelColor
 
@@ -116,7 +122,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let formStack = NSStackView(views: [
             formRow(label: "Mode", control: modeControl),
             formRow(label: "Host", control: hostStack),
-            formRow(label: "Port", control: portField)
+            formRow(label: "Port", control: portField),
+            formRow(label: "Password", control: passwordField)
         ])
         formStack.orientation = .vertical
         formStack.alignment = .leading
@@ -143,7 +150,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             rootStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
             buttonStack.widthAnchor.constraint(equalTo: rootStack.widthAnchor),
             modeControl.widthAnchor.constraint(equalTo: hostField.widthAnchor),
-            portField.widthAnchor.constraint(equalTo: hostField.widthAnchor)
+            portField.widthAnchor.constraint(equalTo: hostField.widthAnchor),
+            passwordField.widthAnchor.constraint(equalTo: hostField.widthAnchor)
         ])
     }
 
@@ -189,6 +197,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let mode: SyncMode = modeControl.selectedSegment == 1 ? .server : .client
         let host = mode == .client ? hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : currentConfig.host
         let portText = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = passwordField.stringValue
 
         if mode == .client && host.isEmpty {
             showValidation("Enter a server host for client mode.")
@@ -208,10 +217,17 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             return
         }
 
+        if password.isEmpty {
+            showValidation("Enter the same sync password on every device.")
+            window?.makeFirstResponder(passwordField)
+            return
+        }
+
         let nextConfig = AppConfig(
             mode: mode,
             host: host.isEmpty ? currentConfig.host : host,
-            port: port
+            port: port,
+            password: password
         )
         onSave?(nextConfig)
         close()

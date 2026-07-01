@@ -19,6 +19,7 @@ internal sealed class ConfigForm : Form
         Maximum = 65_535,
         Value = 8787
     };
+    private readonly TextBox passwordBox = new() { UseSystemPasswordChar = true };
     private string clientHostDraft = "";
 
     public AppConfig Config { get; private set; }
@@ -33,13 +34,14 @@ internal sealed class ConfigForm : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(380, 190);
+        ClientSize = new Size(380, 224);
 
         modeBox.Items.AddRange(new object[] { "Client", "Server" });
         modeBox.SelectedIndex = Config.Mode == SyncMode.Client ? 0 : 1;
         clientHostDraft = NetworkAddress.IsLoopbackHost(Config.Host) ? "" : Config.Host;
         hostBox.Text = clientHostDraft;
         portBox.Value = Math.Clamp(Config.Port, 1, 65_535);
+        passwordBox.Text = Config.Password;
         hostBox.TextChanged += (_, _) =>
         {
             if (modeBox.SelectedIndex != 1)
@@ -55,12 +57,13 @@ internal sealed class ConfigForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
             ColumnCount = 2,
-            RowCount = 5
+            RowCount = 6
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -68,6 +71,7 @@ internal sealed class ConfigForm : Form
         AddRow(layout, 0, "Mode", modeBox);
         AddRow(layout, 1, "Host", BuildHostControl());
         AddRow(layout, 2, "Port", portBox);
+        AddRow(layout, 3, "Password", passwordBox);
 
         var buttons = new FlowLayoutPanel
         {
@@ -80,7 +84,7 @@ internal sealed class ConfigForm : Form
         okButton.Click += (_, _) => Save();
         buttons.Controls.Add(okButton);
         buttons.Controls.Add(cancelButton);
-        layout.Controls.Add(buttons, 0, 4);
+        layout.Controls.Add(buttons, 0, 5);
         layout.SetColumnSpan(buttons, 2);
 
         AcceptButton = okButton;
@@ -143,6 +147,7 @@ internal sealed class ConfigForm : Form
     {
         Config.Mode = modeBox.SelectedIndex == 1 ? SyncMode.Server : SyncMode.Client;
         var host = Config.Mode == SyncMode.Client ? hostBox.Text.Trim() : Config.Host;
+        var password = passwordBox.Text;
 
         if (Config.Mode == SyncMode.Client && string.IsNullOrWhiteSpace(host))
         {
@@ -158,8 +163,16 @@ internal sealed class ConfigForm : Form
             return;
         }
 
+        if (string.IsNullOrEmpty(password))
+        {
+            MessageBox.Show(this, "Enter the same sync password on every device.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            passwordBox.Focus();
+            return;
+        }
+
         Config.Host = host;
         Config.Port = (int)portBox.Value;
+        Config.Password = password;
         Config.Normalize();
         DialogResult = DialogResult.OK;
         Close();

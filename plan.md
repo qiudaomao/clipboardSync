@@ -16,7 +16,14 @@ stage2:
 - File and image payloads are capped at 10 MB raw bytes per item.
 
 stage3:
-shows a different icon when receive a clipboard updates
+- encryption between server and clients
+- a password settings
+
+stage4:
+- mouse and keyboard sharing
+- works similar to synergy but still use current websocket
+- read screen size and maintain layout
+- auto mouse cross over server and client
 
 current implementation focus:
 - Shared JSON protocol documented in docs/protocol.md.

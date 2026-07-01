@@ -26,6 +26,7 @@ internal sealed class AppConfig
     public SyncMode Mode { get; set; } = SyncMode.Client;
     public string Host { get; set; } = "";
     public int Port { get; set; } = 8787;
+    public string Password { get; set; } = "";
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
 
     public void Normalize()
@@ -46,9 +47,20 @@ internal sealed class AppConfig
             Mode = Mode,
             Host = Host,
             Port = Port,
+            Password = Password,
             DeviceId = DeviceId
         };
     }
+}
+
+internal sealed class EncryptedEnvelope
+{
+    public string Type { get; set; } = "encrypted";
+    public int Version { get; set; } = 1;
+    public string Salt { get; set; } = "";
+    public string Nonce { get; set; } = "";
+    public string Ciphertext { get; set; } = "";
+    public string Tag { get; set; } = "";
 }
 
 internal sealed class SyncMessage

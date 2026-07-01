@@ -172,6 +172,12 @@ final class AppController: NSObject, NSApplicationDelegate {
     private func restartTransport() {
         transport?.stop()
 
+        guard !config.password.isEmpty else {
+            transport = nil
+            statusText = "set sync password"
+            return
+        }
+
         let nextTransport: Transport
         switch config.mode {
         case .client:
@@ -209,12 +215,15 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         guard
             let data = try? jsonEncoder.encode(message),
-            let payload = String(data: data, encoding: .utf8)
+            let envelope = try? CryptoBox.encrypt(data, password: config.password),
+            let envelopeData = try? jsonEncoder.encode(envelope),
+            let payload = String(data: envelopeData, encoding: .utf8)
         else {
+            statusText = "encryption failed"
             return false
         }
 
-        guard data.count <= ClipboardLimits.maxWebSocketMessageBytes else {
+        guard envelopeData.count <= ClipboardLimits.maxWebSocketMessageBytes else {
             statusText = "clipboard payload too large"
             return false
         }
@@ -228,7 +237,9 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     private func handleMessage(_ payload: String) {
         guard
-            let data = payload.data(using: .utf8),
+            let envelopeData = payload.data(using: .utf8),
+            let envelope = try? jsonDecoder.decode(EncryptedEnvelope.self, from: envelopeData),
+            let data = try? CryptoBox.decrypt(envelope, password: config.password),
             let message = try? jsonDecoder.decode(SyncMessage.self, from: data),
             message.type == "clipboard",
             message.origin != deviceId,

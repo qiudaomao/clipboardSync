@@ -135,6 +135,14 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         transport?.Dispose();
 
+        if (string.IsNullOrEmpty(config.Password))
+        {
+            transport = null;
+            status = "set sync password";
+            UpdateMenu();
+            return;
+        }
+
         if (config.Mode == SyncMode.Client && string.IsNullOrWhiteSpace(config.Host))
         {
             transport = null;
@@ -204,7 +212,21 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         var message = content.ToMessage(config.DeviceId);
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(message, MessageJsonOptions);
-        if (payloadBytes.Length > ClipboardLimits.MaxWebSocketMessageBytes)
+        EncryptedEnvelope envelope;
+        byte[] envelopeBytes;
+        try
+        {
+            envelope = CryptoBox.Encrypt(payloadBytes, config.Password);
+            envelopeBytes = JsonSerializer.SerializeToUtf8Bytes(envelope, MessageJsonOptions);
+        }
+        catch
+        {
+            status = "encryption failed";
+            UpdateMenu();
+            return false;
+        }
+
+        if (envelopeBytes.Length > ClipboardLimits.MaxWebSocketMessageBytes)
         {
             status = "clipboard payload too large";
             UpdateMenu();
@@ -216,7 +238,7 @@ internal sealed class TrayAppContext : ApplicationContext
             AddHistory(content);
         }
 
-        var payload = System.Text.Encoding.UTF8.GetString(payloadBytes);
+        var payload = System.Text.Encoding.UTF8.GetString(envelopeBytes);
         _ = transport?.SendAsync(payload);
         return true;
     }
@@ -226,7 +248,13 @@ internal sealed class TrayAppContext : ApplicationContext
         SyncMessage? message;
         try
         {
-            message = JsonSerializer.Deserialize<SyncMessage>(payload, MessageJsonOptions);
+            var envelope = JsonSerializer.Deserialize<EncryptedEnvelope>(payload, MessageJsonOptions);
+            if (envelope is null)
+            {
+                return;
+            }
+            var plaintext = CryptoBox.Decrypt(envelope, config.Password);
+            message = JsonSerializer.Deserialize<SyncMessage>(plaintext, MessageJsonOptions);
         }
         catch
         {

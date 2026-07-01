@@ -15,9 +15,25 @@ struct AppConfig: Codable {
     var mode: SyncMode
     var host: String
     var port: Int
+    var password: String
 
-    static let defaults = AppConfig(mode: .client, host: "", port: 8787)
+    static let defaults = AppConfig(mode: .client, host: "", port: 8787, password: "")
     private static let storageKey = "ClipboardSyncMac.config"
+
+    init(mode: SyncMode, host: String, port: Int, password: String) {
+        self.mode = mode
+        self.host = host
+        self.port = port
+        self.password = password
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try container.decodeIfPresent(SyncMode.self, forKey: .mode) ?? Self.defaults.mode
+        host = try container.decodeIfPresent(String.self, forKey: .host) ?? Self.defaults.host
+        port = try container.decodeIfPresent(Int.self, forKey: .port) ?? Self.defaults.port
+        password = try container.decodeIfPresent(String.self, forKey: .password) ?? Self.defaults.password
+    }
 
     static func load() -> AppConfig {
         guard
@@ -39,9 +55,19 @@ struct AppConfig: Codable {
         AppConfig(
             mode: mode,
             host: host.trimmingCharacters(in: .whitespacesAndNewlines),
-            port: min(max(port, 1), 65_535)
+            port: min(max(port, 1), 65_535),
+            password: password
         )
     }
+}
+
+struct EncryptedEnvelope: Codable {
+    let type: String
+    let version: Int
+    let salt: String
+    let nonce: String
+    let ciphertext: String
+    let tag: String
 }
 
 struct SyncMessage: Codable {

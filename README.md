@@ -13,7 +13,8 @@ key features:
 
 4. clipboard history
 
+5. password-based encryption
+
 ![mac](assets/mac.png)
 
 ![win](assets/win.png)
-
