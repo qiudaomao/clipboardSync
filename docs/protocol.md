@@ -151,16 +151,16 @@ identified by device id and synchronized by the server.
   "role": "server",
   "deviceName": "Win-C",
   "deviceAddress": "192.168.1.30",
-  "enabled": true,
   "controlDeviceId": "controller-device-id",
   "peerEdge": "right",
   "sentAt": 1782835200.0
 }
 ```
 
-`kind: "config"` synchronizes the input-sharing setting. A client may send it
-as a change request. The server applies the request and broadcasts the accepted
-server config to all peers.
+`kind: "config"` synchronizes shared input coordination fields. A client may
+send it as a change request. The server applies the request and broadcasts the
+accepted server config to all peers. Local input-sharing enablement is not
+synchronized; each device advertises its current receiver state with `hello`.
 
 ### Mouse
 
@@ -225,7 +225,7 @@ Input message fields:
 - `deviceName`: sender host/device name for UI display.
 - `deviceAddress`: sender LAN IP address for UI display.
 - `screen`: virtual desktop size and scale for `hello`.
-- `enabled`: sender input-sharing runtime state for `hello`; configured input-sharing state for `config`.
+- `enabled`: sender input-sharing runtime state for `hello`.
 - `controlDeviceId`: device id whose mouse and keyboard control remote input.
 - `peerEdge`: peer position relative to the controlling side: `left`, `right`, `top`, or `bottom`.
 - `normalizedX` / `normalizedY`: screen coordinates normalized to `0...1`.
@@ -254,7 +254,8 @@ Encrypted envelope fields:
 - A server broadcasts the encrypted envelope from one client to other clients.
 - A server applies remote messages locally only when it is configured with the same password.
 - Input sharing is off by default and must be enabled in settings or the tray/menu.
-- The configured control device is selected by device id. The server is authoritative for input-sharing config; clients may request changes with `kind: "config"`, and the server rebroadcasts the accepted config.
+- Input-sharing enablement is local to each device. It is not synchronized by `kind: "config"`.
+- The configured control device is selected by device id. The server is authoritative for shared input config; clients may request changes with `kind: "config"`, and the server rebroadcasts the accepted config.
 - The peer edge defines where the remote virtual desktop sits relative to the controller's virtual desktop.
 - Reverse vertical scroll is a local receiver setting. It is not synchronized, flips only injected `deltaY`, and leaves horizontal wheel deltas unchanged.
 - The controller starts remote capture when the local pointer reaches the configured edge and ends capture when the remote pointer crosses back over the opposite edge.

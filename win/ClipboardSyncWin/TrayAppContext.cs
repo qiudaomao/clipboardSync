@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Windows.Forms;
 
 namespace ClipboardSyncWin;
@@ -14,7 +15,8 @@ internal sealed class TrayAppContext : ApplicationContext
     private static readonly JsonSerializerOptions MessageJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
     private readonly NotifyIcon notifyIcon;
@@ -46,14 +48,26 @@ internal sealed class TrayAppContext : ApplicationContext
         public string? Name { get; init; }
         public string? Address { get; init; }
         public string? Role { get; init; }
+        public bool? InputEnabled { get; init; }
         public DateTimeOffset LastSeen { get; init; } = DateTimeOffset.UtcNow;
 
-        public string Title
+        public string BaseTitle
         {
             get
             {
                 var name = string.IsNullOrWhiteSpace(Name) ? "Unknown Device" : Name!;
                 return string.IsNullOrWhiteSpace(Address) ? name : $"{name} ({Address})";
+            }
+        }
+
+        public string Title
+        {
+            get
+            {
+                var status = InputEnabled is null
+                    ? "Unknown"
+                    : InputEnabled.Value ? "Enabled" : "Disabled";
+                return $"{BaseTitle} [{status}]";
             }
         }
     }
@@ -184,6 +198,7 @@ internal sealed class TrayAppContext : ApplicationContext
         Name = Environment.MachineName,
         Address = NetworkAddress.LocalLanIPv4Address(),
         Role = config.Mode == SyncMode.Server ? "server" : "client",
+        InputEnabled = config.InputSharingEnabled,
         LastSeen = DateTimeOffset.UtcNow
     };
 
@@ -203,6 +218,7 @@ internal sealed class TrayAppContext : ApplicationContext
             {
                 Id = selectedId,
                 Name = "Unknown Device",
+                InputEnabled = null,
                 LastSeen = DateTimeOffset.MinValue
             });
         }
@@ -236,6 +252,7 @@ internal sealed class TrayAppContext : ApplicationContext
             Name = message.DeviceName ?? existing?.Name,
             Address = message.DeviceAddress ?? existing?.Address,
             Role = message.Role ?? existing?.Role,
+            InputEnabled = message.Enabled ?? existing?.InputEnabled,
             LastSeen = DateTimeOffset.UtcNow
         };
         UpdateMenu();
@@ -252,8 +269,7 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         config.InputSharingEnabled = !config.InputSharingEnabled;
         ConfigStore.Save(config);
-        UpdateInputCoordinator();
-        SyncInputConfig();
+        UpdateInputCoordinator(sendHello: true);
     }
 
     private void SetControlDevice(string controlDeviceId)
@@ -592,11 +608,6 @@ internal sealed class TrayAppContext : ApplicationContext
     private bool ApplyInputConfig(InputMessage message)
     {
         var changed = false;
-        if (message.Enabled is not null && config.InputSharingEnabled != message.Enabled.Value)
-        {
-            config.InputSharingEnabled = message.Enabled.Value;
-            changed = true;
-        }
         if (message.ControlDeviceId is not null && config.ControlDeviceId != message.ControlDeviceId)
         {
             config.ControlDeviceId = message.ControlDeviceId;
@@ -661,7 +672,6 @@ internal sealed class TrayAppContext : ApplicationContext
             Role = config.Mode == SyncMode.Server ? "server" : "client",
             DeviceName = Environment.MachineName,
             DeviceAddress = NetworkAddress.LocalLanIPv4Address(),
-            Enabled = config.InputSharingEnabled,
             ControlDeviceId = EffectiveControlDeviceId,
             PeerEdge = InputSharingWire.EdgeValue(config.PeerEdge),
             SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0

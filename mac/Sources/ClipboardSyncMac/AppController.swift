@@ -44,9 +44,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var name: String?
         var address: String?
         var role: String?
+        var inputEnabled: Bool?
         var lastSeen: Date
 
-        var title: String {
+        var baseTitle: String {
             let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
             let baseName: String
             if let trimmedName, !trimmedName.isEmpty {
@@ -58,6 +59,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return baseName
             }
             return "\(baseName) (\(address))"
+        }
+
+        var title: String {
+            let status = inputEnabled.map { $0 ? "Enabled" : "Disabled" } ?? "Unknown"
+            return "\(baseTitle) [\(status)]"
         }
     }
 
@@ -227,6 +233,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: DeviceIdentity.displayName,
             address: DeviceIdentity.address,
             role: config.mode.rawValue,
+            inputEnabled: config.inputSharingEnabled,
             lastSeen: Date()
         )
     }
@@ -246,6 +253,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 name: "Unknown Device",
                 address: nil,
                 role: nil,
+                inputEnabled: nil,
                 lastSeen: Date.distantPast
             ))
         }
@@ -273,6 +281,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: message.deviceName ?? existing?.name,
             address: message.deviceAddress ?? existing?.address,
             role: message.role ?? existing?.role,
+            inputEnabled: message.enabled ?? existing?.inputEnabled,
             lastSeen: Date()
         )
         updateMenu()
@@ -317,8 +326,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleInputSharing() {
         config.inputSharingEnabled.toggle()
         config.save()
-        updateInputCoordinator()
-        syncInputConfig()
+        updateInputCoordinator(sendHello: true)
     }
 
     @objc private func setControlDevice(_ sender: NSMenuItem) {
@@ -576,10 +584,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @discardableResult
     private func applyInputConfig(_ message: InputMessage) -> Bool {
         var changed = false
-        if let enabled = message.enabled, config.inputSharingEnabled != enabled {
-            config.inputSharingEnabled = enabled
-            changed = true
-        }
         if let controlDeviceId = message.controlDeviceId, config.controlDeviceId != controlDeviceId {
             config.controlDeviceId = controlDeviceId
             changed = true
@@ -626,7 +630,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             deviceName: DeviceIdentity.displayName,
             deviceAddress: DeviceIdentity.address,
             screen: nil,
-            enabled: config.inputSharingEnabled,
+            enabled: nil,
             controlDeviceId: effectiveControlDeviceId,
             peerEdge: config.peerEdge.rawValue,
             capture: nil,
