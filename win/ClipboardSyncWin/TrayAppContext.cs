@@ -40,7 +40,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private ISyncTransport? transport;
     private int peerCount;
     private bool pendingInputConfigSync;
-    private string status = "stopped";
+    private string status = AppText.Text("status.stopped");
 
     private sealed class InputDeviceMenuDevice
     {
@@ -55,7 +55,7 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             get
             {
-                var name = string.IsNullOrWhiteSpace(Name) ? "Unknown Device" : Name!;
+                var name = string.IsNullOrWhiteSpace(Name) ? AppText.Text("device.unknown") : Name!;
                 return string.IsNullOrWhiteSpace(Address) ? name : $"{name} ({Address})";
             }
         }
@@ -65,9 +65,9 @@ internal sealed class TrayAppContext : ApplicationContext
             get
             {
                 var status = InputEnabled is null
-                    ? "Unknown"
-                    : InputEnabled.Value ? "Enabled" : "Disabled";
-                return $"{BaseTitle} [{status}]";
+                    ? AppText.Text("state.unknown")
+                    : InputEnabled.Value ? AppText.Text("state.enabled") : AppText.Text("state.disabled");
+                return AppText.Format("device.titleStatus", BaseTitle, status);
             }
         }
     }
@@ -77,20 +77,20 @@ internal sealed class TrayAppContext : ApplicationContext
         uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         config = ConfigStore.Load();
 
-        statusItem = new ToolStripMenuItem("Status: stopped") { Enabled = false };
-        historyItem = new ToolStripMenuItem("History");
-        inputStatusItem = new ToolStripMenuItem("Input Sharing: off") { Enabled = false };
-        inputSharingItem = new ToolStripMenuItem("Enable Input Sharing", null, (_, _) => ToggleInputSharing());
-        controlDeviceItem = new ToolStripMenuItem("Control Device");
-        clientModeItem = new ToolStripMenuItem("Client mode", null, (_, _) => SetMode(SyncMode.Client));
-        serverModeItem = new ToolStripMenuItem("Server mode", null, (_, _) => SetMode(SyncMode.Server));
+        statusItem = new ToolStripMenuItem(AppText.Format("status.prefix", status)) { Enabled = false };
+        historyItem = new ToolStripMenuItem(AppText.Text("menu.clipboardHistory"));
+        inputStatusItem = new ToolStripMenuItem(AppText.Text("input.off")) { Enabled = false };
+        inputSharingItem = new ToolStripMenuItem(AppText.Text("menu.enableInputSharing"), null, (_, _) => ToggleInputSharing());
+        controlDeviceItem = new ToolStripMenuItem(AppText.Text("menu.controlDevice"));
+        clientModeItem = new ToolStripMenuItem(AppText.Text("menu.clientMode"), null, (_, _) => SetMode(SyncMode.Client));
+        serverModeItem = new ToolStripMenuItem(AppText.Text("menu.serverMode"), null, (_, _) => SetMode(SyncMode.Server));
         trayIcon = LoadTrayIcon();
         inputCoordinator = new InputSharingCoordinator(config.DeviceId);
 
         notifyIcon = new NotifyIcon
         {
             Icon = trayIcon,
-            Text = "Clipboard Sync",
+            Text = AppText.Text("app.name"),
             Visible = true,
             ContextMenuStrip = BuildMenu()
         };
@@ -132,7 +132,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(historyItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem("Send Files from Clipboard", null, (_, _) => SendFilesFromClipboard()));
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.sendFiles"), null, (_, _) => SendFilesFromClipboard()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(inputStatusItem);
         menu.Items.Add(inputSharingItem);
@@ -142,28 +142,28 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(clientModeItem);
         menu.Items.Add(serverModeItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem("Configure...", null, (_, _) => ShowConfiguration()));
-        menu.Items.Add(new ToolStripMenuItem("Start", null, (_, _) => RestartTransport()));
-        menu.Items.Add(new ToolStripMenuItem("Restart", null, (_, _) => RestartTransport()));
-        menu.Items.Add(new ToolStripMenuItem("Stop", null, (_, _) => StopTransport()));
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.configure"), null, (_, _) => ShowConfiguration()));
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.start"), null, (_, _) => RestartTransport()));
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.restart"), null, (_, _) => RestartTransport()));
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.stop"), null, (_, _) => StopTransport()));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.exit"), null, (_, _) => ExitThread()));
         return menu;
     }
 
     private ToolStripMenuItem BuildPeerEdgeMenu()
     {
-        var menu = new ToolStripMenuItem("Peer Position");
-        AddPeerEdgeItem(menu, ScreenEdge.Right, "Right");
-        AddPeerEdgeItem(menu, ScreenEdge.Left, "Left");
-        AddPeerEdgeItem(menu, ScreenEdge.Top, "Top");
-        AddPeerEdgeItem(menu, ScreenEdge.Bottom, "Bottom");
+        var menu = new ToolStripMenuItem(AppText.Text("menu.peerPosition"));
+        AddPeerEdgeItem(menu, ScreenEdge.Right);
+        AddPeerEdgeItem(menu, ScreenEdge.Left);
+        AddPeerEdgeItem(menu, ScreenEdge.Top);
+        AddPeerEdgeItem(menu, ScreenEdge.Bottom);
         return menu;
     }
 
-    private void AddPeerEdgeItem(ToolStripMenuItem menu, ScreenEdge edge, string title)
+    private void AddPeerEdgeItem(ToolStripMenuItem menu, ScreenEdge edge)
     {
-        var item = new ToolStripMenuItem(title, null, (_, _) => SetPeerEdge(edge));
+        var item = new ToolStripMenuItem(AppText.EdgeTitle(edge), null, (_, _) => SetPeerEdge(edge));
         peerEdgeItems[edge] = item;
         menu.DropDownItems.Add(item);
     }
@@ -176,7 +176,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void UpdateMenu()
     {
-        statusItem.Text = $"Status: {status}";
+        statusItem.Text = AppText.Format("status.prefix", status);
         clientModeItem.Checked = config.Mode == SyncMode.Client;
         serverModeItem.Checked = config.Mode == SyncMode.Server;
         inputSharingItem.Checked = config.InputSharingEnabled;
@@ -217,14 +217,14 @@ internal sealed class TrayAppContext : ApplicationContext
             devices.Add(new InputDeviceMenuDevice
             {
                 Id = selectedId,
-                Name = "Unknown Device",
+                Name = AppText.Text("device.unknown"),
                 InputEnabled = null,
                 LastSeen = DateTimeOffset.MinValue
             });
         }
 
-        var selectedTitle = devices.FirstOrDefault(item => item.Id == selectedId)?.Title ?? "Unknown Device";
-        controlDeviceItem.Text = $"Control Device: {selectedTitle}";
+        var selectedTitle = devices.FirstOrDefault(item => item.Id == selectedId)?.Title ?? AppText.Text("device.unknown");
+        controlDeviceItem.Text = AppText.Format("menu.controlDeviceWithTitle", selectedTitle);
 
         foreach (var device in devices)
         {
@@ -367,7 +367,7 @@ internal sealed class TrayAppContext : ApplicationContext
         if (string.IsNullOrEmpty(config.Password))
         {
             transport = null;
-            status = "set sync password";
+            status = AppText.Text("status.setSyncPassword");
             UpdateMenu();
             return;
         }
@@ -375,7 +375,7 @@ internal sealed class TrayAppContext : ApplicationContext
         if (config.Mode == SyncMode.Client && string.IsNullOrWhiteSpace(config.Host))
         {
             transport = null;
-            status = "set server LAN IP";
+            status = AppText.Text("status.setServerLanIp");
             UpdateMenu();
             return;
         }
@@ -383,7 +383,7 @@ internal sealed class TrayAppContext : ApplicationContext
         if (config.Mode == SyncMode.Client && NetworkAddress.IsLoopbackHost(config.Host))
         {
             transport = null;
-            status = "use LAN IP, not 127.0.0.1";
+            status = AppText.Text("status.useLanIp");
             UpdateMenu();
             return;
         }
@@ -418,7 +418,7 @@ internal sealed class TrayAppContext : ApplicationContext
         transport = null;
         peerCount = 0;
         UpdateInputCoordinator();
-        status = "stopped";
+        status = AppText.Text("status.stopped");
         UpdateMenu();
     }
 
@@ -427,7 +427,7 @@ internal sealed class TrayAppContext : ApplicationContext
         var content = clipboardMonitor.ReadFilesForManualSend();
         if (content is null)
         {
-            status = "copy files first";
+            status = AppText.Text("status.copyFilesFirst");
             UpdateMenu();
             return;
         }
@@ -444,7 +444,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
         if (Publish(content))
         {
-            status = "file transfer started";
+            status = AppText.Text("status.fileTransferStarted");
             UpdateMenu();
         }
     }
@@ -484,14 +484,14 @@ internal sealed class TrayAppContext : ApplicationContext
         }
         catch
         {
-            status = "encryption failed";
+            status = AppText.Text("status.encryptionFailed");
             UpdateMenu();
             return false;
         }
 
         if (envelopeBytes.Length > ClipboardLimits.MaxWebSocketMessageBytes)
         {
-            status = "clipboard payload too large";
+            status = AppText.Text(realtime ? "status.inputPayloadTooLarge" : "status.clipboardPayloadTooLarge");
             UpdateMenu();
             return false;
         }
@@ -758,7 +758,7 @@ internal sealed class TrayAppContext : ApplicationContext
         historyItem.DropDownItems.Clear();
         if (history.Count == 0)
         {
-            historyItem.DropDownItems.Add(new ToolStripMenuItem("No clipboard history") { Enabled = false });
+            historyItem.DropDownItems.Add(new ToolStripMenuItem(AppText.Text("menu.noClipboardHistory")) { Enabled = false });
             return;
         }
 
@@ -773,7 +773,7 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         historyItem.DropDownItems.Add(new ToolStripSeparator());
-        historyItem.DropDownItems.Add(new ToolStripMenuItem("Clear History", null, (_, _) =>
+        historyItem.DropDownItems.Add(new ToolStripMenuItem(AppText.Text("menu.clearClipboardHistory"), null, (_, _) =>
         {
             history.Clear();
             RefreshHistoryMenu();
@@ -790,7 +790,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
         if (!clipboardMonitor.ApplyContent(entry.Content))
         {
-            status = "failed to restore history item";
+            status = AppText.Text("status.restoreHistoryFailed");
             UpdateMenu();
             return;
         }

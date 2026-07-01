@@ -210,16 +210,16 @@ internal sealed class InputSharingCoordinator : IDisposable
     private void UpdateStatus()
     {
         var status = !config.InputSharingEnabled
-            ? "Input Sharing: off"
+            ? AppText.Text("input.off")
             : peerCount == 0
-                ? "Input Sharing: waiting for peer"
+                ? AppText.Text("input.waitingPeer")
                 : IsController && remoteInputEnabled == false
-                    ? "Input Sharing: peer disabled"
+                    ? AppText.Text("input.peerDisabled")
                     : IsController && (remoteScreen is null || remoteInputEnabled is null)
-                    ? "Input Sharing: waiting for peer screen"
+                    ? AppText.Text("input.waitingPeerScreen")
                     : IsController
-                        ? $"Input Sharing: controlling peer ({InputSharingWire.EdgeValue(config.PeerEdge)})"
-                        : "Input Sharing: receiving input";
+                        ? AppText.Format("input.controllingPeer", AppText.EdgeTitle(config.PeerEdge))
+                        : AppText.Text("input.receiving");
         StatusChanged?.Invoke(status);
     }
 

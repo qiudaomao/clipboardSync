@@ -20,9 +20,9 @@ internal sealed class ConfigForm : Form
         Value = 8787
     };
     private readonly TextBox passwordBox = new() { UseSystemPasswordChar = true };
-    private readonly CheckBox inputSharingBox = new() { Text = "Enable Input Sharing", AutoSize = true };
+    private readonly CheckBox inputSharingBox = new() { AutoSize = true };
     private readonly ComboBox peerEdgeBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
-    private readonly CheckBox reverseScrollBox = new() { Text = "Reverse Vertical Scroll", AutoSize = true };
+    private readonly CheckBox reverseScrollBox = new() { AutoSize = true };
     private string clientHostDraft = "";
 
     public AppConfig Config { get; private set; }
@@ -31,7 +31,7 @@ internal sealed class ConfigForm : Form
     {
         Config = config.Clone();
 
-        Text = "Clipboard Sync";
+        Text = AppText.Text("settings.title");
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
         MinimizeBox = false;
@@ -39,7 +39,10 @@ internal sealed class ConfigForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(430, 360);
 
-        modeBox.Items.AddRange(new object[] { "Client", "Server" });
+        inputSharingBox.Text = AppText.Text("settings.enableInputSharing");
+        reverseScrollBox.Text = AppText.Text("settings.reverseVerticalScroll");
+
+        modeBox.Items.AddRange(new object[] { AppText.Text("settings.client"), AppText.Text("settings.server") });
         modeBox.SelectedIndex = Config.Mode == SyncMode.Client ? 0 : 1;
         clientHostDraft = NetworkAddress.IsLoopbackHost(Config.Host) ? "" : Config.Host;
         hostBox.Text = clientHostDraft;
@@ -47,7 +50,13 @@ internal sealed class ConfigForm : Form
         passwordBox.Text = Config.Password;
         inputSharingBox.Checked = Config.InputSharingEnabled;
         reverseScrollBox.Checked = Config.ReverseMouseVerticalScroll;
-        peerEdgeBox.Items.AddRange(new object[] { "Right", "Left", "Top", "Bottom" });
+        peerEdgeBox.Items.AddRange(new object[]
+        {
+            AppText.EdgeTitle(ScreenEdge.Right),
+            AppText.EdgeTitle(ScreenEdge.Left),
+            AppText.EdgeTitle(ScreenEdge.Top),
+            AppText.EdgeTitle(ScreenEdge.Bottom)
+        });
         peerEdgeBox.SelectedIndex = Config.PeerEdge switch
         {
             ScreenEdge.Left => 1,
@@ -85,13 +94,13 @@ internal sealed class ConfigForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
 
-        AddRow(layout, 0, "Mode", modeBox);
-        AddRow(layout, 1, "Host", BuildHostControl());
-        AddRow(layout, 2, "Port", portBox);
-        AddRow(layout, 3, "Password", passwordBox);
-        AddRow(layout, 4, "Input", inputSharingBox);
-        AddRow(layout, 5, "Peer", peerEdgeBox);
-        AddRow(layout, 6, "Scroll", reverseScrollBox);
+        AddRow(layout, 0, AppText.Text("settings.mode"), modeBox);
+        AddRow(layout, 1, AppText.Text("settings.host"), BuildHostControl());
+        AddRow(layout, 2, AppText.Text("settings.port"), portBox);
+        AddRow(layout, 3, AppText.Text("settings.password"), passwordBox);
+        AddRow(layout, 4, AppText.Text("settings.input"), inputSharingBox);
+        AddRow(layout, 5, AppText.Text("settings.peer"), peerEdgeBox);
+        AddRow(layout, 6, AppText.Text("settings.scroll"), reverseScrollBox);
 
         var buttons = new FlowLayoutPanel
         {
@@ -99,8 +108,8 @@ internal sealed class ConfigForm : Form
             FlowDirection = FlowDirection.RightToLeft
         };
 
-        var okButton = new Button { Text = "Save" };
-        var cancelButton = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel };
+        var okButton = new Button { Text = AppText.Text("settings.save") };
+        var cancelButton = new Button { Text = AppText.Text("settings.cancel"), DialogResult = DialogResult.Cancel };
         okButton.Click += (_, _) => Save();
         buttons.Controls.Add(okButton);
         buttons.Controls.Add(cancelButton);
@@ -160,8 +169,8 @@ internal sealed class ConfigForm : Form
             hostBox.Text = NetworkAddress.ServerUrl((int)portBox.Value);
         }
         hostHint.Text = isClient
-            ? "Enter the LAN IP shown on the server."
-            : "Share this address with clients on the same LAN.";
+            ? AppText.Text("settings.hostClientHint")
+            : AppText.Text("settings.hostServerHint");
     }
 
     private void UpdateInputSharingState()
@@ -178,21 +187,21 @@ internal sealed class ConfigForm : Form
 
         if (Config.Mode == SyncMode.Client && string.IsNullOrWhiteSpace(host))
         {
-            MessageBox.Show(this, "Enter the server LAN IP for client mode.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, AppText.Text("settings.validationHost"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             hostBox.Focus();
             return;
         }
 
         if (Config.Mode == SyncMode.Client && NetworkAddress.IsLoopbackHost(host))
         {
-            MessageBox.Show(this, "Use the server machine's LAN IP, not 127.0.0.1.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, AppText.Text("settings.validationLoopback"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             hostBox.Focus();
             return;
         }
 
         if (string.IsNullOrEmpty(password))
         {
-            MessageBox.Show(this, "Enter the same sync password on every device.", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, AppText.Text("settings.validationPassword"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             passwordBox.Focus();
             return;
         }

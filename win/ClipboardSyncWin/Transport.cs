@@ -58,7 +58,7 @@ internal sealed class ClientTransport : ISyncTransport
         socket?.Dispose();
         socket = null;
         PeerCountChanged?.Invoke(0);
-        StatusChanged?.Invoke("stopped");
+        StatusChanged?.Invoke(AppText.Text("status.stopped"));
     }
 
     public async Task SendAsync(string message)
@@ -77,7 +77,7 @@ internal sealed class ClientTransport : ISyncTransport
         }
         catch
         {
-            StatusChanged?.Invoke("send failed");
+            StatusChanged?.Invoke(AppText.Text("status.sendFailed"));
         }
         finally
         {
@@ -101,15 +101,15 @@ internal sealed class ClientTransport : ISyncTransport
                 using var ws = new ClientWebSocket();
                 ConfigureKeepAlive(ws);
                 socket = ws;
-                StatusChanged?.Invoke($"connecting {host}:{port}");
+                StatusChanged?.Invoke(AppText.Format("status.connecting", host, port));
                 await ws.ConnectAsync(new Uri($"ws://{host}:{port}/"), token).ConfigureAwait(false);
                 PeerCountChanged?.Invoke(1);
-                StatusChanged?.Invoke($"connected {host}:{port}");
+                StatusChanged?.Invoke(AppText.Format("status.connected", host, port));
                 await ReceiveLoopAsync(ws, token).ConfigureAwait(false);
                 if (!token.IsCancellationRequested)
                 {
                     PeerCountChanged?.Invoke(0);
-                    StatusChanged?.Invoke("disconnected; retrying");
+                    StatusChanged?.Invoke(AppText.Text("status.disconnectedRetrying"));
                 }
             }
             catch (OperationCanceledException)
@@ -121,7 +121,7 @@ internal sealed class ClientTransport : ISyncTransport
                 if (!token.IsCancellationRequested)
                 {
                     PeerCountChanged?.Invoke(0);
-                    StatusChanged?.Invoke("disconnected; retrying");
+                    StatusChanged?.Invoke(AppText.Text("status.disconnectedRetrying"));
                 }
             }
 
@@ -179,7 +179,7 @@ internal sealed class ClientTransport : ISyncTransport
                 }
                 catch
                 {
-                    StatusChanged?.Invoke("message handler failed");
+                    StatusChanged?.Invoke(AppText.Text("status.messageHandlerFailed"));
                 }
             }
         }
@@ -211,12 +211,12 @@ internal sealed class ServerTransport : ISyncTransport
             listener = new TcpListener(IPAddress.Any, port);
             listener.Start();
             PeerCountChanged?.Invoke(0);
-            StatusChanged?.Invoke($"server {NetworkAddress.ServerUrl(port)}, 0 peer(s)");
+            StatusChanged?.Invoke(AppText.Format("status.serverPeers", NetworkAddress.ServerUrl(port), 0));
             _ = AcceptLoopAsync(cts.Token);
         }
         catch (Exception ex)
         {
-            StatusChanged?.Invoke($"server error: {ex.Message}");
+            StatusChanged?.Invoke(AppText.Format("status.serverError", ex.Message));
         }
     }
 
@@ -230,7 +230,7 @@ internal sealed class ServerTransport : ISyncTransport
         }
         peers.Clear();
         PeerCountChanged?.Invoke(0);
-        StatusChanged?.Invoke("stopped");
+        StatusChanged?.Invoke(AppText.Text("status.stopped"));
     }
 
     public Task SendAsync(string message)
@@ -263,7 +263,7 @@ internal sealed class ServerTransport : ISyncTransport
                     }
                     catch
                     {
-                        StatusChanged?.Invoke("message handler failed");
+                        StatusChanged?.Invoke(AppText.Text("status.messageHandlerFailed"));
                     }
                     await BroadcastAsync(text, id).ConfigureAwait(false);
                 };
@@ -282,7 +282,7 @@ internal sealed class ServerTransport : ISyncTransport
             }
             catch
             {
-                StatusChanged?.Invoke("server accept failed");
+                StatusChanged?.Invoke(AppText.Text("status.serverAcceptFailed"));
             }
         }
     }
@@ -316,7 +316,7 @@ internal sealed class ServerTransport : ISyncTransport
     {
         var readyPeerCount = peers.Count(item => item.Value.IsReady);
         PeerCountChanged?.Invoke(readyPeerCount);
-        StatusChanged?.Invoke($"server {NetworkAddress.ServerUrl(port)}, {readyPeerCount} peer(s)");
+        StatusChanged?.Invoke(AppText.Format("status.serverPeers", NetworkAddress.ServerUrl(port), readyPeerCount));
     }
 }
 

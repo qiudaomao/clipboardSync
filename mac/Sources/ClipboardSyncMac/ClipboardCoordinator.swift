@@ -103,18 +103,18 @@ final class ClipboardCoordinator {
 
             let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
             guard values?.isRegularFile == true else {
-                onLocalSkipped?("folder clipboard is not supported")
+                onLocalSkipped?(AppText.text("status.folderUnsupported"))
                 return nil
             }
 
             let size = values?.fileSize ?? 0
             guard size <= ClipboardLimits.maxFileBytes else {
-                onLocalSkipped?("file over 10 MB skipped")
+                onLocalSkipped?(AppText.text("status.fileTooLarge"))
                 return nil
             }
 
             guard let data = try? Data(contentsOf: url), data.count <= ClipboardLimits.maxFileBytes else {
-                onLocalSkipped?("file over 10 MB skipped")
+                onLocalSkipped?(AppText.text("status.fileTooLarge"))
                 return nil
             }
 
@@ -144,7 +144,7 @@ final class ClipboardCoordinator {
         }
 
         guard data.count <= ClipboardLimits.maxFileBytes else {
-            onLocalSkipped?("image over 10 MB skipped")
+            onLocalSkipped?(AppText.text("status.imageTooLarge"))
             return nil
         }
 

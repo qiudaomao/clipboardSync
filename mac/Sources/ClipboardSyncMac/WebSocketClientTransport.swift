@@ -35,13 +35,13 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         task = nil
         session = nil
         onPeerCount?(0)
-        onStatus?("stopped")
+        onStatus?(AppText.text("status.stopped"))
     }
 
     func send(_ message: String) {
         task?.send(.string(message)) { [weak self] error in
             if let error {
-                self?.onStatus?("send failed: \(error.localizedDescription)")
+                self?.onStatus?(AppText.format("status.sendFailed", error.localizedDescription))
             }
         }
     }
@@ -52,7 +52,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         }
 
         pingInFlight = false
-        onStatus?("connecting \(host):\(port)")
+        onStatus?(AppText.format("status.connecting", host, port))
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: url)
         self.session = session
@@ -84,7 +84,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
             case .failure(let error):
                 if self.shouldRun {
                     self.onPeerCount?(0)
-                    self.onStatus?("disconnected: \(error.localizedDescription)")
+                    self.onStatus?(AppText.format("status.disconnectedError", error.localizedDescription))
                     self.scheduleReconnect()
                 }
             @unknown default:
@@ -141,7 +141,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
 
         if pingInFlight {
             onPeerCount?(0)
-            onStatus?("disconnected: keepalive timeout")
+            onStatus?(AppText.text("status.disconnectedKeepalive"))
             scheduleReconnect()
             return
         }
@@ -155,7 +155,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
 
                 if let error {
                     self.onPeerCount?(0)
-                    self.onStatus?("disconnected: \(error.localizedDescription)")
+                    self.onStatus?(AppText.format("status.disconnectedError", error.localizedDescription))
                     self.scheduleReconnect()
                 } else {
                     self.pingInFlight = false
@@ -173,7 +173,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
             return
         }
         onPeerCount?(1)
-        onStatus?("connected \(host):\(port)")
+        onStatus?(AppText.format("status.connected", host, port))
         startKeepAlive()
     }
 
@@ -188,7 +188,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         }
         if shouldRun {
             onPeerCount?(0)
-            onStatus?("disconnected; retrying")
+            onStatus?(AppText.text("status.disconnectedRetrying"))
             scheduleReconnect()
         }
     }

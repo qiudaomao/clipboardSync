@@ -13,7 +13,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var transport: Transport?
     private var peerCount = 0
     private var pendingInputConfigSync = false
-    private var statusText = "stopped" {
+    private var statusText = AppText.text("status.stopped") {
         didSet {
             updateMenu()
         }
@@ -24,12 +24,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var clientModeItem = NSMenuItem()
     private var inputStatusMenuItem = NSMenuItem()
     private var inputSharingItem = NSMenuItem()
-    private var controlDeviceMenuItem = NSMenuItem(title: "Control Device", action: nil, keyEquivalent: "")
-    private var controlDeviceMenu = NSMenu(title: "Control Device")
+    private var controlDeviceMenuItem = NSMenuItem(title: AppText.text("menu.controlDevice"), action: nil, keyEquivalent: "")
+    private var controlDeviceMenu = NSMenu(title: AppText.text("menu.controlDevice"))
     private var peerEdgeItems: [ScreenEdge: NSMenuItem] = [:]
     private var inputDevices: [String: InputDeviceMenuDevice] = [:]
-    private var historyMenu = NSMenu(title: "History")
-    private var historyMenuItem = NSMenuItem(title: "History", action: nil, keyEquivalent: "")
+    private var historyMenu = NSMenu(title: AppText.text("menu.clipboardHistory"))
+    private var historyMenuItem = NSMenuItem(title: AppText.text("menu.clipboardHistory"), action: nil, keyEquivalent: "")
     private var history: [ClipboardHistoryEntry] = []
     private lazy var settingsWindowController: SettingsWindowController = {
         let controller = SettingsWindowController()
@@ -53,7 +53,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let trimmedName, !trimmedName.isEmpty {
                 baseName = trimmedName
             } else {
-                baseName = "Unknown Device"
+                baseName = AppText.text("device.unknown")
             }
             guard let address, !address.isEmpty else {
                 return baseName
@@ -62,8 +62,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         var title: String {
-            let status = inputEnabled.map { $0 ? "Enabled" : "Disabled" } ?? "Unknown"
-            return "\(baseTitle) [\(status)]"
+            let status = inputEnabled.map {
+                $0 ? AppText.text("state.enabled") : AppText.text("state.disabled")
+            } ?? AppText.text("state.unknown")
+            return AppText.format("device.titleStatus", baseTitle, status)
         }
     }
 
@@ -105,7 +107,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func setupMenu() {
-        if let image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: "Clipboard Sync") {
+        if let image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: AppText.text("app.name")) {
             image.isTemplate = true
             statusItem.button?.image = image
             statusItem.button?.imagePosition = .imageOnly
@@ -114,13 +116,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusItem.button?.image = image
             statusItem.button?.imagePosition = .imageOnly
         } else {
-            statusItem.button?.title = "Clip"
+            statusItem.button?.title = AppText.text("app.shortName")
         }
-        statusItem.button?.toolTip = "Clipboard Sync"
+        statusItem.button?.toolTip = AppText.text("app.name")
 
         let menu = NSMenu()
         menu.delegate = self
-        statusMenuItem = NSMenuItem(title: "Status: stopped", action: nil, keyEquivalent: "")
+        statusMenuItem = NSMenuItem(title: AppText.format("status.prefix", AppText.text("status.stopped")), action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
         menu.addItem(NSMenuItem.separator())
@@ -129,23 +131,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(historyMenuItem)
         menu.addItem(NSMenuItem.separator())
 
-        let sendFilesItem = NSMenuItem(title: "Send Files from Clipboard", action: #selector(sendFilesFromClipboard), keyEquivalent: "")
+        let sendFilesItem = NSMenuItem(title: AppText.text("menu.sendFiles"), action: #selector(sendFilesFromClipboard), keyEquivalent: "")
         sendFilesItem.target = self
         menu.addItem(sendFilesItem)
         menu.addItem(NSMenuItem.separator())
 
-        inputStatusMenuItem = NSMenuItem(title: "Input Sharing: off", action: nil, keyEquivalent: "")
+        inputStatusMenuItem = NSMenuItem(title: AppText.text("input.off"), action: nil, keyEquivalent: "")
         inputStatusMenuItem.isEnabled = false
         menu.addItem(inputStatusMenuItem)
 
-        inputSharingItem = NSMenuItem(title: "Enable Input Sharing", action: #selector(toggleInputSharing), keyEquivalent: "")
+        inputSharingItem = NSMenuItem(title: AppText.text("menu.enableInputSharing"), action: #selector(toggleInputSharing), keyEquivalent: "")
         inputSharingItem.target = self
         menu.addItem(inputSharingItem)
 
         controlDeviceMenuItem.submenu = controlDeviceMenu
         menu.addItem(controlDeviceMenuItem)
 
-        let edgeMenu = NSMenu(title: "Peer Position")
+        let edgeMenu = NSMenu(title: AppText.text("menu.peerPosition"))
         for edge in ScreenEdge.allCases {
             let item = NSMenuItem(title: edge.title, action: #selector(setPeerEdge), keyEquivalent: "")
             item.target = self
@@ -153,40 +155,40 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             edgeMenu.addItem(item)
             peerEdgeItems[edge] = item
         }
-        let edgeItem = NSMenuItem(title: "Peer Position", action: nil, keyEquivalent: "")
+        let edgeItem = NSMenuItem(title: AppText.text("menu.peerPosition"), action: nil, keyEquivalent: "")
         edgeItem.submenu = edgeMenu
         menu.addItem(edgeItem)
         menu.addItem(NSMenuItem.separator())
 
-        clientModeItem = NSMenuItem(title: "Client mode", action: #selector(setClientMode), keyEquivalent: "")
+        clientModeItem = NSMenuItem(title: AppText.text("menu.clientMode"), action: #selector(setClientMode), keyEquivalent: "")
         clientModeItem.target = self
         menu.addItem(clientModeItem)
 
-        serverModeItem = NSMenuItem(title: "Server mode", action: #selector(setServerMode), keyEquivalent: "")
+        serverModeItem = NSMenuItem(title: AppText.text("menu.serverMode"), action: #selector(setServerMode), keyEquivalent: "")
         serverModeItem.target = self
         menu.addItem(serverModeItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        let configureItem = NSMenuItem(title: "Settings...", action: #selector(showConfiguration), keyEquivalent: ",")
+        let configureItem = NSMenuItem(title: AppText.text("menu.settings"), action: #selector(showConfiguration), keyEquivalent: ",")
         configureItem.target = self
         menu.addItem(configureItem)
 
-        let startItem = NSMenuItem(title: "Start", action: #selector(startTransport), keyEquivalent: "")
+        let startItem = NSMenuItem(title: AppText.text("menu.start"), action: #selector(startTransport), keyEquivalent: "")
         startItem.target = self
         menu.addItem(startItem)
 
-        let restartItem = NSMenuItem(title: "Restart", action: #selector(restartTransportFromMenu), keyEquivalent: "")
+        let restartItem = NSMenuItem(title: AppText.text("menu.restart"), action: #selector(restartTransportFromMenu), keyEquivalent: "")
         restartItem.target = self
         menu.addItem(restartItem)
 
-        let stopItem = NSMenuItem(title: "Stop", action: #selector(stopTransport), keyEquivalent: "")
+        let stopItem = NSMenuItem(title: AppText.text("menu.stop"), action: #selector(stopTransport), keyEquivalent: "")
         stopItem.target = self
         menu.addItem(stopItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: AppText.text("menu.quit"), action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -209,7 +211,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateMenu() {
-        statusMenuItem.title = "Status: \(statusText)"
+        statusMenuItem.title = AppText.format("status.prefix", statusText)
         clientModeItem.state = config.mode == .client ? .on : .off
         serverModeItem.state = config.mode == .server ? .on : .off
         inputSharingItem.state = config.inputSharingEnabled ? .on : .off
@@ -250,7 +252,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !devices.contains(where: { $0.id == selectedId }) {
             devices.append(InputDeviceMenuDevice(
                 id: selectedId,
-                name: "Unknown Device",
+                name: AppText.text("device.unknown"),
                 address: nil,
                 role: nil,
                 inputEnabled: nil,
@@ -258,8 +260,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ))
         }
 
-        let selectedTitle = devices.first { $0.id == selectedId }?.title ?? "Unknown Device"
-        controlDeviceMenuItem.title = "Control Device: \(selectedTitle)"
+        let selectedTitle = devices.first { $0.id == selectedId }?.title ?? AppText.text("device.unknown")
+        controlDeviceMenuItem.title = AppText.format("menu.controlDeviceWithTitle", selectedTitle)
 
         for device in devices {
             let item = NSMenuItem(title: device.title, action: #selector(setControlDevice), keyEquivalent: "")
@@ -312,7 +314,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         transport = nil
         peerCount = 0
         updateInputCoordinator()
-        statusText = "stopped"
+        statusText = AppText.text("status.stopped")
     }
 
     @objc private func quit() {
@@ -354,7 +356,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func sendFilesFromClipboard() {
         guard let content = clipboard.readFilesForManualSend() else {
-            statusText = "copy files first"
+            statusText = AppText.text("status.copyFilesFirst")
             return
         }
 
@@ -366,7 +368,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if publish(content) {
-            statusText = "file transfer started"
+            statusText = AppText.text("status.fileTransferStarted")
         }
     }
 
@@ -427,7 +429,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         guard !config.password.isEmpty else {
             transport = nil
-            statusText = "set sync password"
+            statusText = AppText.text("status.setSyncPassword")
             return
         }
 
@@ -435,11 +437,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch config.mode {
         case .client:
             guard !config.host.isEmpty else {
-                statusText = "set server LAN IP"
+                statusText = AppText.text("status.setServerLanIp")
                 return
             }
             guard !NetworkAddress.isLoopbackHost(config.host) else {
-                statusText = "use LAN IP, not 127.0.0.1"
+                statusText = AppText.text("status.useLanIp")
                 return
             }
             nextTransport = WebSocketClientTransport(host: config.host, port: config.port)
@@ -501,12 +503,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let envelopeData = try? jsonEncoder.encode(envelope),
             let payload = String(data: envelopeData, encoding: .utf8)
         else {
-            statusText = "encryption failed"
+            statusText = AppText.text("status.encryptionFailed")
             return false
         }
 
         guard envelopeData.count <= ClipboardLimits.maxWebSocketMessageBytes else {
-            statusText = "clipboard payload too large"
+            statusText = AppText.text("status.clipboardPayloadTooLarge")
             return false
         }
 
@@ -522,12 +524,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let envelopeData = try? jsonEncoder.encode(envelope),
             let payload = String(data: envelopeData, encoding: .utf8)
         else {
-            statusText = "encryption failed"
+            statusText = AppText.text("status.encryptionFailed")
             return false
         }
 
         guard envelopeData.count <= ClipboardLimits.maxWebSocketMessageBytes else {
-            statusText = "input payload too large"
+            statusText = AppText.text("status.inputPayloadTooLarge")
             return false
         }
 
@@ -703,7 +705,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshHistoryMenu() {
         historyMenu.removeAllItems()
         guard !history.isEmpty else {
-            let emptyItem = NSMenuItem(title: "No clipboard history", action: nil, keyEquivalent: "")
+            let emptyItem = NSMenuItem(title: AppText.text("menu.noClipboardHistory"), action: nil, keyEquivalent: "")
             emptyItem.isEnabled = false
             historyMenu.addItem(emptyItem)
             return
@@ -717,7 +719,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         historyMenu.addItem(NSMenuItem.separator())
-        let clearItem = NSMenuItem(title: "Clear History", action: #selector(clearHistory), keyEquivalent: "")
+        let clearItem = NSMenuItem(title: AppText.text("menu.clearClipboardHistory"), action: #selector(clearHistory), keyEquivalent: "")
         clearItem.target = self
         historyMenu.addItem(clearItem)
     }
@@ -732,7 +734,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         guard clipboard.applyContent(entry.content) else {
-            statusText = "failed to restore history item"
+            statusText = AppText.text("status.restoreHistoryFailed")
             return
         }
 

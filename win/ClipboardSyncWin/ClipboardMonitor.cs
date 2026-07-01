@@ -135,14 +135,14 @@ internal sealed class ClipboardMonitor : IDisposable
         {
             if (!File.Exists(path))
             {
-                NotifySkipped("folder clipboard is not supported", skippedKey);
+                NotifySkipped(AppText.Text("status.folderUnsupported"), skippedKey);
                 return null;
             }
 
             var info = new FileInfo(path);
             if (info.Length > ClipboardLimits.MaxFileBytes)
             {
-                NotifySkipped("file over 10 MB skipped", skippedKey);
+                NotifySkipped(AppText.Text("status.fileTooLarge"), skippedKey);
                 return null;
             }
 
@@ -153,13 +153,13 @@ internal sealed class ClipboardMonitor : IDisposable
             }
             catch
             {
-                NotifySkipped("file clipboard read failed", skippedKey);
+                NotifySkipped(AppText.Text("status.fileReadFailed"), skippedKey);
                 return null;
             }
 
             if (data.Length > ClipboardLimits.MaxFileBytes)
             {
-                NotifySkipped("file over 10 MB skipped", skippedKey);
+                NotifySkipped(AppText.Text("status.fileTooLarge"), skippedKey);
                 return null;
             }
 
@@ -189,7 +189,7 @@ internal sealed class ClipboardMonitor : IDisposable
             var data = stream.ToArray();
             if (data.Length > ClipboardLimits.MaxFileBytes)
             {
-                NotifySkipped("image over 10 MB skipped", $"image:{data.Length}");
+                NotifySkipped(AppText.Text("status.imageTooLarge"), $"image:{data.Length}");
                 return null;
             }
 

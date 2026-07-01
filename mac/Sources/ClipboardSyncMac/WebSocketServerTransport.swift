@@ -20,7 +20,7 @@ final class WebSocketServerTransport: Transport {
         queue.async { [self] in
             do {
                 guard let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else {
-                    onStatus?("invalid port")
+                    onStatus?(AppText.text("status.invalidPort"))
                     return
                 }
 
@@ -33,9 +33,9 @@ final class WebSocketServerTransport: Transport {
                     case .ready:
                         self?.pushStatus()
                     case .failed(let error):
-                        self?.onStatus?("server failed: \(error.localizedDescription)")
+                        self?.onStatus?(AppText.format("status.serverFailed", error.localizedDescription))
                     case .cancelled:
-                        self?.onStatus?("stopped")
+                        self?.onStatus?(AppText.text("status.stopped"))
                     default:
                         break
                     }
@@ -43,9 +43,9 @@ final class WebSocketServerTransport: Transport {
 
                 self.listener = listener
                 listener.start(queue: queue)
-                onStatus?("starting server \(NetworkAddress.serverURL(port: port))")
+                onStatus?(AppText.format("status.startingServer", NetworkAddress.serverURL(port: port)))
             } catch {
-                onStatus?("server error: \(error.localizedDescription)")
+                onStatus?(AppText.format("status.serverError", error.localizedDescription))
             }
         }
     }
@@ -57,7 +57,7 @@ final class WebSocketServerTransport: Transport {
             self.peers.values.forEach { $0.close() }
             self.peers.removeAll()
             self.onPeerCount?(0)
-            self.onStatus?("stopped")
+            self.onStatus?(AppText.text("status.stopped"))
         }
     }
 
@@ -102,7 +102,7 @@ final class WebSocketServerTransport: Transport {
     private func pushStatus() {
         let readyPeerCount = peers.values.filter(\.isReady).count
         onPeerCount?(readyPeerCount)
-        onStatus?("server \(NetworkAddress.serverURL(port: port)), \(readyPeerCount) peer(s)")
+        onStatus?(AppText.format("status.serverPeers", NetworkAddress.serverURL(port: port), readyPeerCount))
     }
 }
 

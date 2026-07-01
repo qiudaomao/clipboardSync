@@ -241,7 +241,7 @@ internal sealed class ClipboardContent
         {
             return Kind switch
             {
-                "image" => $"Image: {FormatBytes(Image?.Size ?? 0)}",
+                "image" => AppText.Format("history.image", FormatBytes(Image?.Size ?? 0)),
                 "files" => FormatFileTitle(),
                 _ => FormatTextTitle()
             };
@@ -301,15 +301,15 @@ internal sealed class ClipboardContent
     {
         var compact = Text.ReplaceLineEndings(" ");
         return string.IsNullOrEmpty(compact)
-            ? "Text"
-            : $"Text: {compact[..Math.Min(compact.Length, 42)]}";
+            ? AppText.Text("history.text")
+            : AppText.Format("history.textWithPreview", compact[..Math.Min(compact.Length, 42)]);
     }
 
     private string FormatFileTitle()
     {
         var names = string.Join(", ", Files.Take(2).Select(item => item.Name));
         var suffix = Files.Count > 2 ? $" +{Files.Count - 2}" : "";
-        return $"Files: {names}{suffix}";
+        return AppText.Format("history.files", names, suffix);
     }
 
     private static string FormatBytes(int bytes)

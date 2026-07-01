@@ -153,21 +153,21 @@ final class InputSharingCoordinator {
     private func updateStatus() {
         let status: String
         if !config.inputSharingEnabled {
-            status = "Input Sharing: off"
+            status = AppText.text("input.off")
         } else if peerCount == 0 {
-            status = "Input Sharing: waiting for peer"
+            status = AppText.text("input.waitingPeer")
         } else if !hasAccessibilityPermission {
-            status = "Input Sharing: grant Accessibility"
+            status = AppText.text("input.grantAccessibility")
         } else if isController && !hasInputMonitoringPermission {
-            status = "Input Sharing: grant Input Monitoring"
+            status = AppText.text("input.grantInputMonitoring")
         } else if isController && remoteInputEnabled == false {
-            status = "Input Sharing: peer disabled"
+            status = AppText.text("input.peerDisabled")
         } else if isController && (remoteScreen == nil || remoteInputEnabled == nil) {
-            status = "Input Sharing: waiting for peer screen"
+            status = AppText.text("input.waitingPeerScreen")
         } else if isController {
-            status = "Input Sharing: controlling peer (\(config.peerEdge.rawValue))"
+            status = AppText.format("input.controllingPeer", config.peerEdge.title)
         } else {
-            status = "Input Sharing: receiving input"
+            status = AppText.text("input.receiving")
         }
         onStatus?(status)
     }
@@ -178,7 +178,7 @@ final class InputSharingCoordinator {
         }
 
         guard hasInputMonitoringPermission else {
-            onStatus?("Input Sharing: grant Input Monitoring")
+            onStatus?(AppText.text("input.grantInputMonitoring"))
             requestInputMonitoringPermission()
             return
         }
@@ -208,7 +208,7 @@ final class InputSharingCoordinator {
             callback: Self.eventCallback,
             userInfo: userInfo
         ) else {
-            onStatus?("Input Sharing: grant Accessibility/Input Monitoring")
+            onStatus?(AppText.text("input.grantBoth"))
             requestMissingPermissionsIfNeeded()
             return
         }

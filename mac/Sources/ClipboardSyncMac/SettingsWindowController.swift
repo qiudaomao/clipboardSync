@@ -3,17 +3,17 @@ import AppKit
 final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     var onSave: ((AppConfig) -> Void)?
 
-    private let modeControl = NSSegmentedControl(labels: ["Client", "Server"], trackingMode: .selectOne, target: nil, action: nil)
+    private let modeControl = NSSegmentedControl(labels: [AppText.text("settings.client"), AppText.text("settings.server")], trackingMode: .selectOne, target: nil, action: nil)
     private let hostField = NSTextField()
     private let portField = NSTextField()
     private let passwordField = NSSecureTextField()
-    private let inputSharingButton = NSButton(checkboxWithTitle: "Enable Input Sharing", target: nil, action: nil)
+    private let inputSharingButton = NSButton(checkboxWithTitle: AppText.text("settings.enableInputSharing"), target: nil, action: nil)
     private let peerEdgePopup = NSPopUpButton()
-    private let reverseScrollButton = NSButton(checkboxWithTitle: "Reverse Vertical Scroll", target: nil, action: nil)
-    private let hostHintLabel = NSTextField(labelWithString: "Used only in client mode.")
+    private let reverseScrollButton = NSButton(checkboxWithTitle: AppText.text("settings.reverseVerticalScroll"), target: nil, action: nil)
+    private let hostHintLabel = NSTextField(labelWithString: AppText.text("settings.hostDefaultHint"))
     private let validationLabel = NSTextField(labelWithString: "")
-    private let saveButton = NSButton(title: "Save", target: nil, action: nil)
-    private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+    private let saveButton = NSButton(title: AppText.text("settings.save"), target: nil, action: nil)
+    private let cancelButton = NSButton(title: AppText.text("settings.cancel"), target: nil, action: nil)
 
     private var currentConfig = AppConfig.defaults
     private var clientHostDraft = ""
@@ -25,7 +25,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Clipboard Sync Settings"
+        window.title = AppText.text("settings.title")
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 480, height: 452)
 
@@ -83,7 +83,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         portField.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         portField.delegate = self
 
-        passwordField.placeholderString = "Required on every device"
+        passwordField.placeholderString = AppText.text("settings.passwordPlaceholder")
         passwordField.controlSize = .large
         passwordField.font = .systemFont(ofSize: NSFont.systemFontSize)
 
@@ -118,10 +118,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         cancelButton.bezelStyle = .rounded
         cancelButton.controlSize = .large
 
-        let titleLabel = NSTextField(labelWithString: "Clipboard Sync")
+        let titleLabel = NSTextField(labelWithString: AppText.text("settings.header"))
         titleLabel.font = .boldSystemFont(ofSize: 17)
 
-        let subtitleLabel = NSTextField(wrappingLabelWithString: "Configure how this Mac syncs clipboard updates.")
+        let subtitleLabel = NSTextField(wrappingLabelWithString: AppText.text("settings.subtitle"))
         subtitleLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         subtitleLabel.textColor = .secondaryLabelColor
 
@@ -138,13 +138,13 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         hostHintLabel.widthAnchor.constraint(equalTo: hostField.widthAnchor).isActive = true
 
         let formStack = NSStackView(views: [
-            formRow(label: "Mode", control: modeControl),
-            formRow(label: "Host", control: hostStack),
-            formRow(label: "Port", control: portField),
-            formRow(label: "Password", control: passwordField),
-            formRow(label: "Input", control: inputSharingButton),
-            formRow(label: "Peer", control: peerEdgePopup),
-            formRow(label: "Scroll", control: reverseScrollButton)
+            formRow(label: AppText.text("settings.mode"), control: modeControl),
+            formRow(label: AppText.text("settings.host"), control: hostStack),
+            formRow(label: AppText.text("settings.port"), control: portField),
+            formRow(label: AppText.text("settings.password"), control: passwordField),
+            formRow(label: AppText.text("settings.input"), control: inputSharingButton),
+            formRow(label: AppText.text("settings.peer"), control: peerEdgePopup),
+            formRow(label: AppText.text("settings.scroll"), control: reverseScrollButton)
         ])
         formStack.orientation = .vertical
         formStack.alignment = .leading
@@ -208,7 +208,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             hostField.isSelectable = true
             hostField.stringValue = clientHostDraft
             hostField.placeholderString = "192.168.1.10"
-            hostHintLabel.stringValue = "Enter the LAN IP shown on the server Mac."
+            hostHintLabel.stringValue = AppText.text("settings.hostClientHint")
         } else {
             if hostField.isEnabled {
                 clientHostDraft = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -217,7 +217,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             hostField.isEditable = false
             hostField.isSelectable = true
             hostField.stringValue = NetworkAddress.serverURL(port: currentPortValue())
-            hostHintLabel.stringValue = "Share this address with clients on the same LAN."
+            hostHintLabel.stringValue = AppText.text("settings.hostServerHint")
         }
         updateInputSharingState()
     }
@@ -238,25 +238,25 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let reverseMouseVerticalScroll = reverseScrollButton.state == .on
 
         if mode == .client && host.isEmpty {
-            showValidation("Enter a server host for client mode.")
+            showValidation(AppText.text("settings.validationHost"))
             window?.makeFirstResponder(hostField)
             return
         }
 
         if mode == .client && NetworkAddress.isLoopbackHost(host) {
-            showValidation("Use the server Mac's LAN IP, not 127.0.0.1.")
+            showValidation(AppText.text("settings.validationLoopback"))
             window?.makeFirstResponder(hostField)
             return
         }
 
         guard let port = Int(portText), (1...65_535).contains(port) else {
-            showValidation("Port must be a number from 1 to 65535.")
+            showValidation(AppText.text("settings.validationPort"))
             window?.makeFirstResponder(portField)
             return
         }
 
         if password.isEmpty {
-            showValidation("Enter the same sync password on every device.")
+            showValidation(AppText.text("settings.validationPassword"))
             window?.makeFirstResponder(passwordField)
             return
         }
