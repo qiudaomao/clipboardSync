@@ -128,11 +128,31 @@ internal sealed class ScreenLayoutCanvas : Panel
     private Metrics? dragMetrics;
     private bool didDragDuringGesture;
 
+    private const float CursorDotRadius = 7f;
+    private readonly System.Windows.Forms.Timer cursorTrackingTimer;
+    private PointF? realCursorPosition;
+
     public ScreenLayoutCanvas()
     {
         DoubleBuffered = true;
         ResizeRedraw = true;
         BackColor = SystemColors.ControlLightLight;
+
+        // Tracks this machine's actual cursor and shows it at the matching spot on whichever of
+        // this machine's own screen rects currently contains it.
+        cursorTrackingTimer = new System.Windows.Forms.Timer { Interval = 16 };
+        cursorTrackingTimer.Tick += (_, _) => UpdateRealCursorPosition();
+        cursorTrackingTimer.Start();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            cursorTrackingTimer.Stop();
+            cursorTrackingTimer.Dispose();
+        }
+        base.Dispose(disposing);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -141,37 +161,99 @@ internal sealed class ScreenLayoutCanvas : Panel
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
 
-        if (entries.Count == 0)
+        var metrics = dragMetrics ?? ComputeMetrics();
+
+        if (entries.Count > 0)
         {
-            return;
+            using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+            using var font = new Font(Font.FontFamily, 9f, FontStyle.Bold);
+
+            foreach (var entry in entries.OrderBy(item => item.ScreenId, StringComparer.Ordinal))
+            {
+                var rect = ScreenRect(entry, metrics);
+                var color = ColorFor(entry.DeviceId);
+
+                using (var fillBrush = new SolidBrush(Color.FromArgb(90, color)))
+                {
+                    g.FillRectangle(fillBrush, rect);
+                }
+                using (var pen = new Pen(color, entry.DeviceId == LocalDeviceId ? 3f : 1.5f))
+                {
+                    g.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
+                }
+
+                if (rect.Width <= 40 || rect.Height <= 28)
+                {
+                    continue;
+                }
+
+                var text = $"{ScreenLabel(entry)}\n{(int)entry.Width}×{(int)entry.Height}";
+                g.DrawString(text, font, Brushes.Black, rect, format);
+            }
         }
 
-        var metrics = dragMetrics ?? ComputeMetrics();
-        using var format = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-        using var font = new Font(Font.FontFamily, 9f, FontStyle.Bold);
+        DrawRealCursor(g, metrics);
+    }
 
-        foreach (var entry in entries.OrderBy(item => item.ScreenId, StringComparer.Ordinal))
+    /// This machine's actual cursor position, mapped onto the corresponding spot in the shared
+    /// layout canvas. Left null (dot hidden) if the monitor the cursor is currently on hasn't been
+    /// registered in `entries` yet.
+    private void UpdateRealCursorPosition()
+    {
+        realCursorPosition = ComputeRealCursorCanvasPosition();
+        Invalidate();
+    }
+
+    private PointF? ComputeRealCursorCanvasPosition()
+    {
+        if (string.IsNullOrEmpty(LocalDeviceId))
         {
-            var rect = ScreenRect(entry, metrics);
-            var color = ColorFor(entry.DeviceId);
-
-            using (var fillBrush = new SolidBrush(Color.FromArgb(90, color)))
-            {
-                g.FillRectangle(fillBrush, rect);
-            }
-            using (var pen = new Pen(color, entry.DeviceId == LocalDeviceId ? 3f : 1.5f))
-            {
-                g.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
-            }
-
-            if (rect.Width <= 40 || rect.Height <= 28)
+            return null;
+        }
+        var location = Cursor.Position;
+        var screens = Screen.AllScreens;
+        for (var index = 0; index < screens.Length; index++)
+        {
+            var bounds = screens[index].Bounds;
+            if (!bounds.Contains(location))
             {
                 continue;
             }
-
-            var text = $"{ScreenLabel(entry)}\n{(int)entry.Width}×{(int)entry.Height}";
-            g.DrawString(text, font, Brushes.Black, rect, format);
+            var screenId = $"{LocalDeviceId}#{index}";
+            var entry = entries.FirstOrDefault(item => item.ScreenId == screenId);
+            if (entry is null)
+            {
+                return null;
+            }
+            return new PointF(
+                (float)(entry.X + (location.X - bounds.Left)),
+                (float)(entry.Y + (location.Y - bounds.Top)));
         }
+        return null;
+    }
+
+    private void DrawRealCursor(Graphics g, Metrics metrics)
+    {
+        if (realCursorPosition is not { } canvasPosition)
+        {
+            return;
+        }
+        var position = new PointF(
+            (canvasPosition.X - metrics.OriginX) * metrics.Scale + metrics.MarginX,
+            (canvasPosition.Y - metrics.OriginY) * metrics.Scale + metrics.MarginY);
+        var rect = new RectangleF(
+            position.X - CursorDotRadius,
+            position.Y - CursorDotRadius,
+            CursorDotRadius * 2,
+            CursorDotRadius * 2);
+
+        using (var shadowBrush = new SolidBrush(Color.FromArgb(60, Color.Black)))
+        {
+            g.FillEllipse(shadowBrush, new RectangleF(rect.X, rect.Y + 2, rect.Width, rect.Height));
+        }
+        g.FillEllipse(Brushes.White, rect);
+        using var pen = new Pen(Color.FromArgb(150, Color.Black), 1.5f);
+        g.DrawEllipse(pen, rect);
     }
 
     private string ScreenLabel(ScreenLayoutEntry entry)

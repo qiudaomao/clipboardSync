@@ -969,7 +969,29 @@ final class InputSharingCoordinator {
         return CGDisplayBounds(displays[index])
     }
 
-    private static func activeDisplayIds() -> [CGDirectDisplayID] {
+    /// This machine's actual cursor position, mapped onto the corresponding spot in the shared
+    /// layout canvas — used to show a live "you are here" dot in the Screen Layout window. Returns
+    /// nil if the monitor the cursor is currently on hasn't been registered in `entries` yet.
+    static func currentLocalCanvasCursorPosition(deviceId: String, entries: [ScreenLayoutEntry]) -> CGPoint? {
+        guard !deviceId.isEmpty else {
+            return nil
+        }
+        let location = CGEvent(source: nil)?.location ?? .zero
+        for (index, displayId) in activeDisplayIds().enumerated() {
+            let bounds = CGDisplayBounds(displayId)
+            guard bounds.contains(location) else {
+                continue
+            }
+            let screenId = "\(deviceId)#\(index)"
+            guard let entry = entries.first(where: { $0.screenId == screenId }) else {
+                return nil
+            }
+            return CGPoint(x: entry.x + (location.x - bounds.minX), y: entry.y + (location.y - bounds.minY))
+        }
+        return nil
+    }
+
+    static func activeDisplayIds() -> [CGDirectDisplayID] {
         var displayCount: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &displayCount) == .success, displayCount > 0 else {
             return [CGMainDisplayID()]

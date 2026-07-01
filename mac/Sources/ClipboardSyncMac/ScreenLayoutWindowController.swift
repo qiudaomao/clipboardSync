@@ -1,6 +1,6 @@
 import AppKit
 
-final class ScreenLayoutWindowController: NSWindowController {
+final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
     var onLayoutChanged: (([ScreenLayoutEntry]) -> Void)?
 
     private let canvasView = ScreenLayoutCanvasView()
@@ -18,6 +18,7 @@ final class ScreenLayoutWindowController: NSWindowController {
         window.minSize = NSSize(width: 420, height: 320)
 
         super.init(window: window)
+        window.delegate = self
         setupContent()
     }
 
@@ -35,6 +36,11 @@ final class ScreenLayoutWindowController: NSWindowController {
             window?.center()
         }
         window?.makeKeyAndOrderFront(nil)
+        canvasView.startCursorTracking()
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        canvasView.stopCursorTracking()
     }
 
     private func setupContent() {
@@ -122,6 +128,9 @@ final class ScreenLayoutCanvasView: NSView {
     private var dragMetrics: Metrics?
     private var didDragDuringGesture = false
 
+    private var realCursorPosition: CGPoint?
+    private var cursorTrackingTimer: Timer?
+
     override var isFlipped: Bool {
         true
     }
@@ -130,44 +139,97 @@ final class ScreenLayoutCanvasView: NSView {
         NSColor.controlBackgroundColor.setFill()
         bounds.fill()
 
-        guard !entries.isEmpty else {
+        let metrics = dragMetrics ?? computeMetrics()
+
+        if !entries.isEmpty {
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.alignment = .center
+
+            for entry in entries.sorted(by: { $0.screenId < $1.screenId }) {
+                let rect = screenRect(for: entry, metrics: metrics)
+                let color = Self.color(for: entry.deviceId)
+
+                let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+                color.withAlphaComponent(0.35).setFill()
+                path.fill()
+                color.setStroke()
+                path.lineWidth = entry.deviceId == localDeviceId ? 3 : 1.5
+                path.stroke()
+
+                guard rect.width > 40, rect.height > 28 else {
+                    continue
+                }
+
+                let subtitle = "\(Int(entry.width))\u{00D7}\(Int(entry.height))"
+                let text = NSAttributedString(string: "\(screenLabel(for: entry))\n\(subtitle)", attributes: [
+                    .foregroundColor: NSColor.labelColor,
+                    .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                    .paragraphStyle: paragraphStyle
+                ])
+                let textSize = text.size()
+                let textRect = CGRect(
+                    x: rect.midX - textSize.width / 2,
+                    y: rect.midY - textSize.height / 2,
+                    width: textSize.width,
+                    height: textSize.height
+                )
+                text.draw(in: textRect)
+            }
+        }
+
+        drawRealCursor(metrics: metrics)
+    }
+
+    // MARK: - Live cursor position
+
+    private static let cursorDotRadius: CGFloat = 7
+
+    /// Tracks this machine's actual cursor and shows it at the matching spot on whichever of this
+    /// machine's own screen rects currently contains it — e.g. the dot sits mid-way down screen #1
+    /// when the real pointer is mid-way down that monitor. Only known once this device's own
+    /// screens are registered in `entries`; hidden otherwise.
+    func startCursorTracking() {
+        guard cursorTrackingTimer == nil else {
             return
         }
-
-        let metrics = dragMetrics ?? computeMetrics()
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = .center
-
-        for entry in entries.sorted(by: { $0.screenId < $1.screenId }) {
-            let rect = screenRect(for: entry, metrics: metrics)
-            let color = Self.color(for: entry.deviceId)
-
-            let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
-            color.withAlphaComponent(0.35).setFill()
-            path.fill()
-            color.setStroke()
-            path.lineWidth = entry.deviceId == localDeviceId ? 3 : 1.5
-            path.stroke()
-
-            guard rect.width > 40, rect.height > 28 else {
-                continue
-            }
-
-            let subtitle = "\(Int(entry.width))\u{00D7}\(Int(entry.height))"
-            let text = NSAttributedString(string: "\(screenLabel(for: entry))\n\(subtitle)", attributes: [
-                .foregroundColor: NSColor.labelColor,
-                .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-                .paragraphStyle: paragraphStyle
-            ])
-            let textSize = text.size()
-            let textRect = CGRect(
-                x: rect.midX - textSize.width / 2,
-                y: rect.midY - textSize.height / 2,
-                width: textSize.width,
-                height: textSize.height
-            )
-            text.draw(in: textRect)
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.updateRealCursorPosition()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        cursorTrackingTimer = timer
+        updateRealCursorPosition()
+    }
+
+    func stopCursorTracking() {
+        cursorTrackingTimer?.invalidate()
+        cursorTrackingTimer = nil
+    }
+
+    private func updateRealCursorPosition() {
+        realCursorPosition = InputSharingCoordinator.currentLocalCanvasCursorPosition(deviceId: localDeviceId, entries: entries)
+        needsDisplay = true
+    }
+
+    private func drawRealCursor(metrics: Metrics) {
+        guard let canvasPosition = realCursorPosition else {
+            return
+        }
+        let position = CGPoint(
+            x: (canvasPosition.x - metrics.originX) * metrics.scale + metrics.marginX,
+            y: (canvasPosition.y - metrics.originY) * metrics.scale + metrics.marginY
+        )
+        let radius = Self.cursorDotRadius
+        let rect = CGRect(x: position.x - radius, y: position.y - radius, width: radius * 2, height: radius * 2)
+
+        NSColor.black.withAlphaComponent(0.25).setFill()
+        NSBezierPath(ovalIn: rect.offsetBy(dx: 0, dy: 2)).fill()
+
+        NSColor.white.setFill()
+        let dot = NSBezierPath(ovalIn: rect)
+        dot.fill()
+        NSColor.black.withAlphaComponent(0.6).setStroke()
+        dot.lineWidth = 1.5
+        dot.stroke()
     }
 
     private func screenLabel(for entry: ScreenLayoutEntry) -> String {
