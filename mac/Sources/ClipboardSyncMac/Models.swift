@@ -804,6 +804,22 @@ final class ScreenLayoutStore {
         return changed
     }
 
+    /// Drops every screen belonging to `deviceId` (e.g. once that device has been considered
+    /// disconnected), so it stops showing in the Screen Layout window. Returns whether anything
+    /// changed.
+    @discardableResult
+    func remove(deviceId: String) -> Bool {
+        let staleIds = entries.values.filter { $0.deviceId == deviceId }.map(\.screenId)
+        guard !staleIds.isEmpty else {
+            return false
+        }
+        for screenId in staleIds {
+            entries.removeValue(forKey: screenId)
+        }
+        save()
+        return true
+    }
+
     func applySnapshot(_ snapshot: [ScreenLayoutEntry]) {
         entries = Dictionary(uniqueKeysWithValues: snapshot.map { ($0.screenId, $0) })
         save()

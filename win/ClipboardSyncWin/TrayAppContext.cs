@@ -42,6 +42,8 @@ internal sealed class TrayAppContext : ApplicationContext
     private int peerCount;
     private bool pendingInputConfigSync;
     private string status = AppText.Text("status.stopped");
+    private readonly System.Windows.Forms.Timer presenceTimer;
+    private static readonly TimeSpan PresenceStaleTimeout = TimeSpan.FromSeconds(15);
 
     private sealed class InputDeviceMenuDevice
     {
@@ -111,12 +113,26 @@ internal sealed class TrayAppContext : ApplicationContext
         UpdateInputCoordinator();
 
         RestartTransport();
+
+        // Periodically re-broadcasts our own hello (so peers keep our LastSeen fresh even when we
+        // have nothing else to send) and prunes any peer we haven't heard from in a while -
+        // otherwise a disconnected device's screens and menu entry would linger forever, since
+        // nothing else ever removes them.
+        presenceTimer = new System.Windows.Forms.Timer { Interval = 5000 };
+        presenceTimer.Tick += (_, _) =>
+        {
+            SendInputHello();
+            PruneStaleDevices();
+        };
+        presenceTimer.Start();
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
+            presenceTimer.Stop();
+            presenceTimer.Dispose();
             transport?.Dispose();
             inputCoordinator.Dispose();
             clipboardMonitor.Dispose();
@@ -126,6 +142,42 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         base.Dispose(disposing);
+    }
+
+    private void PruneStaleDevices()
+    {
+        var cutoff = DateTimeOffset.UtcNow - PresenceStaleTimeout;
+        var staleIds = inputDevices.Values.Where(d => d.LastSeen < cutoff).Select(d => d.Id).ToList();
+        if (staleIds.Count == 0)
+        {
+            return;
+        }
+
+        var layoutChanged = false;
+        foreach (var staleId in staleIds)
+        {
+            inputDevices.Remove(staleId);
+            if (screenLayoutStore.Remove(staleId))
+            {
+                layoutChanged = true;
+            }
+            if (config.ControlDeviceId == staleId)
+            {
+                config.ControlDeviceId = null;
+                ConfigStore.Save(config);
+            }
+        }
+
+        UpdateMenu();
+        UpdateInputCoordinator();
+        if (layoutChanged)
+        {
+            RefreshScreenLayoutFormIfVisible();
+            if (config.Mode == SyncMode.Server)
+            {
+                BroadcastLayout();
+            }
+        }
     }
 
     private ContextMenuStrip BuildMenu()

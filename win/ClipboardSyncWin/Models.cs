@@ -315,6 +315,24 @@ internal sealed class ScreenLayoutStore
         return changed;
     }
 
+    /// Drops every screen belonging to `deviceId` (e.g. once that device has been considered
+    /// disconnected), so it stops showing in the Screen Layout window. Returns whether anything
+    /// changed.
+    public bool Remove(string deviceId)
+    {
+        var staleIds = entries.Values.Where(e => e.DeviceId == deviceId).Select(e => e.ScreenId).ToList();
+        if (staleIds.Count == 0)
+        {
+            return false;
+        }
+        foreach (var screenId in staleIds)
+        {
+            entries.Remove(screenId);
+        }
+        Save();
+        return true;
+    }
+
     public void ApplySnapshot(List<ScreenLayoutEntry> snapshot)
     {
         entries.Clear();

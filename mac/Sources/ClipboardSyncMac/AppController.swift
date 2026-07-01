@@ -13,6 +13,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var config = AppConfig.load()
     private var transport: Transport?
     private var peerCount = 0
+    private var presenceTimer: Timer?
+    private static let presenceHeartbeatInterval: TimeInterval = 5
+    private static let presenceStaleTimeout: TimeInterval = 15
     private var pendingInputConfigSync = false
     private var statusText = AppText.text("status.stopped") {
         didSet {
@@ -108,6 +111,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         inputCoordinator.start()
         updateInputCoordinator()
         restartTransport()
+        startPresenceHeartbeat()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -115,6 +119,50 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clipboard.stop()
         inputCoordinator.stop()
         transport?.stop()
+        presenceTimer?.invalidate()
+    }
+
+    /// Periodically re-broadcasts our own hello (so peers keep our `lastSeen` fresh even when we
+    /// have nothing else to send) and prunes any peer we haven't heard from in a while — otherwise
+    /// a disconnected device's screens and menu entry would linger forever, since nothing else ever
+    /// removes them.
+    private func startPresenceHeartbeat() {
+        presenceTimer?.invalidate()
+        let timer = Timer(timeInterval: Self.presenceHeartbeatInterval, repeats: true) { [weak self] _ in
+            self?.sendInputHello()
+            self?.pruneStaleDevices()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        presenceTimer = timer
+    }
+
+    private func pruneStaleDevices() {
+        let cutoff = Date().addingTimeInterval(-Self.presenceStaleTimeout)
+        let staleIds = inputDevices.values.filter { $0.lastSeen < cutoff }.map(\.id)
+        guard !staleIds.isEmpty else {
+            return
+        }
+
+        var layoutChanged = false
+        for staleId in staleIds {
+            inputDevices.removeValue(forKey: staleId)
+            if screenLayoutStore.remove(deviceId: staleId) {
+                layoutChanged = true
+            }
+            if config.controlDeviceId == staleId {
+                config.controlDeviceId = nil
+                config.save()
+            }
+        }
+
+        updateMenu()
+        updateInputCoordinator()
+        if layoutChanged {
+            refreshScreenLayoutWindowIfVisible()
+            if config.mode == .server {
+                broadcastLayout()
+            }
+        }
     }
 
     private func setupMenu() {
