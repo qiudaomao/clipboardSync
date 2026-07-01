@@ -43,6 +43,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.onLayoutChanged = { [weak self] entries in
             self?.applyLocalLayoutChange(entries)
         }
+        controller.onLocalCursorMoved = { [weak self] screenId, normalizedX, normalizedY in
+            self?.broadcastCursorPosition(screenId: screenId, normalizedX: normalizedX, normalizedY: normalizedY)
+        }
         return controller
     }()
 
@@ -395,6 +398,42 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ))
     }
 
+    private func broadcastCursorPosition(screenId: String, normalizedX: Double, normalizedY: Double) {
+        guard transport != nil, !config.password.isEmpty, peerCount > 0 else {
+            return
+        }
+        publishInput(InputMessage(
+            type: "input",
+            origin: deviceId,
+            target: nil,
+            kind: "cursor",
+            role: nil,
+            deviceName: nil,
+            deviceAddress: nil,
+            screens: nil,
+            enabled: nil,
+            controlDeviceId: nil,
+            layout: nil,
+            capture: nil,
+            mouse: nil,
+            key: nil,
+            sentAt: Date().timeIntervalSince1970,
+            cursor: InputCursorPayload(screenId: screenId, normalizedX: normalizedX, normalizedY: normalizedY)
+        ))
+    }
+
+    private func handleCursorMessage(_ message: InputMessage) {
+        guard let cursor = message.cursor else {
+            return
+        }
+        screenLayoutWindowController.updateRemoteCursor(
+            deviceId: message.origin,
+            screenId: cursor.screenId,
+            normalizedX: cursor.normalizedX,
+            normalizedY: cursor.normalizedY
+        )
+    }
+
     private func handleLayoutMessage(_ message: InputMessage) {
         guard let layout = message.layout else {
             return
@@ -703,6 +742,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if message.kind == "layout" {
             handleLayoutMessage(message)
+            return
+        }
+
+        if message.kind == "cursor" {
+            handleCursorMessage(message)
             return
         }
 

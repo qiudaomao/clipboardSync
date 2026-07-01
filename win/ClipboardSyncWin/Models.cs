@@ -175,6 +175,7 @@ internal sealed class InputMessage
     public InputMousePayload? Mouse { get; set; }
     public InputKeyPayload? Key { get; set; }
     public double SentAt { get; set; }
+    public InputCursorPayload? Cursor { get; set; }
 
     public static InputMessage Hello(
         string origin,
@@ -393,6 +394,16 @@ internal sealed class InputCapturePayload
 {
     public string Action { get; set; } = "";
     public string Edge { get; set; } = "";
+    public string ScreenId { get; set; } = "";
+    public double NormalizedX { get; set; }
+    public double NormalizedY { get; set; }
+}
+
+/// Reports where a machine's own real cursor currently sits, for peers to render a "fake mouse"
+/// dot on that machine's screens in the Screen Layout window. Broadcast (not targeted) only while
+/// the sender's own Screen Layout window is open.
+internal sealed class InputCursorPayload
+{
     public string ScreenId { get; set; } = "";
     public double NormalizedX { get; set; }
     public double NormalizedY { get; set; }

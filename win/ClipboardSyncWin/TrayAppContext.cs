@@ -299,6 +299,7 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             screenLayoutForm = new ScreenLayoutForm();
             screenLayoutForm.LayoutChanged += entries => ApplyLocalLayoutChange(entries);
+            screenLayoutForm.LocalCursorMoved += (screenId, normalizedX, normalizedY) => BroadcastCursorPosition(screenId, normalizedX, normalizedY);
         }
         return screenLayoutForm;
     }
@@ -357,6 +358,31 @@ internal sealed class TrayAppContext : ApplicationContext
             Layout = entries,
             SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
         });
+    }
+
+    private void BroadcastCursorPosition(string screenId, double normalizedX, double normalizedY)
+    {
+        if (transport is null || string.IsNullOrEmpty(config.Password) || peerCount == 0)
+        {
+            return;
+        }
+        PublishInput(new InputMessage
+        {
+            Type = "input",
+            Origin = config.DeviceId,
+            Kind = "cursor",
+            Cursor = new InputCursorPayload { ScreenId = screenId, NormalizedX = normalizedX, NormalizedY = normalizedY },
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        });
+    }
+
+    private void HandleCursorMessage(InputMessage message)
+    {
+        if (message.Cursor is not { } cursor || screenLayoutForm is not { IsDisposed: false, Visible: true } form)
+        {
+            return;
+        }
+        form.UpdateRemoteCursor(message.Origin, cursor.ScreenId, cursor.NormalizedX, cursor.NormalizedY);
     }
 
     private void HandleLayoutMessage(InputMessage message)
@@ -727,6 +753,12 @@ internal sealed class TrayAppContext : ApplicationContext
         if (message.Kind == "layout")
         {
             HandleLayoutMessage(message);
+            return;
+        }
+
+        if (message.Kind == "cursor")
+        {
+            HandleCursorMessage(message);
             return;
         }
 

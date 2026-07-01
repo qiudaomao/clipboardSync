@@ -648,6 +648,43 @@ struct InputMessage: Codable {
     let mouse: InputMousePayload?
     let key: InputKeyPayload?
     let sentAt: TimeInterval
+    let cursor: InputCursorPayload?
+
+    init(
+        type: String,
+        origin: String,
+        target: String?,
+        kind: String,
+        role: String?,
+        deviceName: String?,
+        deviceAddress: String?,
+        screens: [ScreenMetrics]?,
+        enabled: Bool?,
+        controlDeviceId: String?,
+        layout: [ScreenLayoutEntry]?,
+        capture: InputCapturePayload?,
+        mouse: InputMousePayload?,
+        key: InputKeyPayload?,
+        sentAt: TimeInterval,
+        cursor: InputCursorPayload? = nil
+    ) {
+        self.type = type
+        self.origin = origin
+        self.target = target
+        self.kind = kind
+        self.role = role
+        self.deviceName = deviceName
+        self.deviceAddress = deviceAddress
+        self.screens = screens
+        self.enabled = enabled
+        self.controlDeviceId = controlDeviceId
+        self.layout = layout
+        self.capture = capture
+        self.mouse = mouse
+        self.key = key
+        self.sentAt = sentAt
+        self.cursor = cursor
+    }
 
     static func hello(
         origin: String,
@@ -806,6 +843,15 @@ final class ScreenLayoutStore {
 struct InputCapturePayload: Codable {
     let action: String
     let edge: String
+    let screenId: String
+    let normalizedX: Double
+    let normalizedY: Double
+}
+
+/// Reports where a machine's own real cursor currently sits, for peers to render a "fake mouse"
+/// dot on that machine's screens in the Screen Layout window. Broadcast (not targeted) only while
+/// the sender's own Screen Layout window is open.
+struct InputCursorPayload: Codable {
     let screenId: String
     let normalizedX: Double
     let normalizedY: Double
