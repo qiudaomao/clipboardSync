@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -105,6 +106,11 @@ internal sealed class ClientTransport : ISyncTransport
                 PeerCountChanged?.Invoke(1);
                 StatusChanged?.Invoke($"connected {host}:{port}");
                 await ReceiveLoopAsync(ws, token).ConfigureAwait(false);
+                if (!token.IsCancellationRequested)
+                {
+                    PeerCountChanged?.Invoke(0);
+                    StatusChanged?.Invoke("disconnected; retrying");
+                }
             }
             catch (OperationCanceledException)
             {
@@ -261,13 +267,13 @@ internal sealed class ServerTransport : ISyncTransport
                     }
                     await BroadcastAsync(text, id).ConfigureAwait(false);
                 };
+                peer.Ready += PushStatus;
                 peer.Closed += () =>
                 {
                     peers.TryRemove(id, out _);
                     PushStatus();
                 };
 
-                PushStatus();
                 _ = peer.RunAsync(token);
             }
             catch (OperationCanceledException)
@@ -290,6 +296,11 @@ internal sealed class ServerTransport : ISyncTransport
                 continue;
             }
 
+            if (!item.Value.IsReady)
+            {
+                continue;
+            }
+
             try
             {
                 await item.Value.SendTextAsync(message).ConfigureAwait(false);
@@ -303,8 +314,9 @@ internal sealed class ServerTransport : ISyncTransport
 
     private void PushStatus()
     {
-        PeerCountChanged?.Invoke(peers.Count);
-        StatusChanged?.Invoke($"server {NetworkAddress.ServerUrl(port)}, {peers.Count} peer(s)");
+        var readyPeerCount = peers.Count(item => item.Value.IsReady);
+        PeerCountChanged?.Invoke(readyPeerCount);
+        StatusChanged?.Invoke($"server {NetworkAddress.ServerUrl(port)}, {readyPeerCount} peer(s)");
     }
 }
 
@@ -315,6 +327,8 @@ internal sealed class ServerPeer
     private readonly SemaphoreSlim sendLock = new(1, 1);
     private bool closed;
 
+    public bool IsReady { get; private set; }
+    public event Action? Ready;
     public event Func<string, Task>? TextReceived;
     public event Action? Closed;
 
@@ -332,6 +346,9 @@ internal sealed class ServerPeer
             {
                 return;
             }
+
+            IsReady = true;
+            Ready?.Invoke();
 
             while (!token.IsCancellationRequested)
             {
@@ -359,7 +376,7 @@ internal sealed class ServerPeer
 
     public async Task SendTextAsync(string text)
     {
-        if (closed)
+        if (closed || !IsReady)
         {
             return;
         }

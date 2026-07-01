@@ -78,6 +78,9 @@ final class WebSocketServerTransport: Transport {
             self.onMessage?(text)
             self.broadcast(text, excluding: peer)
         }
+        peer.onReady = { [weak self] in
+            self?.pushStatus()
+        }
         peer.onClose = { [weak self, weak peer] in
             guard let self, let peer else {
                 return
@@ -88,24 +91,26 @@ final class WebSocketServerTransport: Transport {
 
         peers[peerId] = peer
         peer.start()
-        pushStatus()
     }
 
     private func broadcast(_ message: String, excluding excluded: ServerPeer?) {
-        for peer in peers.values where peer !== excluded {
+        for peer in peers.values where peer !== excluded && peer.isReady {
             peer.sendText(message)
         }
     }
 
     private func pushStatus() {
-        onPeerCount?(peers.count)
-        onStatus?("server \(NetworkAddress.serverURL(port: port)), \(peers.count) peer(s)")
+        let readyPeerCount = peers.values.filter(\.isReady).count
+        onPeerCount?(readyPeerCount)
+        onStatus?("server \(NetworkAddress.serverURL(port: port)), \(readyPeerCount) peer(s)")
     }
 }
 
 private final class ServerPeer {
+    var onReady: (() -> Void)?
     var onText: ((String) -> Void)?
     var onClose: (() -> Void)?
+    private(set) var isReady = false
 
     private let connection: NWConnection
     private let queue: DispatchQueue
@@ -140,6 +145,9 @@ private final class ServerPeer {
     }
 
     func sendText(_ text: String) {
+        guard isReady else {
+            return
+        }
         sendFrame(opcode: 0x1, payload: Data(text.utf8))
     }
 
@@ -188,6 +196,8 @@ private final class ServerPeer {
                     self.close()
                     return
                 }
+                self.isReady = true
+                self.onReady?()
                 self.receiveFrame()
             })
         }
