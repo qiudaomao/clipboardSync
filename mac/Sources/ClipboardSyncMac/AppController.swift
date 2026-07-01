@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 
-final class AppController: NSObject, NSApplicationDelegate {
+final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let clipboard = ClipboardCoordinator()
     private let deviceId = DeviceIdentity.current
@@ -39,6 +39,12 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(workspaceApplicationDidActivate),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
         clipboard.onLocalContent = { [weak self] content in
             self?.publish(content)
         }
@@ -62,6 +68,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         clipboard.stop()
         inputCoordinator.stop()
         transport?.stop()
@@ -82,6 +89,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         statusItem.button?.toolTip = "Clipboard Sync"
 
         let menu = NSMenu()
+        menu.delegate = self
         statusMenuItem = NSMenuItem(title: "Status: stopped", action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
@@ -160,6 +168,20 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         statusItem.menu = menu
         updateMenu()
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        updateInputCoordinator(sendHello: true)
+    }
+
+    @objc private func workspaceApplicationDidActivate(_ notification: Notification) {
+        guard
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+            app.bundleIdentifier == Bundle.main.bundleIdentifier
+        else {
+            return
+        }
+        updateInputCoordinator(sendHello: true)
     }
 
     private func updateMenu() {
