@@ -371,11 +371,53 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func applyConfig(_ nextConfig: AppConfig) {
+        let previousConfig = config
+        let shouldRestartTransport = requiresTransportRestart(from: previousConfig, to: nextConfig)
+        let shouldSendHello = previousConfig.inputSharingEnabled != nextConfig.inputSharingEnabled
+        let shouldSyncInputConfig = sharedInputConfigChanged(from: previousConfig, to: nextConfig)
+
         config = nextConfig
         config.save()
-        updateInputCoordinator()
-        pendingInputConfigSync = true
-        restartTransport()
+        if shouldRestartTransport {
+            pendingInputConfigSync = true
+            restartTransport()
+            return
+        }
+
+        updateInputCoordinator(sendHello: shouldSendHello)
+        if shouldSyncInputConfig {
+            syncInputConfig()
+        }
+    }
+
+    private func requiresTransportRestart(from previous: AppConfig, to next: AppConfig) -> Bool {
+        if transport == nil, canStartTransport(next) {
+            return true
+        }
+        if canStartTransport(previous) != canStartTransport(next) {
+            return true
+        }
+        if previous.mode != next.mode || previous.port != next.port {
+            return true
+        }
+        if (previous.mode == .client || next.mode == .client) && previous.host != next.host {
+            return true
+        }
+        return false
+    }
+
+    private func canStartTransport(_ configuration: AppConfig) -> Bool {
+        guard !configuration.password.isEmpty else {
+            return false
+        }
+        if configuration.mode == .client {
+            return !configuration.host.isEmpty && !NetworkAddress.isLoopbackHost(configuration.host)
+        }
+        return true
+    }
+
+    private func sharedInputConfigChanged(from previous: AppConfig, to next: AppConfig) -> Bool {
+        previous.controlDeviceId != next.controlDeviceId || previous.peerEdge != next.peerEdge
     }
 
     private func restartTransport() {

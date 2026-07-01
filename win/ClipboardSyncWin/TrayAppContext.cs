@@ -296,13 +296,66 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
+        var previousConfig = config.Clone();
         var nextConfig = form.Config;
         nextConfig.DeviceId = config.DeviceId;
+        nextConfig.Normalize();
+
+        var shouldRestartTransport = RequiresTransportRestart(previousConfig, nextConfig);
+        var shouldSendHello = previousConfig.InputSharingEnabled != nextConfig.InputSharingEnabled;
+        var shouldSyncInputConfig =
+            previousConfig.ControlDeviceId != nextConfig.ControlDeviceId ||
+            previousConfig.PeerEdge != nextConfig.PeerEdge;
+
         config = nextConfig;
         ConfigStore.Save(config);
-        UpdateInputCoordinator();
-        pendingInputConfigSync = true;
-        RestartTransport();
+        if (shouldRestartTransport)
+        {
+            pendingInputConfigSync = true;
+            RestartTransport();
+            return;
+        }
+
+        UpdateInputCoordinator(sendHello: shouldSendHello);
+        if (shouldSyncInputConfig)
+        {
+            SyncInputConfig();
+        }
+    }
+
+    private bool RequiresTransportRestart(AppConfig previous, AppConfig next)
+    {
+        if (transport is null && CanStartTransport(next))
+        {
+            return true;
+        }
+        if (CanStartTransport(previous) != CanStartTransport(next))
+        {
+            return true;
+        }
+        if (previous.Mode != next.Mode || previous.Port != next.Port)
+        {
+            return true;
+        }
+        if ((previous.Mode == SyncMode.Client || next.Mode == SyncMode.Client) &&
+            previous.Host != next.Host)
+        {
+            return true;
+        }
+        return false;
+    }
+
+    private static bool CanStartTransport(AppConfig item)
+    {
+        if (string.IsNullOrEmpty(item.Password))
+        {
+            return false;
+        }
+        if (item.Mode == SyncMode.Client)
+        {
+            return !string.IsNullOrWhiteSpace(item.Host) && !NetworkAddress.IsLoopbackHost(item.Host);
+        }
+        return true;
     }
 
     private void RestartTransport()
