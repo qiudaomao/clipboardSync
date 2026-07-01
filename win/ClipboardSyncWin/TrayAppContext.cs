@@ -434,10 +434,10 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void HandleMessage(string payload)
     {
-        byte[] plaintext;
-        MessageHeader? header;
         try
         {
+            byte[] plaintext;
+            MessageHeader? header;
             var envelope = JsonSerializer.Deserialize<EncryptedEnvelope>(payload, MessageJsonOptions);
             if (envelope is null)
             {
@@ -445,20 +445,20 @@ internal sealed class TrayAppContext : ApplicationContext
             }
             plaintext = CryptoBox.Decrypt(envelope, config.Password);
             header = JsonSerializer.Deserialize<MessageHeader>(plaintext, MessageJsonOptions);
+
+            switch (header?.Type)
+            {
+                case "clipboard":
+                    OnUi(() => HandleClipboardMessage(plaintext));
+                    break;
+                case "input":
+                    HandleInputMessage(plaintext);
+                    break;
+            }
         }
         catch
         {
             return;
-        }
-
-        switch (header?.Type)
-        {
-            case "clipboard":
-                OnUi(() => HandleClipboardMessage(plaintext));
-                break;
-            case "input":
-                HandleInputMessage(plaintext);
-                break;
         }
     }
 
@@ -738,13 +738,25 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void OnUi(Action action)
     {
+        void Run()
+        {
+            try
+            {
+                action();
+            }
+            catch
+            {
+                // Ignore stale or malformed network/UI callbacks.
+            }
+        }
+
         if (SynchronizationContext.Current == uiContext)
         {
-            action();
+            Run();
         }
         else
         {
-            uiContext.Post(_ => action(), null);
+            uiContext.Post(_ => Run(), null);
         }
     }
 }

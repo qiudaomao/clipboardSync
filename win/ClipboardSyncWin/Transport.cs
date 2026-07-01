@@ -167,7 +167,14 @@ internal sealed class ClientTransport : ISyncTransport
 
             if (result.MessageType == WebSocketMessageType.Text)
             {
-                MessageReceived?.Invoke(Encoding.UTF8.GetString(message.ToArray()));
+                try
+                {
+                    MessageReceived?.Invoke(Encoding.UTF8.GetString(message.ToArray()));
+                }
+                catch
+                {
+                    StatusChanged?.Invoke("message handler failed");
+                }
             }
         }
     }
@@ -244,7 +251,14 @@ internal sealed class ServerTransport : ISyncTransport
 
                 peer.TextReceived += async text =>
                 {
-                    MessageReceived?.Invoke(text);
+                    try
+                    {
+                        MessageReceived?.Invoke(text);
+                    }
+                    catch
+                    {
+                        StatusChanged?.Invoke("message handler failed");
+                    }
                     await BroadcastAsync(text, id).ConfigureAwait(false);
                 };
                 peer.Closed += () =>
