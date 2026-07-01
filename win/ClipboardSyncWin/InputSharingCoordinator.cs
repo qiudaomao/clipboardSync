@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -31,24 +32,27 @@ internal sealed class InputSharingCoordinator : IDisposable
     private static readonly TimeSpan RemoteMouseMoveInterval = TimeSpan.FromMilliseconds(8);
 
     private readonly string deviceId;
+    private readonly ScreenLayoutStore layoutStore;
     private readonly LowLevelProc mouseProc;
     private readonly LowLevelProc keyboardProc;
     private readonly object remoteMouseMoveLock = new();
     private AppConfig config = new();
     private SyncMode role = SyncMode.Client;
     private int peerCount;
-    private string? remoteDeviceId;
-    private ScreenMetrics? remoteScreen;
-    private bool? remoteInputEnabled;
-    private bool remoteActive;
+    private Dictionary<string, bool> deviceEnabled = [];
+    private Dictionary<string, string> deviceNames = [];
+    private string? activeScreenId;
+    private string? activeTargetDeviceId;
+    private ScreenEdge lastCrossedEdge = ScreenEdge.Right;
+    private PointF virtualCursor;
     private bool receivingRemote;
+    private string? receivingScreenId;
     private readonly HashSet<string> pressedModifierKeys = [];
     private readonly HashSet<string> remotePressedSourceModifierKeys = [];
     private readonly HashSet<string> remotePressedModifierKeys = [];
     private (double X, double Y)? pendingRemoteMouseMove;
     private System.Threading.Timer? pendingRemoteMouseMoveTimer;
     private DateTimeOffset lastRemoteMouseMoveAt = DateTimeOffset.MinValue;
-    private PointF remotePosition;
     private IntPtr mouseHook;
     private IntPtr keyboardHook;
     private Point localAnchor;
@@ -56,9 +60,10 @@ internal sealed class InputSharingCoordinator : IDisposable
     public event Action<InputMessage>? MessageReady;
     public event Action<string>? StatusChanged;
 
-    public InputSharingCoordinator(string deviceId)
+    public InputSharingCoordinator(string deviceId, ScreenLayoutStore layoutStore)
     {
         this.deviceId = deviceId;
+        this.layoutStore = layoutStore;
         mouseProc = MouseHookCallback;
         keyboardProc = KeyboardHookCallback;
     }
@@ -68,12 +73,14 @@ internal sealed class InputSharingCoordinator : IDisposable
         UpdateInputState();
     }
 
-    public void Update(AppConfig nextConfig, SyncMode nextRole, int nextPeerCount)
+    public void Update(AppConfig nextConfig, SyncMode nextRole, int nextPeerCount, Dictionary<string, bool> nextDeviceEnabled, Dictionary<string, string> nextDeviceNames)
     {
         var shouldReleaseRemoteModifiers = !ModifierMapsEqual(config.KeyboardModifierMap, nextConfig.KeyboardModifierMap);
         config = nextConfig.Clone();
         role = nextRole;
         peerCount = nextPeerCount;
+        deviceEnabled = nextDeviceEnabled;
+        deviceNames = nextDeviceNames;
         if (shouldReleaseRemoteModifiers)
         {
             ReleaseRemoteModifiers();
@@ -88,10 +95,9 @@ internal sealed class InputSharingCoordinator : IDisposable
             role,
             deviceName,
             deviceAddress,
-            CurrentScreenMetrics(),
+            CurrentScreens(),
             config.InputSharingEnabled && peerCount > 0,
-            EffectiveControlDeviceId,
-            config.PeerEdge);
+            EffectiveControlDeviceId);
     }
 
     public void Handle(InputMessage message)
@@ -103,12 +109,6 @@ internal sealed class InputSharingCoordinator : IDisposable
 
         if (message.Kind == "hello")
         {
-            if (ShouldUseAsRemotePeer(message))
-            {
-                remoteDeviceId = message.Origin;
-                remoteScreen = message.Screen;
-                remoteInputEnabled = message.Enabled;
-            }
             UpdateStatus();
             return;
         }
@@ -142,6 +142,10 @@ internal sealed class InputSharingCoordinator : IDisposable
     {
         ReleaseRemoteModifiers();
         SendPressedModifierKeyUps();
+        activeScreenId = null;
+        activeTargetDeviceId = null;
+        receivingRemote = false;
+        receivingScreenId = null;
         ClearPendingRemoteMouseMove();
         RemoveHooks();
     }
@@ -171,21 +175,8 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
     }
 
-    private bool ShouldUseAsRemotePeer(InputMessage message)
-    {
-        if (IsController)
-        {
-            if (role == SyncMode.Client)
-            {
-                return message.Role == "server";
-            }
-
-            return message.Role == "client" &&
-                (remoteDeviceId is null || remoteDeviceId == message.Origin || peerCount <= 1);
-        }
-
-        return message.Origin == EffectiveControlDeviceId;
-    }
+    private bool HasKnownRemotePeer => layoutStore.Entries.Values.Any(entry =>
+        entry.DeviceId != deviceId && deviceEnabled.TryGetValue(entry.DeviceId, out var enabled) && enabled);
 
     private void UpdateInputState()
     {
@@ -195,19 +186,17 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
         else
         {
-            if (remoteActive)
+            if (activeScreenId is not null)
             {
-                SendPressedModifierKeyUps();
-                SendCapture("end");
+                EndRemoteCapture(null);
             }
             RemoveHooks();
-            remoteActive = false;
-            pressedModifierKeys.Clear();
         }
         if (!CanReceiveRemoteInput)
         {
             ReleaseRemoteModifiers();
             receivingRemote = false;
+            receivingScreenId = null;
             ClearPendingRemoteMouseMove();
         }
         UpdateStatus();
@@ -219,13 +208,13 @@ internal sealed class InputSharingCoordinator : IDisposable
             ? AppText.Text("input.off")
             : peerCount == 0
                 ? AppText.Text("input.waitingPeer")
-                : IsController && remoteInputEnabled == false
-                    ? AppText.Text("input.peerDisabled")
-                    : IsController && (remoteScreen is null || remoteInputEnabled is null)
+                : IsController && !HasKnownRemotePeer
                     ? AppText.Text("input.waitingPeerScreen")
-                    : IsController
-                        ? AppText.Format("input.controllingPeer", AppText.EdgeTitle(config.PeerEdge))
-                        : AppText.Text("input.receiving");
+                    : IsController && activeTargetDeviceId is not null
+                        ? AppText.Format("input.controllingPeer", deviceNames.TryGetValue(activeTargetDeviceId, out var name) ? name : activeTargetDeviceId)
+                        : IsController
+                            ? AppText.Text("input.ready")
+                            : AppText.Text("input.receiving");
         StatusChanged?.Invoke(status);
     }
 
@@ -274,7 +263,7 @@ internal sealed class InputSharingCoordinator : IDisposable
             return HandleLocalMouseMove(data.pt) ? (IntPtr)1 : CallNextHookEx(mouseHook, nCode, wParam, lParam);
         }
 
-        if (!remoteActive)
+        if (activeScreenId is null)
         {
             return CallNextHookEx(mouseHook, nCode, wParam, lParam);
         }
@@ -302,7 +291,7 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode < HC_ACTION || !IsController || !remoteActive)
+        if (nCode < HC_ACTION || !IsController || activeScreenId is null)
         {
             return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
         }
@@ -326,147 +315,308 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private bool HandleLocalMouseMove(POINT point)
     {
-        if (!remoteActive)
+        if (activeScreenId is null)
         {
-            if (!ShouldStartCapture(point) || remoteScreen is null)
+            var current = CurrentLocalScreen(point);
+            if (current is null || !layoutStore.Entries.TryGetValue(current.Value.ScreenId, out var currentEntry))
             {
                 return false;
             }
 
-            remoteActive = true;
-            pressedModifierKeys.Clear();
-            remotePosition = EntryPosition(remoteScreen, config.PeerEdge, point);
+            var match = CrossingNeighbor(point, currentEntry, current.Value.RealRect);
+            if (match is null)
+            {
+                return false;
+            }
+
             localAnchor = CenterOfScreenContaining(point);
-            SendCapture("start");
-            SendMouseMove();
+            StartRemoteCapture(match.Value.Neighbor, match.Value.CanvasPoint, match.Value.Edge);
             SetCursorPos(localAnchor.X, localAnchor.Y);
-            UpdateStatus();
             return true;
         }
 
         var dx = point.X - localAnchor.X;
         var dy = point.Y - localAnchor.Y;
-        remotePosition.X += dx;
-        remotePosition.Y += dy;
-
-        if (ShouldEndCapture(dx, dy))
-        {
-            SendPressedModifierKeyUps();
-            SendCapture("end");
-            remoteActive = false;
-            pressedModifierKeys.Clear();
-            var returnPoint = ReturnPoint();
-            SetCursorPos(returnPoint.X, returnPoint.Y);
-            UpdateStatus();
-            return true;
-        }
-
-        if (remoteScreen is not null)
-        {
-            remotePosition.X = (float)Math.Clamp(remotePosition.X, 0, Math.Max(remoteScreen.Width - 1, 0));
-            remotePosition.Y = (float)Math.Clamp(remotePosition.Y, 0, Math.Max(remoteScreen.Height - 1, 0));
-        }
-
         if (dx != 0 || dy != 0)
         {
-            SendMouseMove();
+            virtualCursor.X += dx;
+            virtualCursor.Y += dy;
+            AdvanceRemoteCursor();
             SetCursorPos(localAnchor.X, localAnchor.Y);
         }
         return true;
     }
 
-    private bool ShouldStartCapture(POINT point)
+    /// Which of this machine's own monitors currently contains the cursor, alongside that
+    /// monitor's real screen-coordinate bounds.
+    private (string ScreenId, RectangleF RealRect)? CurrentLocalScreen(POINT point)
     {
-        if (remoteScreen is null || remoteInputEnabled != true)
+        var screens = Screen.AllScreens;
+        for (var index = 0; index < screens.Length; index++)
         {
-            return false;
+            var bounds = screens[index].Bounds;
+            if (bounds.Contains(point.X, point.Y))
+            {
+                return ($"{deviceId}#{index}", bounds);
+            }
         }
+        return null;
+    }
 
-        var bounds = DesktopBounds();
+    /// Local cursor is in real screen coordinates, relative to the current monitor's bounds. The
+    /// shared layout canvas uses the same top-left-origin, y-down convention, so translating is
+    /// just an offset by that monitor's own layout entry origin. The four-edge check is against
+    /// the full local desktop bounds (union of all of this machine's monitors) so an internal seam
+    /// between two of this machine's own screens never triggers a hop - only leaving the whole
+    /// local footprint does.
+    private (ScreenEdge Edge, ScreenLayoutEntry Neighbor, PointF CanvasPoint)? CrossingNeighbor(
+        POINT location,
+        ScreenLayoutEntry currentEntry,
+        RectangleF currentRealRect)
+    {
+        var unionBounds = DesktopBounds();
         const int threshold = 2;
-        return config.PeerEdge switch
+        var canvasPoint = new PointF(
+            (float)(currentEntry.X + (location.X - currentRealRect.Left)),
+            (float)(currentEntry.Y + (location.Y - currentRealRect.Top)));
+
+        var candidateEdges = new List<ScreenEdge>();
+        if (location.X >= unionBounds.Right - threshold) candidateEdges.Add(ScreenEdge.Right);
+        if (location.X <= unionBounds.Left + threshold) candidateEdges.Add(ScreenEdge.Left);
+        if (location.Y <= unionBounds.Top + threshold) candidateEdges.Add(ScreenEdge.Top);
+        if (location.Y >= unionBounds.Bottom - threshold) candidateEdges.Add(ScreenEdge.Bottom);
+
+        var ownScreenIds = layoutStore.Entries.Values.Where(e => e.DeviceId == deviceId).Select(e => e.ScreenId).ToHashSet();
+
+        foreach (var edge in candidateEdges)
         {
-            ScreenEdge.Left => point.X <= bounds.Left + threshold,
-            ScreenEdge.Top => point.Y <= bounds.Top + threshold,
-            ScreenEdge.Bottom => point.Y >= bounds.Bottom - threshold,
-            _ => point.X >= bounds.Right - threshold
-        };
+            var crossAxis = edge is ScreenEdge.Left or ScreenEdge.Right ? canvasPoint.Y : canvasPoint.X;
+            var match = Neighbor(edge, currentEntry.Rect, ownScreenIds, crossAxis);
+            if (match is not null)
+            {
+                return (edge, match, canvasPoint);
+            }
+        }
+        return null;
     }
 
-    private bool ShouldEndCapture(int dx, int dy)
+    /// Finds the closest enabled screen positioned beyond `edge` of `rect` whose span across the
+    /// perpendicular axis covers `crossAxis`. Tolerates a small gap so screens dragged in the
+    /// layout window don't need to touch pixel-perfectly. A candidate belonging to this device
+    /// itself is always eligible (used to detect "back to my own screen" hand-offs).
+    private ScreenLayoutEntry? Neighbor(ScreenEdge edge, RectangleF rect, HashSet<string> excludingScreenIds, float crossAxis)
     {
-        if (remoteScreen is null)
+        const float epsilon = 48f;
+        ScreenLayoutEntry? best = null;
+        var bestGap = float.MaxValue;
+
+        foreach (var entry in layoutStore.Entries.Values)
         {
-            return true;
+            if (excludingScreenIds.Contains(entry.ScreenId))
+            {
+                continue;
+            }
+            if (entry.DeviceId != deviceId && !(deviceEnabled.TryGetValue(entry.DeviceId, out var enabled) && enabled))
+            {
+                continue;
+            }
+
+            var candidate = entry.Rect;
+            float gap;
+            switch (edge)
+            {
+                case ScreenEdge.Right:
+                    if (!(candidate.Top < crossAxis && candidate.Bottom > crossAxis)) continue;
+                    gap = candidate.Left - rect.Right;
+                    break;
+                case ScreenEdge.Left:
+                    if (!(candidate.Top < crossAxis && candidate.Bottom > crossAxis)) continue;
+                    gap = rect.Left - candidate.Right;
+                    break;
+                case ScreenEdge.Bottom:
+                    if (!(candidate.Left < crossAxis && candidate.Right > crossAxis)) continue;
+                    gap = candidate.Top - rect.Bottom;
+                    break;
+                default:
+                    if (!(candidate.Left < crossAxis && candidate.Right > crossAxis)) continue;
+                    gap = rect.Top - candidate.Bottom;
+                    break;
+            }
+
+            if (gap < -epsilon || gap >= bestGap)
+            {
+                continue;
+            }
+            bestGap = gap;
+            best = entry;
+        }
+        return best;
+    }
+
+    private static ScreenEdge? ExitedEdge(PointF point, RectangleF rect)
+    {
+        var left = rect.Left - point.X;
+        var right = point.X - rect.Right;
+        var top = rect.Top - point.Y;
+        var bottom = point.Y - rect.Bottom;
+        var maxOverflow = Math.Max(Math.Max(left, right), Math.Max(top, bottom));
+        if (maxOverflow <= 0)
+        {
+            return null;
+        }
+        if (maxOverflow == left) return ScreenEdge.Left;
+        if (maxOverflow == right) return ScreenEdge.Right;
+        if (maxOverflow == top) return ScreenEdge.Top;
+        return ScreenEdge.Bottom;
+    }
+
+    private static PointF Clamp(PointF point, RectangleF rect)
+    {
+        return new PointF(
+            Math.Min(Math.Max(point.X, rect.Left), rect.Right),
+            Math.Min(Math.Max(point.Y, rect.Top), rect.Bottom));
+    }
+
+    private void StartRemoteCapture(ScreenLayoutEntry target, PointF canvasPoint, ScreenEdge edge)
+    {
+        virtualCursor = Clamp(canvasPoint, target.Rect);
+        activeScreenId = target.ScreenId;
+        activeTargetDeviceId = target.DeviceId;
+        lastCrossedEdge = edge;
+        SendCapture("start", target.DeviceId, target.ScreenId, edge, target);
+        SendMouseMove();
+        UpdateStatus();
+    }
+
+    /// Walks the shared layout each time the virtual cursor leaves the currently active screen's
+    /// rect, handing capture off to whichever neighbor covers that boundary (which may be another
+    /// screen on the same remote machine, or one of this controller's own screens, ending remote
+    /// capture) and sticking at the edge when there's none.
+    private void AdvanceRemoteCursor()
+    {
+        if (activeScreenId is null || activeTargetDeviceId is null || !layoutStore.Entries.TryGetValue(activeScreenId, out var activeEntry))
+        {
+            EndRemoteCapture(null);
+            return;
         }
 
-        return config.PeerEdge switch
+        var rect = activeEntry.Rect;
+        var edge = ExitedEdge(virtualCursor, rect);
+        if (edge is null)
         {
-            ScreenEdge.Left => remotePosition.X >= remoteScreen.Width - 1 && dx > 0,
-            ScreenEdge.Top => remotePosition.Y >= remoteScreen.Height - 1 && dy > 0,
-            ScreenEdge.Bottom => remotePosition.Y <= 0 && dy < 0,
-            _ => remotePosition.X <= 0 && dx < 0
-        };
+            SendMouseMove();
+            return;
+        }
+
+        var crossAxis = edge is ScreenEdge.Left or ScreenEdge.Right ? virtualCursor.Y : virtualCursor.X;
+        var match = Neighbor(edge.Value, rect, [activeScreenId], crossAxis);
+        if (match is null)
+        {
+            virtualCursor = Clamp(virtualCursor, rect);
+            SendMouseMove();
+            return;
+        }
+
+        lastCrossedEdge = edge.Value;
+
+        if (match.DeviceId == deviceId)
+        {
+            virtualCursor = Clamp(virtualCursor, match.Rect);
+            EndRemoteCapture(match.ScreenId);
+            return;
+        }
+
+        SendPressedModifierKeyUps();
+        SendCapture("end", activeTargetDeviceId, activeScreenId, edge.Value, activeEntry);
+        virtualCursor = Clamp(virtualCursor, match.Rect);
+        activeScreenId = match.ScreenId;
+        activeTargetDeviceId = match.DeviceId;
+        SendCapture("start", match.DeviceId, match.ScreenId, edge.Value, match);
+        SendMouseMove();
+        UpdateStatus();
     }
 
-    private PointF EntryPosition(ScreenMetrics screen, ScreenEdge edge, POINT point)
+    private void EndRemoteCapture(string? returnToScreenId)
     {
-        var bounds = DesktopBounds();
-        var normalizedX = (point.X - bounds.Left) / Math.Max((double)bounds.Width, 1);
-        var normalizedY = (point.Y - bounds.Top) / Math.Max((double)bounds.Height, 1);
-        return edge switch
+        if (activeScreenId is null || activeTargetDeviceId is null)
         {
-            ScreenEdge.Left => new PointF((float)Math.Max(screen.Width - 1, 0), (float)(normalizedY * screen.Height)),
-            ScreenEdge.Top => new PointF((float)(normalizedX * screen.Width), (float)Math.Max(screen.Height - 1, 0)),
-            ScreenEdge.Bottom => new PointF((float)(normalizedX * screen.Width), 0),
-            _ => new PointF(0, (float)(normalizedY * screen.Height))
-        };
+            return;
+        }
+        var endingScreenId = activeScreenId;
+        var endingTargetDeviceId = activeTargetDeviceId;
+        SendPressedModifierKeyUps();
+        pressedModifierKeys.Clear();
+        layoutStore.Entries.TryGetValue(endingScreenId, out var entry);
+        SendCapture("end", endingTargetDeviceId, endingScreenId, lastCrossedEdge, entry);
+        activeScreenId = null;
+        activeTargetDeviceId = null;
+        if (returnToScreenId is not null)
+        {
+            WarpLocalCursorToReturnPoint(returnToScreenId);
+        }
+        UpdateStatus();
     }
 
-    private Point ReturnPoint()
+    private void WarpLocalCursorToReturnPoint(string screenId)
     {
-        var bounds = DesktopBounds();
-        return config.PeerEdge switch
+        if (!layoutStore.Entries.TryGetValue(screenId, out var localEntry))
         {
-            ScreenEdge.Left => new Point(bounds.Left + 2, bounds.Top + (int)(bounds.Height * NormalizedRemoteY())),
-            ScreenEdge.Top => new Point(bounds.Left + (int)(bounds.Width * NormalizedRemoteX()), bounds.Top + 2),
-            ScreenEdge.Bottom => new Point(bounds.Left + (int)(bounds.Width * NormalizedRemoteX()), bounds.Bottom - 2),
-            _ => new Point(bounds.Right - 2, bounds.Top + (int)(bounds.Height * NormalizedRemoteY()))
-        };
+            return;
+        }
+        var realRect = LocalScreenRealRect(screenId) ?? DesktopBounds();
+        var rawX = realRect.Left + (virtualCursor.X - localEntry.X);
+        var rawY = realRect.Top + (virtualCursor.Y - localEntry.Y);
+        var clampedX = (int)Math.Min(Math.Max(rawX, realRect.Left), Math.Max(realRect.Right - 2, realRect.Left));
+        var clampedY = (int)Math.Min(Math.Max(rawY, realRect.Top), Math.Max(realRect.Bottom - 2, realRect.Top));
+        SetCursorPos(clampedX, clampedY);
     }
 
-    private void SendCapture(string action)
+    private void SendCapture(string action, string targetDeviceId, string screenId, ScreenEdge edge, ScreenLayoutEntry? entry)
     {
+        var normalized = entry is not null ? NormalizedPoint(entry) : (X: 0.0, Y: 0.0);
         MessageReady?.Invoke(new InputMessage
         {
             Type = "input",
             Origin = deviceId,
-            Target = remoteDeviceId,
+            Target = targetDeviceId,
             Kind = "capture",
             Capture = new InputCapturePayload
             {
                 Action = action,
-                Edge = InputSharingWire.EdgeValue(config.PeerEdge),
-                NormalizedX = NormalizedRemoteX(),
-                NormalizedY = NormalizedRemoteY()
+                Edge = InputSharingWire.EdgeValue(edge),
+                ScreenId = screenId,
+                NormalizedX = normalized.X,
+                NormalizedY = normalized.Y
             },
             SentAt = Now()
         });
     }
 
+    private (double X, double Y) NormalizedPoint(ScreenLayoutEntry entry)
+    {
+        var x = Math.Clamp((virtualCursor.X - entry.X) / Math.Max(entry.Width, 1), 0, 1);
+        var y = Math.Clamp((virtualCursor.Y - entry.Y) / Math.Max(entry.Height, 1), 0, 1);
+        return (x, y);
+    }
+
     private void SendMouseMove()
     {
+        if (activeTargetDeviceId is null || activeScreenId is null || !layoutStore.Entries.TryGetValue(activeScreenId, out var entry))
+        {
+            return;
+        }
+        var normalized = NormalizedPoint(entry);
         MessageReady?.Invoke(new InputMessage
         {
             Type = "input",
             Origin = deviceId,
-            Target = remoteDeviceId,
+            Target = activeTargetDeviceId,
             Kind = "mouseMove",
             Mouse = new InputMousePayload
             {
                 Action = "move",
-                NormalizedX = NormalizedRemoteX(),
-                NormalizedY = NormalizedRemoteY()
+                NormalizedX = normalized.X,
+                NormalizedY = normalized.Y
             },
             SentAt = Now()
         });
@@ -474,21 +624,26 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private void SendMouseButton(int message)
     {
+        if (activeTargetDeviceId is null || activeScreenId is null || !layoutStore.Entries.TryGetValue(activeScreenId, out var entry))
+        {
+            return;
+        }
         var button = message == WM_RBUTTONDOWN || message == WM_RBUTTONUP ? "right" :
             message == WM_MBUTTONDOWN || message == WM_MBUTTONUP ? "middle" : "left";
         var action = message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN || message == WM_MBUTTONDOWN ? "down" : "up";
+        var normalized = NormalizedPoint(entry);
         MessageReady?.Invoke(new InputMessage
         {
             Type = "input",
             Origin = deviceId,
-            Target = remoteDeviceId,
+            Target = activeTargetDeviceId,
             Kind = "mouseButton",
             Mouse = new InputMousePayload
             {
                 Action = action,
                 Button = button,
-                NormalizedX = NormalizedRemoteX(),
-                NormalizedY = NormalizedRemoteY()
+                NormalizedX = normalized.X,
+                NormalizedY = normalized.Y
             },
             SentAt = Now()
         });
@@ -496,17 +651,22 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private void SendMouseWheel(double deltaX, double deltaY)
     {
+        if (activeTargetDeviceId is null || activeScreenId is null || !layoutStore.Entries.TryGetValue(activeScreenId, out var entry))
+        {
+            return;
+        }
+        var normalized = NormalizedPoint(entry);
         MessageReady?.Invoke(new InputMessage
         {
             Type = "input",
             Origin = deviceId,
-            Target = remoteDeviceId,
+            Target = activeTargetDeviceId,
             Kind = "mouseWheel",
             Mouse = new InputMousePayload
             {
                 Action = "wheel",
-                NormalizedX = NormalizedRemoteX(),
-                NormalizedY = NormalizedRemoteY(),
+                NormalizedX = normalized.X,
+                NormalizedY = normalized.Y,
                 DeltaX = deltaX,
                 DeltaY = deltaY
             },
@@ -516,6 +676,10 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private void SendKey(Keys keyCode, string action)
     {
+        if (activeTargetDeviceId is null)
+        {
+            return;
+        }
         if (!WindowsKeyToCanonical.TryGetValue(keyCode, out var key))
         {
             return;
@@ -526,7 +690,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             Type = "input",
             Origin = deviceId,
-            Target = remoteDeviceId,
+            Target = activeTargetDeviceId,
             Kind = "key",
             Key = new InputKeyPayload
             {
@@ -540,6 +704,10 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private void SendPressedModifierKeyUps()
     {
+        if (activeTargetDeviceId is null)
+        {
+            return;
+        }
         foreach (var modifier in ModifierKeyOrder)
         {
             if (pressedModifierKeys.Contains(modifier))
@@ -548,7 +716,7 @@ internal sealed class InputSharingCoordinator : IDisposable
                 {
                     Type = "input",
                     Origin = deviceId,
-                    Target = remoteDeviceId,
+                    Target = activeTargetDeviceId,
                     Kind = "key",
                     Key = new InputKeyPayload
                     {
@@ -572,6 +740,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         if (capture.Action == "start")
         {
             receivingRemote = true;
+            receivingScreenId = capture.ScreenId;
             ClearPendingRemoteMouseMove();
             ReleaseRemoteModifiers();
             WarpTo(capture.NormalizedX, capture.NormalizedY);
@@ -581,6 +750,7 @@ internal sealed class InputSharingCoordinator : IDisposable
             ClearPendingRemoteMouseMove();
             ReleaseRemoteModifiers();
             receivingRemote = false;
+            receivingScreenId = null;
         }
     }
 
@@ -736,9 +906,15 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
     }
 
-    private static void WarpTo(double normalizedX, double normalizedY)
+    /// Maps a normalized 0...1 point onto the monitor we're currently receiving remote input for
+    /// (`receivingScreenId`), falling back to the whole local desktop union if that screen can't be
+    /// resolved (e.g. it was unplugged mid-session), then injects it as an absolute move across the
+    /// full virtual desktop (Windows' SendInput absolute coordinates are always virtual-desktop
+    /// relative, regardless of which monitor rect the target pixel point came from).
+    private void WarpTo(double normalizedX, double normalizedY)
     {
-        var point = PointFor(normalizedX, normalizedY);
+        var targetRect = (receivingScreenId is not null ? LocalScreenRealRect(receivingScreenId) : null) ?? DesktopBounds();
+        var point = PointFor(normalizedX, normalizedY, targetRect);
         var bounds = DesktopBounds();
         SendMouseInput(
             MouseFlags.Move | MouseFlags.Absolute | MouseFlags.VirtualDesk,
@@ -747,33 +923,51 @@ internal sealed class InputSharingCoordinator : IDisposable
             ToAbsoluteMouseCoordinate(point.Y, bounds.Top, bounds.Height));
     }
 
-    private static Point PointFor(double normalizedX, double normalizedY)
+    private static Point PointFor(double normalizedX, double normalizedY, Rectangle rect)
     {
-        var bounds = DesktopBounds();
         return new Point(
-            bounds.Left + (int)(Math.Clamp(normalizedX, 0, 1) * Math.Max(bounds.Width - 1, 0)),
-            bounds.Top + (int)(Math.Clamp(normalizedY, 0, 1) * Math.Max(bounds.Height - 1, 0)));
+            rect.Left + (int)(Math.Clamp(normalizedX, 0, 1) * Math.Max(rect.Width - 1, 0)),
+            rect.Top + (int)(Math.Clamp(normalizedY, 0, 1) * Math.Max(rect.Height - 1, 0)));
     }
 
-    private double NormalizedRemoteX()
+    internal static List<ScreenMetrics> CurrentScreens()
     {
-        return remoteScreen is null ? 0 : Math.Clamp(remotePosition.X / Math.Max(remoteScreen.Width, 1), 0, 1);
-    }
-
-    private double NormalizedRemoteY()
-    {
-        return remoteScreen is null ? 0 : Math.Clamp(remotePosition.Y / Math.Max(remoteScreen.Height, 1), 0, 1);
-    }
-
-    private static ScreenMetrics CurrentScreenMetrics()
-    {
-        var bounds = DesktopBounds();
-        return new ScreenMetrics { Width = bounds.Width, Height = bounds.Height, Scale = 1 };
+        return Screen.AllScreens.Select(screen => new ScreenMetrics
+        {
+            Width = screen.Bounds.Width,
+            Height = screen.Bounds.Height,
+            Scale = 1,
+            LocalX = screen.Bounds.X,
+            LocalY = screen.Bounds.Y
+        }).ToList();
     }
 
     private static Rectangle DesktopBounds()
     {
         return SystemInformation.VirtualScreen;
+    }
+
+    /// This machine's own monitor for `screenId` (parsed as `"<deviceId>#<index>"`), resolved
+    /// against the current live display list. Used both to warp the local cursor back onto the
+    /// right monitor when returning from remote capture, and to warp a remote peer's input onto the
+    /// right one of our own monitors when receiving.
+    private Rectangle? LocalScreenRealRect(string screenId)
+    {
+        var prefix = $"{deviceId}#";
+        if (!screenId.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+        if (!int.TryParse(screenId.AsSpan(prefix.Length), out var index))
+        {
+            return null;
+        }
+        var screens = Screen.AllScreens;
+        if (index < 0 || index >= screens.Length)
+        {
+            return null;
+        }
+        return screens[index].Bounds;
     }
 
     private static Point CenterOfScreenContaining(POINT point)

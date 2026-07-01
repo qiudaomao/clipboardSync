@@ -55,9 +55,9 @@ The Windows server also binds to the LAN and shows a `ws://LAN-IP:port/` address
 Text and image clipboard changes sync automatically. File clipboard contents are only sent from `Send Files from Clipboard` in the tray menu, with a 10 MB limit per file.
 The `History` submenu keeps the latest 10 clipboard items and can restore/resend an item.
 Set the same sync password on every device before starting. Clipboard payloads are encrypted with AES-GCM over the existing WebSocket connection.
-Input Sharing is off by default. Enable it from Configure or the tray menu, choose `Server -> Client` or `Client -> Server`, and set the peer position edge.
+Input Sharing is off by default. Enable it from Configure or the tray menu, choose `Server -> Client` or `Client -> Server`, and arrange each machine's screen in the `Screen Layout...` tray menu window (drag rects to match how they physically sit relative to each other).
 
 ## Notes
 
 The WebSocket endpoint is still plain `ws://`, but clipboard and input-sharing message bodies are encrypted and authenticated with the configured shared password.
-On macOS, the Screen Layout window represents every physical monitor of every machine as its own rect (not just one rect per machine) and arranges them in a shared 2D layout with no overlaps and no gaps between adjacent machines; a machine's own monitors are fixed relative to each other (that's the OS's arrangement, not user-adjustable here) and drag together as one group. Input sharing hops across whichever monitor is adjacent as the cursor crosses an edge, including hopping between two monitors on the same machine. Windows input sharing still targets a single configured peer edge and treats all of its own local monitors as one virtual desktop.
+On both macOS and Windows, the Screen Layout window represents every physical monitor of every machine as its own rect (not just one rect per machine) and arranges them in a shared 2D layout with no overlaps and no gaps between adjacent machines; a machine's own monitors are fixed relative to each other (that's the OS's arrangement, not user-adjustable here) and drag together as one group. Input sharing hops across whichever monitor is adjacent as the cursor crosses an edge, including hopping between two monitors on the same machine, whether that machine is macOS or Windows.

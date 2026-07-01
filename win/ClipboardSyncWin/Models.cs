@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -92,7 +93,6 @@ internal sealed class AppConfig
     public string Password { get; set; } = "";
     public bool InputSharingEnabled { get; set; }
     public string? ControlDeviceId { get; set; }
-    public ScreenEdge PeerEdge { get; set; } = ScreenEdge.Right;
     public bool ReverseMouseVerticalScroll { get; set; }
     public KeyboardModifierMap KeyboardModifierMap { get; set; } = new();
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
@@ -124,7 +124,6 @@ internal sealed class AppConfig
             Password = Password,
             InputSharingEnabled = InputSharingEnabled,
             ControlDeviceId = ControlDeviceId,
-            PeerEdge = PeerEdge,
             ReverseMouseVerticalScroll = ReverseMouseVerticalScroll,
             KeyboardModifierMap = modifierMap.Clone(),
             DeviceId = DeviceId
@@ -168,10 +167,10 @@ internal sealed class InputMessage
     public string? Role { get; set; }
     public string? DeviceName { get; set; }
     public string? DeviceAddress { get; set; }
-    public ScreenMetrics? Screen { get; set; }
+    public List<ScreenMetrics>? Screens { get; set; }
     public bool? Enabled { get; set; }
     public string? ControlDeviceId { get; set; }
-    public string? PeerEdge { get; set; }
+    public List<ScreenLayoutEntry>? Layout { get; set; }
     public InputCapturePayload? Capture { get; set; }
     public InputMousePayload? Mouse { get; set; }
     public InputKeyPayload? Key { get; set; }
@@ -182,10 +181,9 @@ internal sealed class InputMessage
         SyncMode role,
         string deviceName,
         string? deviceAddress,
-        ScreenMetrics screen,
+        List<ScreenMetrics> screens,
         bool enabled,
-        string? controlDeviceId,
-        ScreenEdge peerEdge)
+        string? controlDeviceId)
     {
         return new InputMessage
         {
@@ -195,26 +193,207 @@ internal sealed class InputMessage
             Role = role == SyncMode.Server ? "server" : "client",
             DeviceName = deviceName,
             DeviceAddress = deviceAddress,
-            Screen = screen,
+            Screens = screens,
             Enabled = enabled,
             ControlDeviceId = controlDeviceId,
-            PeerEdge = InputSharingWire.EdgeValue(peerEdge),
             SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
         };
     }
 }
 
+/// Describes one physical monitor. LocalX/LocalY are that monitor's origin within its own
+/// machine's local coordinate space (Windows: SystemInformation.VirtualScreen coordinates), used
+/// to preserve each machine's real monitor arrangement when first auto-placing its screens into
+/// the shared layout.
 internal sealed class ScreenMetrics
 {
     public double Width { get; set; }
     public double Height { get; set; }
     public double Scale { get; set; } = 1;
+    public double LocalX { get; set; }
+    public double LocalY { get; set; }
+}
+
+/// One physical monitor's rect in the shared layout canvas. ScreenId ("<deviceId>#<index>")
+/// identifies the individual monitor; DeviceId is the machine that owns it - several entries can
+/// share the same DeviceId when that machine has more than one screen.
+internal sealed class ScreenLayoutEntry
+{
+    public string ScreenId { get; set; } = "";
+    public string DeviceId { get; set; } = "";
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+
+    public RectangleF Rect => new((float)X, (float)Y, (float)Width, (float)Height);
+
+    public ScreenLayoutEntry Clone()
+    {
+        return new ScreenLayoutEntry { ScreenId = ScreenId, DeviceId = DeviceId, X = X, Y = Y, Width = Width, Height = Height };
+    }
+}
+
+internal sealed class ScreenLayoutStore
+{
+    private readonly Dictionary<string, ScreenLayoutEntry> entries;
+
+    public ScreenLayoutStore()
+    {
+        entries = Load();
+    }
+
+    public IReadOnlyDictionary<string, ScreenLayoutEntry> Entries => entries;
+
+    /// Merges a device's current monitor list into the store: updates sizes for known screens
+    /// (keeping any dragged position), places newly-seen screens next to their siblings (or to the
+    /// right of everything, for a brand-new device) while preserving their real relative
+    /// arrangement, and drops entries for monitors that disappeared (unplugged). Returns whether
+    /// anything changed.
+    public bool Merge(string deviceId, List<ScreenMetrics> screens)
+    {
+        var changed = false;
+
+        var priorScreenIds = entries.Values.Where(e => e.DeviceId == deviceId).Select(e => e.ScreenId).ToHashSet();
+        var nextScreenIds = Enumerable.Range(0, screens.Count).Select(i => $"{deviceId}#{i}").ToHashSet();
+        foreach (var staleId in priorScreenIds.Except(nextScreenIds))
+        {
+            entries.Remove(staleId);
+            changed = true;
+        }
+
+        var isNewDevice = priorScreenIds.Count == 0;
+        var groupOffsetX = isNewDevice ? entries.Values.Select(e => e.X + e.Width).DefaultIfEmpty(0).Max() : 0;
+        var localMinX = screens.Select(s => s.LocalX).DefaultIfEmpty(0).Min();
+        var localMinY = screens.Select(s => s.LocalY).DefaultIfEmpty(0).Min();
+
+        for (var index = 0; index < screens.Count; index++)
+        {
+            var screen = screens[index];
+            var screenId = $"{deviceId}#{index}";
+            if (entries.TryGetValue(screenId, out var existing))
+            {
+                if (existing.Width == screen.Width && existing.Height == screen.Height)
+                {
+                    continue;
+                }
+                entries[screenId] = new ScreenLayoutEntry { ScreenId = screenId, DeviceId = deviceId, X = existing.X, Y = existing.Y, Width = screen.Width, Height = screen.Height };
+                changed = true;
+                continue;
+            }
+
+            double x;
+            double y;
+            if (isNewDevice)
+            {
+                x = groupOffsetX + (screen.LocalX - localMinX);
+                y = screen.LocalY - localMinY;
+            }
+            else
+            {
+                var sibling = entries.Values.Where(e => e.DeviceId == deviceId).OrderByDescending(e => e.X).FirstOrDefault();
+                if (sibling is not null)
+                {
+                    x = sibling.X + sibling.Width;
+                    y = sibling.Y;
+                }
+                else
+                {
+                    x = entries.Values.Select(e => e.X + e.Width).DefaultIfEmpty(0).Max();
+                    y = 0;
+                }
+            }
+            entries[screenId] = new ScreenLayoutEntry { ScreenId = screenId, DeviceId = deviceId, X = x, Y = y, Width = screen.Width, Height = screen.Height };
+            changed = true;
+        }
+
+        if (changed)
+        {
+            Save();
+        }
+        return changed;
+    }
+
+    public void ApplySnapshot(List<ScreenLayoutEntry> snapshot)
+    {
+        entries.Clear();
+        foreach (var entry in snapshot)
+        {
+            entries[entry.ScreenId] = entry;
+        }
+        Save();
+    }
+
+    public void ApplyPositionUpdates(List<ScreenLayoutEntry> updates)
+    {
+        foreach (var update in updates)
+        {
+            if (!entries.TryGetValue(update.ScreenId, out var existing))
+            {
+                continue;
+            }
+            entries[update.ScreenId] = new ScreenLayoutEntry { ScreenId = update.ScreenId, DeviceId = existing.DeviceId, X = update.X, Y = update.Y, Width = existing.Width, Height = existing.Height };
+        }
+        Save();
+    }
+
+    public List<ScreenLayoutEntry> Snapshot()
+    {
+        return entries.Values.Select(e => e.Clone()).ToList();
+    }
+
+    private static string StorePath
+    {
+        get
+        {
+            var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            return Path.Combine(root, "ClipboardSync", "screenLayout.json");
+        }
+    }
+
+    private void Save()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(StorePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+            File.WriteAllText(StorePath, JsonSerializer.Serialize(Snapshot()));
+        }
+        catch
+        {
+            // Best effort; layout will just be rebuilt from the next round of hellos.
+        }
+    }
+
+    private static Dictionary<string, ScreenLayoutEntry> Load()
+    {
+        try
+        {
+            if (File.Exists(StorePath))
+            {
+                var list = JsonSerializer.Deserialize<List<ScreenLayoutEntry>>(File.ReadAllText(StorePath));
+                if (list is not null)
+                {
+                    return list.ToDictionary(e => e.ScreenId, e => e);
+                }
+            }
+        }
+        catch
+        {
+            // Fall through to an empty store.
+        }
+        return [];
+    }
 }
 
 internal sealed class InputCapturePayload
 {
     public string Action { get; set; } = "";
     public string Edge { get; set; } = "";
+    public string ScreenId { get; set; } = "";
     public double NormalizedX { get; set; }
     public double NormalizedY { get; set; }
 }

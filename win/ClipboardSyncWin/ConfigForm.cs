@@ -22,7 +22,6 @@ internal sealed class ConfigForm : Form
     };
     private readonly TextBox passwordBox = new() { UseSystemPasswordChar = true };
     private readonly CheckBox inputSharingBox = new() { AutoSize = true };
-    private readonly ComboBox peerEdgeBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly CheckBox reverseScrollBox = new() { AutoSize = true };
     private readonly ComboBox shiftModifierBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox controlModifierBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -59,20 +58,6 @@ internal sealed class ConfigForm : Form
         ConfigureModifierBox(controlModifierBox, Config.KeyboardModifierMap.Control);
         ConfigureModifierBox(altModifierBox, Config.KeyboardModifierMap.Alt);
         ConfigureModifierBox(metaModifierBox, Config.KeyboardModifierMap.Meta);
-        peerEdgeBox.Items.AddRange(new object[]
-        {
-            AppText.EdgeTitle(ScreenEdge.Right),
-            AppText.EdgeTitle(ScreenEdge.Left),
-            AppText.EdgeTitle(ScreenEdge.Top),
-            AppText.EdgeTitle(ScreenEdge.Bottom)
-        });
-        peerEdgeBox.SelectedIndex = Config.PeerEdge switch
-        {
-            ScreenEdge.Left => 1,
-            ScreenEdge.Top => 2,
-            ScreenEdge.Bottom => 3,
-            _ => 0
-        };
         inputSharingBox.CheckedChanged += (_, _) => UpdateInputSharingState();
         hostBox.TextChanged += (_, _) =>
         {
@@ -89,13 +74,12 @@ internal sealed class ConfigForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(12),
             ColumnCount = 2,
-            RowCount = 10
+            RowCount = 9
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
@@ -109,9 +93,8 @@ internal sealed class ConfigForm : Form
         AddRow(layout, 2, AppText.Text("settings.port"), portBox);
         AddRow(layout, 3, AppText.Text("settings.password"), passwordBox);
         AddRow(layout, 4, AppText.Text("settings.input"), inputSharingBox);
-        AddRow(layout, 5, AppText.Text("settings.peer"), peerEdgeBox);
-        AddRow(layout, 6, AppText.Text("settings.scroll"), reverseScrollBox);
-        AddRow(layout, 7, AppText.Text("settings.modifierKeys"), BuildModifierMapControl());
+        AddRow(layout, 5, AppText.Text("settings.scroll"), reverseScrollBox);
+        AddRow(layout, 6, AppText.Text("settings.modifierKeys"), BuildModifierMapControl());
 
         var buttons = new FlowLayoutPanel
         {
@@ -124,7 +107,7 @@ internal sealed class ConfigForm : Form
         okButton.Click += (_, _) => Save();
         buttons.Controls.Add(okButton);
         buttons.Controls.Add(cancelButton);
-        layout.Controls.Add(buttons, 0, 9);
+        layout.Controls.Add(buttons, 0, 8);
         layout.SetColumnSpan(buttons, 2);
 
         AcceptButton = okButton;
@@ -222,7 +205,6 @@ internal sealed class ConfigForm : Form
 
     private void UpdateInputSharingState()
     {
-        peerEdgeBox.Enabled = inputSharingBox.Checked;
         reverseScrollBox.Enabled = inputSharingBox.Checked;
         foreach (var box in ModifierBoxes)
         {
@@ -268,13 +250,6 @@ internal sealed class ConfigForm : Form
             Control = SelectedModifier(controlModifierBox, KeyboardModifier.Control),
             Alt = SelectedModifier(altModifierBox, KeyboardModifier.Alt),
             Meta = SelectedModifier(metaModifierBox, KeyboardModifier.Meta)
-        };
-        Config.PeerEdge = peerEdgeBox.SelectedIndex switch
-        {
-            1 => ScreenEdge.Left,
-            2 => ScreenEdge.Top,
-            3 => ScreenEdge.Bottom,
-            _ => ScreenEdge.Right
         };
         Config.Normalize();
         DialogResult = DialogResult.OK;

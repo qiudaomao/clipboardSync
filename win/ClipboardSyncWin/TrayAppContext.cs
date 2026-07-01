@@ -25,16 +25,17 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem inputStatusItem;
     private readonly ToolStripMenuItem inputSharingItem;
     private readonly ToolStripMenuItem controlDeviceItem;
-    private readonly Dictionary<ScreenEdge, ToolStripMenuItem> peerEdgeItems = [];
     private readonly Dictionary<string, InputDeviceMenuDevice> inputDevices = [];
     private readonly ToolStripMenuItem clientModeItem;
     private readonly ToolStripMenuItem serverModeItem;
     private readonly ClipboardMonitor clipboardMonitor;
+    private readonly ScreenLayoutStore screenLayoutStore = new();
     private readonly InputSharingCoordinator inputCoordinator;
     private readonly object inputCoordinatorLock = new();
     private readonly SynchronizationContext uiContext;
     private readonly Icon trayIcon;
     private readonly List<ClipboardHistoryEntry> history = [];
+    private ScreenLayoutForm? screenLayoutForm;
 
     private AppConfig config;
     private ISyncTransport? transport;
@@ -85,7 +86,7 @@ internal sealed class TrayAppContext : ApplicationContext
         clientModeItem = new ToolStripMenuItem(AppText.Text("menu.clientMode"), null, (_, _) => SetMode(SyncMode.Client));
         serverModeItem = new ToolStripMenuItem(AppText.Text("menu.serverMode"), null, (_, _) => SetMode(SyncMode.Server));
         trayIcon = LoadTrayIcon();
-        inputCoordinator = new InputSharingCoordinator(config.DeviceId);
+        inputCoordinator = new InputSharingCoordinator(config.DeviceId, screenLayoutStore);
 
         notifyIcon = new NotifyIcon
         {
@@ -105,6 +106,7 @@ internal sealed class TrayAppContext : ApplicationContext
         inputCoordinator.MessageReady += message => OnUi(() => PublishInput(message));
         inputCoordinator.StatusChanged += text => OnUi(() => inputStatusItem.Text = text);
         clipboardMonitor.Start();
+        RegisterLocalScreen();
         inputCoordinator.Start();
         UpdateInputCoordinator();
 
@@ -120,6 +122,7 @@ internal sealed class TrayAppContext : ApplicationContext
             clipboardMonitor.Dispose();
             notifyIcon.Dispose();
             trayIcon.Dispose();
+            screenLayoutForm?.Dispose();
         }
 
         base.Dispose(disposing);
@@ -137,7 +140,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(inputStatusItem);
         menu.Items.Add(inputSharingItem);
         menu.Items.Add(controlDeviceItem);
-        menu.Items.Add(BuildPeerEdgeMenu());
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.screenLayout"), null, (_, _) => ShowScreenLayout()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(clientModeItem);
         menu.Items.Add(serverModeItem);
@@ -149,23 +152,6 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.exit"), null, (_, _) => ExitThread()));
         return menu;
-    }
-
-    private ToolStripMenuItem BuildPeerEdgeMenu()
-    {
-        var menu = new ToolStripMenuItem(AppText.Text("menu.peerPosition"));
-        AddPeerEdgeItem(menu, ScreenEdge.Right);
-        AddPeerEdgeItem(menu, ScreenEdge.Left);
-        AddPeerEdgeItem(menu, ScreenEdge.Top);
-        AddPeerEdgeItem(menu, ScreenEdge.Bottom);
-        return menu;
-    }
-
-    private void AddPeerEdgeItem(ToolStripMenuItem menu, ScreenEdge edge)
-    {
-        var item = new ToolStripMenuItem(AppText.EdgeTitle(edge), null, (_, _) => SetPeerEdge(edge));
-        peerEdgeItems[edge] = item;
-        menu.DropDownItems.Add(item);
     }
 
     private static Icon LoadTrayIcon()
@@ -181,10 +167,6 @@ internal sealed class TrayAppContext : ApplicationContext
         serverModeItem.Checked = config.Mode == SyncMode.Server;
         inputSharingItem.Checked = config.InputSharingEnabled;
         RefreshControlDeviceMenu();
-        foreach (var item in peerEdgeItems)
-        {
-            item.Value.Checked = config.PeerEdge == item.Key;
-        }
         RefreshHistoryMenu();
     }
 
@@ -255,7 +237,155 @@ internal sealed class TrayAppContext : ApplicationContext
             InputEnabled = message.Enabled ?? existing?.InputEnabled,
             LastSeen = DateTimeOffset.UtcNow
         };
+
+        if (message.Screens is { } screens && screenLayoutStore.Merge(message.Origin, screens))
+        {
+            if (config.Mode == SyncMode.Server)
+            {
+                BroadcastLayout();
+            }
+            RefreshScreenLayoutFormIfVisible();
+        }
+
         UpdateMenu();
+    }
+
+    private Dictionary<string, bool> DeviceEnabledMap()
+    {
+        var map = new Dictionary<string, bool> { [config.DeviceId] = config.InputSharingEnabled };
+        foreach (var device in inputDevices.Values)
+        {
+            if (device.InputEnabled is { } enabled)
+            {
+                map[device.Id] = enabled;
+            }
+        }
+        return map;
+    }
+
+    private Dictionary<string, string> DeviceDisplayNames()
+    {
+        var names = new Dictionary<string, string> { [config.DeviceId] = Environment.MachineName };
+        foreach (var device in inputDevices.Values)
+        {
+            names[device.Id] = device.BaseTitle;
+        }
+        return names;
+    }
+
+    private void RegisterLocalScreen()
+    {
+        if (screenLayoutStore.Merge(config.DeviceId, InputSharingCoordinator.CurrentScreens()))
+        {
+            RefreshScreenLayoutFormIfVisible();
+        }
+    }
+
+    private void ShowScreenLayout()
+    {
+        RegisterLocalScreen();
+        var form = EnsureScreenLayoutForm();
+        form.UpdateLayout(screenLayoutStore.Snapshot(), config.DeviceId, DeviceDisplayNames());
+        if (!form.Visible)
+        {
+            form.Show();
+        }
+        form.Activate();
+    }
+
+    private ScreenLayoutForm EnsureScreenLayoutForm()
+    {
+        if (screenLayoutForm is null || screenLayoutForm.IsDisposed)
+        {
+            screenLayoutForm = new ScreenLayoutForm();
+            screenLayoutForm.LayoutChanged += entries => ApplyLocalLayoutChange(entries);
+        }
+        return screenLayoutForm;
+    }
+
+    private void RefreshScreenLayoutFormIfVisible()
+    {
+        if (screenLayoutForm is { IsDisposed: false, Visible: true })
+        {
+            screenLayoutForm.UpdateLayout(screenLayoutStore.Snapshot(), config.DeviceId, DeviceDisplayNames());
+        }
+    }
+
+    private void ApplyLocalLayoutChange(List<ScreenLayoutEntry> entries)
+    {
+        if (config.Mode == SyncMode.Server)
+        {
+            screenLayoutStore.ApplyPositionUpdates(entries);
+            BroadcastLayout();
+        }
+        else
+        {
+            SendLayoutRequest(entries);
+        }
+        UpdateInputCoordinator();
+    }
+
+    private void BroadcastLayout()
+    {
+        if (transport is null || string.IsNullOrEmpty(config.Password))
+        {
+            return;
+        }
+        PublishInput(new InputMessage
+        {
+            Type = "input",
+            Origin = config.DeviceId,
+            Kind = "layout",
+            Role = config.Mode == SyncMode.Server ? "server" : "client",
+            Layout = screenLayoutStore.Snapshot(),
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        });
+    }
+
+    private void SendLayoutRequest(List<ScreenLayoutEntry> entries)
+    {
+        if (transport is null || string.IsNullOrEmpty(config.Password))
+        {
+            return;
+        }
+        PublishInput(new InputMessage
+        {
+            Type = "input",
+            Origin = config.DeviceId,
+            Kind = "layout",
+            Role = config.Mode == SyncMode.Server ? "server" : "client",
+            Layout = entries,
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        });
+    }
+
+    private void HandleLayoutMessage(InputMessage message)
+    {
+        if (message.Layout is not { } layout)
+        {
+            return;
+        }
+
+        if (config.Mode == SyncMode.Server)
+        {
+            if (message.Role != "client")
+            {
+                return;
+            }
+            screenLayoutStore.ApplyPositionUpdates(layout);
+            BroadcastLayout();
+        }
+        else
+        {
+            if (message.Role != "server")
+            {
+                return;
+            }
+            screenLayoutStore.ApplySnapshot(layout);
+        }
+
+        RefreshScreenLayoutFormIfVisible();
+        UpdateInputCoordinator();
     }
 
     private void SetMode(SyncMode mode)
@@ -280,14 +410,6 @@ internal sealed class TrayAppContext : ApplicationContext
         SyncInputConfig();
     }
 
-    private void SetPeerEdge(ScreenEdge edge)
-    {
-        config.PeerEdge = edge;
-        ConfigStore.Save(config);
-        UpdateInputCoordinator();
-        SyncInputConfig();
-    }
-
     private void ShowConfiguration()
     {
         using var form = new ConfigForm(config);
@@ -303,9 +425,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
         var shouldRestartTransport = RequiresTransportRestart(previousConfig, nextConfig);
         var shouldSendHello = previousConfig.InputSharingEnabled != nextConfig.InputSharingEnabled;
-        var shouldSyncInputConfig =
-            previousConfig.ControlDeviceId != nextConfig.ControlDeviceId ||
-            previousConfig.PeerEdge != nextConfig.PeerEdge;
+        var shouldSyncInputConfig = previousConfig.ControlDeviceId != nextConfig.ControlDeviceId;
 
         config = nextConfig;
         ConfigStore.Save(config);
@@ -604,26 +724,17 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
+        if (message.Kind == "layout")
+        {
+            HandleLayoutMessage(message);
+            return;
+        }
+
         if (message.Kind == "hello" && config.Mode == SyncMode.Client && message.Role == "server")
         {
-            var changed = false;
-            if (message.PeerEdge is not null)
-            {
-                var edge = InputSharingWire.ParseEdge(message.PeerEdge);
-                if (config.PeerEdge != edge)
-                {
-                    config.PeerEdge = edge;
-                    changed = true;
-                }
-            }
             if (message.ControlDeviceId is not null && config.ControlDeviceId != message.ControlDeviceId)
             {
                 config.ControlDeviceId = message.ControlDeviceId;
-                changed = true;
-            }
-
-            if (changed)
-            {
                 ConfigStore.Save(config);
                 UpdateInputCoordinator();
             }
@@ -660,34 +771,21 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private bool ApplyInputConfig(InputMessage message)
     {
-        var changed = false;
-        if (message.ControlDeviceId is not null && config.ControlDeviceId != message.ControlDeviceId)
+        if (message.ControlDeviceId is null || config.ControlDeviceId == message.ControlDeviceId)
         {
-            config.ControlDeviceId = message.ControlDeviceId;
-            changed = true;
+            return false;
         }
-        if (message.PeerEdge is not null)
-        {
-            var edge = InputSharingWire.ParseEdge(message.PeerEdge);
-            if (config.PeerEdge != edge)
-            {
-                config.PeerEdge = edge;
-                changed = true;
-            }
-        }
-        if (changed)
-        {
-            ConfigStore.Save(config);
-            UpdateInputCoordinator();
-        }
-        return changed;
+        config.ControlDeviceId = message.ControlDeviceId;
+        ConfigStore.Save(config);
+        UpdateInputCoordinator();
+        return true;
     }
 
     private void UpdateInputCoordinator(bool sendHello = false)
     {
         lock (inputCoordinatorLock)
         {
-            inputCoordinator.Update(config, config.Mode, peerCount);
+            inputCoordinator.Update(config, config.Mode, peerCount, DeviceEnabledMap(), DeviceDisplayNames());
         }
         UpdateMenu();
         if (sendHello)
@@ -726,7 +824,6 @@ internal sealed class TrayAppContext : ApplicationContext
             DeviceName = Environment.MachineName,
             DeviceAddress = NetworkAddress.LocalLanIPv4Address(),
             ControlDeviceId = EffectiveControlDeviceId,
-            PeerEdge = InputSharingWire.EdgeValue(config.PeerEdge),
             SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
         });
     }
