@@ -7,7 +7,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let deviceId = DeviceIdentity.current
     private let jsonEncoder = JSONEncoder()
     private let jsonDecoder = JSONDecoder()
-    private lazy var inputCoordinator = InputSharingCoordinator(deviceId: deviceId)
+    private let screenLayoutStore = ScreenLayoutStore()
+    private lazy var inputCoordinator = InputSharingCoordinator(deviceId: deviceId, layoutStore: screenLayoutStore)
 
     private var config = AppConfig.load()
     private var transport: Transport?
@@ -26,7 +27,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var inputSharingItem = NSMenuItem()
     private var controlDeviceMenuItem = NSMenuItem(title: AppText.text("menu.controlDevice"), action: nil, keyEquivalent: "")
     private var controlDeviceMenu = NSMenu(title: AppText.text("menu.controlDevice"))
-    private var peerEdgeItems: [ScreenEdge: NSMenuItem] = [:]
     private var inputDevices: [String: InputDeviceMenuDevice] = [:]
     private var historyMenu = NSMenu(title: AppText.text("menu.clipboardHistory"))
     private var historyMenuItem = NSMenuItem(title: AppText.text("menu.clipboardHistory"), action: nil, keyEquivalent: "")
@@ -35,6 +35,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let controller = SettingsWindowController()
         controller.onSave = { [weak self] nextConfig in
             self?.applyConfig(nextConfig)
+        }
+        return controller
+    }()
+    private lazy var screenLayoutWindowController: ScreenLayoutWindowController = {
+        let controller = ScreenLayoutWindowController()
+        controller.onLayoutChanged = { [weak self] entries in
+            self?.applyLocalLayoutChange(entries)
         }
         return controller
     }()
@@ -94,6 +101,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         clipboard.start()
+        registerLocalScreen()
         inputCoordinator.start()
         updateInputCoordinator()
         restartTransport()
@@ -147,17 +155,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controlDeviceMenuItem.submenu = controlDeviceMenu
         menu.addItem(controlDeviceMenuItem)
 
-        let edgeMenu = NSMenu(title: AppText.text("menu.peerPosition"))
-        for edge in ScreenEdge.allCases {
-            let item = NSMenuItem(title: edge.title, action: #selector(setPeerEdge), keyEquivalent: "")
-            item.target = self
-            item.representedObject = edge.rawValue
-            edgeMenu.addItem(item)
-            peerEdgeItems[edge] = item
-        }
-        let edgeItem = NSMenuItem(title: AppText.text("menu.peerPosition"), action: nil, keyEquivalent: "")
-        edgeItem.submenu = edgeMenu
-        menu.addItem(edgeItem)
+        let screenLayoutItem = NSMenuItem(title: AppText.text("menu.screenLayout"), action: #selector(showScreenLayout), keyEquivalent: "")
+        screenLayoutItem.target = self
+        menu.addItem(screenLayoutItem)
         menu.addItem(NSMenuItem.separator())
 
         clientModeItem = NSMenuItem(title: AppText.text("menu.clientMode"), action: #selector(setClientMode), keyEquivalent: "")
@@ -216,9 +216,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         serverModeItem.state = config.mode == .server ? .on : .off
         inputSharingItem.state = config.inputSharingEnabled ? .on : .off
         refreshControlDeviceMenu()
-        for (edge, item) in peerEdgeItems {
-            item.state = config.peerEdge == edge ? .on : .off
-        }
         refreshHistoryMenu()
     }
 
@@ -286,7 +283,137 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             inputEnabled: message.enabled ?? existing?.inputEnabled,
             lastSeen: Date()
         )
+
+        if let screens = message.screens, screenLayoutStore.merge(deviceId: message.origin, screens: screens) {
+            if config.mode == .server {
+                broadcastLayout()
+            }
+            refreshScreenLayoutWindowIfVisible()
+        }
+
         updateMenu()
+    }
+
+    private var deviceEnabledMap: [String: Bool] {
+        var map: [String: Bool] = [deviceId: config.inputSharingEnabled]
+        for device in inputDevices.values {
+            if let inputEnabled = device.inputEnabled {
+                map[device.id] = inputEnabled
+            }
+        }
+        return map
+    }
+
+    private var deviceDisplayNames: [String: String] {
+        var names: [String: String] = [deviceId: DeviceIdentity.displayName]
+        for device in inputDevices.values {
+            names[device.id] = device.baseTitle
+        }
+        return names
+    }
+
+    private func registerLocalScreen() {
+        if screenLayoutStore.merge(deviceId: deviceId, screens: InputSharingCoordinator.currentScreens()) {
+            refreshScreenLayoutWindowIfVisible()
+        }
+    }
+
+    @objc private func showScreenLayout() {
+        registerLocalScreen()
+        screenLayoutWindowController.show(
+            entries: screenLayoutStore.snapshot(),
+            localDeviceId: deviceId,
+            deviceNames: deviceDisplayNames
+        )
+    }
+
+    private func refreshScreenLayoutWindowIfVisible() {
+        guard screenLayoutWindowController.window?.isVisible == true else {
+            return
+        }
+        screenLayoutWindowController.show(
+            entries: screenLayoutStore.snapshot(),
+            localDeviceId: deviceId,
+            deviceNames: deviceDisplayNames
+        )
+    }
+
+    private func applyLocalLayoutChange(_ entries: [ScreenLayoutEntry]) {
+        switch config.mode {
+        case .server:
+            screenLayoutStore.applyPositionUpdates(entries)
+            broadcastLayout()
+        case .client:
+            sendLayoutRequest(entries)
+        }
+        updateInputCoordinator()
+    }
+
+    private func broadcastLayout() {
+        guard transport != nil, !config.password.isEmpty else {
+            return
+        }
+        publishInput(InputMessage(
+            type: "input",
+            origin: deviceId,
+            target: nil,
+            kind: "layout",
+            role: config.mode.rawValue,
+            deviceName: nil,
+            deviceAddress: nil,
+            screens: nil,
+            enabled: nil,
+            controlDeviceId: nil,
+            layout: screenLayoutStore.snapshot(),
+            capture: nil,
+            mouse: nil,
+            key: nil,
+            sentAt: Date().timeIntervalSince1970
+        ))
+    }
+
+    private func sendLayoutRequest(_ entries: [ScreenLayoutEntry]) {
+        guard transport != nil, !config.password.isEmpty else {
+            return
+        }
+        publishInput(InputMessage(
+            type: "input",
+            origin: deviceId,
+            target: nil,
+            kind: "layout",
+            role: config.mode.rawValue,
+            deviceName: nil,
+            deviceAddress: nil,
+            screens: nil,
+            enabled: nil,
+            controlDeviceId: nil,
+            layout: entries,
+            capture: nil,
+            mouse: nil,
+            key: nil,
+            sentAt: Date().timeIntervalSince1970
+        ))
+    }
+
+    private func handleLayoutMessage(_ message: InputMessage) {
+        guard let layout = message.layout else {
+            return
+        }
+        switch config.mode {
+        case .server:
+            guard message.role == SyncMode.client.rawValue else {
+                return
+            }
+            screenLayoutStore.applyPositionUpdates(layout)
+            broadcastLayout()
+        case .client:
+            guard message.role == SyncMode.server.rawValue else {
+                return
+            }
+            screenLayoutStore.applySnapshot(layout)
+        }
+        refreshScreenLayoutWindowIfVisible()
+        updateInputCoordinator()
     }
 
     @objc private func setClientMode() {
@@ -336,19 +463,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         config.controlDeviceId = controlDeviceId
-        config.save()
-        updateInputCoordinator()
-        syncInputConfig()
-    }
-
-    @objc private func setPeerEdge(_ sender: NSMenuItem) {
-        guard
-            let rawValue = sender.representedObject as? String,
-            let edge = ScreenEdge(rawValue: rawValue)
-        else {
-            return
-        }
-        config.peerEdge = edge
         config.save()
         updateInputCoordinator()
         syncInputConfig()
@@ -419,7 +533,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func sharedInputConfigChanged(from previous: AppConfig, to next: AppConfig) -> Bool {
-        previous.controlDeviceId != next.controlDeviceId || previous.peerEdge != next.peerEdge
+        previous.controlDeviceId != next.controlDeviceId
     }
 
     private func restartTransport() {
@@ -587,17 +701,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        if message.kind == "layout" {
+            handleLayoutMessage(message)
+            return
+        }
+
         if message.kind == "hello", config.mode == .client, message.role == SyncMode.server.rawValue {
-            var changed = false
-            if let edge = message.peerEdge.flatMap(ScreenEdge.init(rawValue:)), config.peerEdge != edge {
-                config.peerEdge = edge
-                changed = true
-            }
             if let controlDeviceId = message.controlDeviceId, config.controlDeviceId != controlDeviceId {
                 config.controlDeviceId = controlDeviceId
-                changed = true
-            }
-            if changed {
                 config.save()
                 updateInputCoordinator()
             }
@@ -627,24 +738,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @discardableResult
     private func applyInputConfig(_ message: InputMessage) -> Bool {
-        var changed = false
-        if let controlDeviceId = message.controlDeviceId, config.controlDeviceId != controlDeviceId {
-            config.controlDeviceId = controlDeviceId
-            changed = true
+        guard let controlDeviceId = message.controlDeviceId, config.controlDeviceId != controlDeviceId else {
+            return false
         }
-        if let edge = message.peerEdge.flatMap(ScreenEdge.init(rawValue:)), config.peerEdge != edge {
-            config.peerEdge = edge
-            changed = true
-        }
-        if changed {
-            config.save()
-            updateInputCoordinator()
-        }
-        return changed
+        config.controlDeviceId = controlDeviceId
+        config.save()
+        updateInputCoordinator()
+        return true
     }
 
     private func updateInputCoordinator(sendHello: Bool = false) {
-        inputCoordinator.update(config: config, role: config.mode, peerCount: peerCount)
+        inputCoordinator.update(
+            config: config,
+            role: config.mode,
+            peerCount: peerCount,
+            deviceEnabled: deviceEnabledMap,
+            deviceNames: deviceDisplayNames
+        )
         updateMenu()
         if sendHello {
             sendInputHello()
@@ -673,10 +783,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             role: config.mode.rawValue,
             deviceName: DeviceIdentity.displayName,
             deviceAddress: DeviceIdentity.address,
-            screen: nil,
+            screens: nil,
             enabled: nil,
             controlDeviceId: effectiveControlDeviceId,
-            peerEdge: config.peerEdge.rawValue,
+            layout: nil,
             capture: nil,
             mouse: nil,
             key: nil,

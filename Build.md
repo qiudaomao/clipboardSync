@@ -40,7 +40,7 @@ In server mode the settings window shows the LAN WebSocket address, such as `ws:
 Text and image clipboard changes sync automatically. File clipboard contents are not sent by the poller; copy files in Finder, then click `Send Files from Clipboard` from the menu bar. Each file must be 10 MB or smaller.
 The `History` submenu keeps the latest 10 clipboard items and can restore/resend an item.
 Set the same sync password on every device before starting. Clipboard payloads are encrypted with AES-GCM over the existing WebSocket connection.
-Input Sharing is off by default. Enable it from Settings or the menu, choose `Server -> Client` or `Client -> Server`, and set the peer position edge. macOS needs Accessibility/Input Monitoring permission before keyboard and mouse sharing can run.
+Input Sharing is off by default. Enable it from Settings or the menu, choose `Server -> Client` or `Client -> Server`, and arrange each machine's screen in the `Screen Layout...` menu window (drag rects to match how they physically sit relative to each other). macOS needs Accessibility/Input Monitoring permission before keyboard and mouse sharing can run.
 
 The Swift Package in `mac/Package.swift` is kept as a lightweight compiler check, but the Xcode project is the native app bundle build.
 
@@ -60,4 +60,4 @@ Input Sharing is off by default. Enable it from Configure or the tray menu, choo
 ## Notes
 
 The WebSocket endpoint is still plain `ws://`, but clipboard and input-sharing message bodies are encrypted and authenticated with the configured shared password.
-Input sharing v1 supports one peer and treats all local monitors as one virtual desktop.
+On macOS, the Screen Layout window represents every physical monitor of every machine as its own rect (not just one rect per machine) and arranges them in a shared 2D layout with no overlaps and no gaps between adjacent machines; a machine's own monitors are fixed relative to each other (that's the OS's arrangement, not user-adjustable here) and drag together as one group. Input sharing hops across whichever monitor is adjacent as the cursor crosses an edge, including hopping between two monitors on the same machine. Windows input sharing still targets a single configured peer edge and treats all of its own local monitors as one virtual desktop.

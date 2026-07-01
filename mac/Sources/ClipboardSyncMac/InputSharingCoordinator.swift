@@ -8,15 +8,18 @@ final class InputSharingCoordinator {
     var onStatus: ((String) -> Void)?
 
     private let deviceId: String
+    private let layoutStore: ScreenLayoutStore
     private var role: SyncMode = .client
     private var config = AppConfig.defaults
     private var peerCount = 0
-    private var remoteDeviceId: String?
-    private var remoteScreen: ScreenMetrics?
-    private var remoteInputEnabled: Bool?
-    private var remoteActive = false
+    private var deviceEnabled: [String: Bool] = [:]
+    private var deviceNames: [String: String] = [:]
+    private var activeScreenId: String?
+    private var activeTargetDeviceId: String?
+    private var lastCrossedEdge: ScreenEdge = .right
+    private var virtualCursor = CGPoint.zero
     private var receivingRemote = false
-    private var remotePosition = CGPoint.zero
+    private var receivingScreenId: String?
     private var remotePressedMouseButtons: Set<String> = []
     private var remotePressedSourceModifierKeys: Set<String> = []
     private var remotePressedModifierKeys: Set<String> = []
@@ -30,8 +33,9 @@ final class InputSharingCoordinator {
     private var didRequestAccessibility = false
     private var didRequestInputMonitoring = false
 
-    init(deviceId: String) {
+    init(deviceId: String, layoutStore: ScreenLayoutStore) {
         self.deviceId = deviceId
+        self.layoutStore = layoutStore
     }
 
     func start() {
@@ -41,18 +45,22 @@ final class InputSharingCoordinator {
     func stop() {
         sendPressedModifierKeyUps()
         removeEventTap()
-        remoteActive = false
+        activeScreenId = nil
+        activeTargetDeviceId = nil
         receivingRemote = false
+        receivingScreenId = nil
         remotePressedMouseButtons.removeAll()
         cancelPendingMouseMove()
         releaseRemoteModifiers()
     }
 
-    func update(config: AppConfig, role: SyncMode, peerCount: Int) {
+    func update(config: AppConfig, role: SyncMode, peerCount: Int, deviceEnabled: [String: Bool], deviceNames: [String: String]) {
         let shouldReleaseRemoteModifiers = self.config.keyboardModifierMap != config.keyboardModifierMap
         self.config = config
         self.role = role
         self.peerCount = peerCount
+        self.deviceEnabled = deviceEnabled
+        self.deviceNames = deviceNames
         if shouldReleaseRemoteModifiers {
             releaseRemoteModifiers()
         }
@@ -65,10 +73,9 @@ final class InputSharingCoordinator {
             role: role,
             deviceName: deviceName,
             deviceAddress: deviceAddress,
-            screen: Self.currentScreenMetrics(),
+            screens: Self.currentScreens(),
             enabled: config.inputSharingEnabled && peerCount > 0,
-            controlDeviceId: effectiveControlDeviceId,
-            peerEdge: config.peerEdge
+            controlDeviceId: effectiveControlDeviceId
         )
     }
 
@@ -78,11 +85,6 @@ final class InputSharingCoordinator {
         }
 
         if message.kind == "hello" {
-            if shouldUseAsRemotePeer(message) {
-                remoteDeviceId = message.origin
-                remoteScreen = message.screen
-                remoteInputEnabled = message.enabled
-            }
             updateStatus()
             return
         }
@@ -125,15 +127,8 @@ final class InputSharingCoordinator {
         return effectiveControlDeviceId != deviceId
     }
 
-    private func shouldUseAsRemotePeer(_ message: InputMessage) -> Bool {
-        if isController {
-            if role == .client {
-                return message.role == SyncMode.server.rawValue
-            }
-            return message.role == SyncMode.client.rawValue &&
-                (remoteDeviceId == nil || remoteDeviceId == message.origin || peerCount <= 1)
-        }
-        return message.origin == effectiveControlDeviceId
+    private var hasKnownRemotePeer: Bool {
+        layoutStore.entries.values.contains { $0.deviceId != deviceId && deviceEnabled[$0.deviceId] == true }
     }
 
     private func updateInputState() {
@@ -144,12 +139,10 @@ final class InputSharingCoordinator {
         if isController, hasAccessibilityPermission, hasInputMonitoringPermission {
             ensureEventTap()
         } else {
-            if remoteActive {
-                sendPressedModifierKeyUps()
-                sendCapture(action: "end")
+            if activeScreenId != nil {
+                endRemoteCapture(returnToScreenId: nil)
             }
             removeEventTap()
-            remoteActive = false
             cancelPendingMouseMove()
         }
         updateStatus()
@@ -165,12 +158,12 @@ final class InputSharingCoordinator {
             status = AppText.text("input.grantAccessibility")
         } else if isController && !hasInputMonitoringPermission {
             status = AppText.text("input.grantInputMonitoring")
-        } else if isController && remoteInputEnabled == false {
-            status = AppText.text("input.peerDisabled")
-        } else if isController && (remoteScreen == nil || remoteInputEnabled == nil) {
+        } else if isController && !hasKnownRemotePeer {
             status = AppText.text("input.waitingPeerScreen")
+        } else if isController, let activeTargetDeviceId {
+            status = AppText.format("input.controllingPeer", deviceNames[activeTargetDeviceId] ?? activeTargetDeviceId)
         } else if isController {
-            status = AppText.format("input.controllingPeer", config.peerEdge.title)
+            status = AppText.text("input.ready")
         } else {
             status = AppText.text("input.receiving")
         }
@@ -260,27 +253,27 @@ final class InputSharingCoordinator {
         case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
             return handleLocalMouseMove(event)
         case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
-            guard remoteActive else {
+            guard activeScreenId != nil else {
                 return Unmanaged.passUnretained(event)
             }
             flushPendingMouseMove()
             sendMouseButton(type: type)
             return nil
         case .scrollWheel:
-            guard remoteActive else {
+            guard activeScreenId != nil else {
                 return Unmanaged.passUnretained(event)
             }
             flushPendingMouseMove()
             sendMouseWheel(event)
             return nil
         case .keyDown, .keyUp:
-            guard remoteActive else {
+            guard activeScreenId != nil else {
                 return Unmanaged.passUnretained(event)
             }
             sendKey(event, action: type == .keyDown ? "down" : "up")
             return nil
         case .flagsChanged:
-            guard remoteActive else {
+            guard activeScreenId != nil else {
                 return Unmanaged.passUnretained(event)
             }
             sendModifierChanges(event)
@@ -291,131 +284,237 @@ final class InputSharingCoordinator {
     }
 
     private func handleLocalMouseMove(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        if !remoteActive {
-            guard shouldStartCapture(at: event.location), let remoteScreen else {
+        if activeScreenId == nil {
+            guard
+                let current = currentLocalScreen(at: event.location),
+                let currentEntry = layoutStore.entries[current.screenId]
+            else {
                 return Unmanaged.passUnretained(event)
             }
-            remoteActive = true
-            remotePosition = entryPosition(on: remoteScreen, edge: config.peerEdge, location: event.location)
-            sendCapture(action: "start")
-            sendMouseMoveNow()
-            updateStatus()
+            guard let match = crossingNeighbor(
+                at: event.location,
+                currentEntry: currentEntry,
+                currentRealRect: current.realRect
+            ) else {
+                return Unmanaged.passUnretained(event)
+            }
+            startRemoteCapture(target: match.neighbor, canvasPoint: match.canvasPoint, edge: match.edge)
             return nil
         }
 
         let dx = event.getDoubleValueField(.mouseEventDeltaX)
         let dy = event.getDoubleValueField(.mouseEventDeltaY)
-        remotePosition.x += dx
-        remotePosition.y += dy
+        virtualCursor.x += dx
+        virtualCursor.y += dy
 
-        if shouldEndCapture(deltaX: dx, deltaY: dy) {
-            cancelPendingMouseMove()
-            sendPressedModifierKeyUps()
-            sendCapture(action: "end")
-            remoteActive = false
-            warpLocalCursorToReturnPoint()
-            updateStatus()
-            return nil
-        }
-
-        if let remoteScreen {
-            remotePosition.x = min(max(remotePosition.x, 0), max(remoteScreen.width - 1, 0))
-            remotePosition.y = min(max(remotePosition.y, 0), max(remoteScreen.height - 1, 0))
-        }
-        queueMouseMove()
+        advanceRemoteCursor()
         return nil
     }
 
-    private func shouldStartCapture(at location: CGPoint) -> Bool {
-        guard remoteScreen != nil, remoteInputEnabled == true else {
-            return false
+    /// Which of this machine's own monitors currently contains the cursor, alongside that
+    /// monitor's real Quartz rect.
+    private func currentLocalScreen(at location: CGPoint) -> (screenId: String, realRect: CGRect)? {
+        for (index, displayId) in Self.activeDisplayIds().enumerated() {
+            let rect = CGDisplayBounds(displayId)
+            if rect.contains(location) {
+                return ("\(deviceId)#\(index)", rect)
+            }
         }
-        let bounds = Self.desktopBounds()
+        return nil
+    }
+
+    /// Local cursor is in Quartz global coordinates, relative to the current monitor's real rect.
+    /// The shared layout canvas uses the same top-left-origin, y-down convention, so translating
+    /// is just an offset by that monitor's own layout entry origin. The four-edge check is against
+    /// the full local desktop bounds (union of all of this machine's monitors) so an internal seam
+    /// between two of this machine's own screens never triggers a hop — only leaving the whole
+    /// local footprint does.
+    private func crossingNeighbor(
+        at location: CGPoint,
+        currentEntry: ScreenLayoutEntry,
+        currentRealRect: CGRect
+    ) -> (edge: ScreenEdge, neighbor: ScreenLayoutEntry, canvasPoint: CGPoint)? {
+        let unionBounds = Self.desktopBounds()
         let threshold = 2.0
-        switch config.peerEdge {
-        case .right:
-            return Double(location.x) >= Double(bounds.maxX) - threshold
-        case .left:
-            return Double(location.x) <= Double(bounds.minX) + threshold
-        case .top:
-            return Double(location.y) <= Double(bounds.minY) + threshold
-        case .bottom:
-            return Double(location.y) >= Double(bounds.maxY) - threshold
+        let canvasPoint = CGPoint(
+            x: currentEntry.x + (location.x - currentRealRect.minX),
+            y: currentEntry.y + (location.y - currentRealRect.minY)
+        )
+
+        var candidateEdges: [ScreenEdge] = []
+        if Double(location.x) >= Double(unionBounds.maxX) - threshold { candidateEdges.append(.right) }
+        if Double(location.x) <= Double(unionBounds.minX) + threshold { candidateEdges.append(.left) }
+        if Double(location.y) <= Double(unionBounds.minY) + threshold { candidateEdges.append(.top) }
+        if Double(location.y) >= Double(unionBounds.maxY) - threshold { candidateEdges.append(.bottom) }
+
+        let ownScreenIds = Set(layoutStore.entries.values.filter { $0.deviceId == deviceId }.map(\.screenId))
+
+        for edge in candidateEdges {
+            let crossAxis = (edge == .left || edge == .right) ? canvasPoint.y : canvasPoint.x
+            if let match = neighbor(beyond: edge, of: currentEntry.rect, excludingScreenIds: ownScreenIds, crossAxis: crossAxis) {
+                return (edge, match, canvasPoint)
+            }
         }
+        return nil
     }
 
-    private func shouldEndCapture(deltaX: Double, deltaY: Double) -> Bool {
-        guard let remoteScreen else {
-            return true
+    /// Finds the closest enabled screen positioned beyond `edge` of `rect` whose span across the
+    /// perpendicular axis covers `crossAxis`. Tolerates a small gap so screens dragged in the
+    /// layout window don't need to touch pixel-perfectly. A candidate belonging to this device
+    /// itself is always eligible (used to detect "back to my own screen" hand-offs).
+    private func neighbor(beyond edge: ScreenEdge, of rect: CGRect, excludingScreenIds: Set<String>, crossAxis: Double) -> ScreenLayoutEntry? {
+        let epsilon = 48.0
+        var best: ScreenLayoutEntry?
+        var bestGap = Double.greatestFiniteMagnitude
+
+        for entry in layoutStore.entries.values where !excludingScreenIds.contains(entry.screenId) {
+            guard entry.deviceId == deviceId || deviceEnabled[entry.deviceId] == true else {
+                continue
+            }
+            let candidate = entry.rect
+            let gap: Double
+            switch edge {
+            case .right:
+                guard candidate.maxY > crossAxis, candidate.minY < crossAxis else { continue }
+                gap = candidate.minX - rect.maxX
+            case .left:
+                guard candidate.maxY > crossAxis, candidate.minY < crossAxis else { continue }
+                gap = rect.minX - candidate.maxX
+            case .bottom:
+                guard candidate.maxX > crossAxis, candidate.minX < crossAxis else { continue }
+                gap = candidate.minY - rect.maxY
+            case .top:
+                guard candidate.maxX > crossAxis, candidate.minX < crossAxis else { continue }
+                gap = rect.minY - candidate.maxY
+            }
+            guard gap >= -epsilon, gap < bestGap else { continue }
+            bestGap = gap
+            best = entry
         }
-        switch config.peerEdge {
-        case .right:
-            return remotePosition.x <= 0 && deltaX < 0
-        case .left:
-            return remotePosition.x >= remoteScreen.width - 1 && deltaX > 0
-        case .top:
-            return remotePosition.y >= remoteScreen.height - 1 && deltaY > 0
-        case .bottom:
-            return remotePosition.y <= 0 && deltaY < 0
-        }
+        return best
     }
 
-    private func entryPosition(on screen: ScreenMetrics, edge: ScreenEdge, location: CGPoint) -> CGPoint {
-        let bounds = Self.desktopBounds()
-        let normalizedX = Double(location.x - bounds.minX) / max(Double(bounds.width), 1)
-        let normalizedY = Double(location.y - bounds.minY) / max(Double(bounds.height), 1)
-        switch edge {
-        case .right:
-            return CGPoint(x: 0, y: normalizedY * screen.height)
-        case .left:
-            return CGPoint(x: max(screen.width - 1, 0), y: normalizedY * screen.height)
-        case .top:
-            return CGPoint(x: normalizedX * screen.width, y: max(screen.height - 1, 0))
-        case .bottom:
-            return CGPoint(x: normalizedX * screen.width, y: 0)
+    private func exitedEdge(of point: CGPoint, rect: CGRect) -> ScreenEdge? {
+        let left = rect.minX - point.x
+        let right = point.x - rect.maxX
+        let top = rect.minY - point.y
+        let bottom = point.y - rect.maxY
+        let maxOverflow = max(max(left, right), max(top, bottom))
+        guard maxOverflow > 0 else {
+            return nil
         }
+        if maxOverflow == left { return .left }
+        if maxOverflow == right { return .right }
+        if maxOverflow == top { return .top }
+        return .bottom
     }
 
-    private func warpLocalCursorToReturnPoint() {
-        let bounds = Self.desktopBounds()
-        let localX: CGFloat
-        let localY: CGFloat
-        switch config.peerEdge {
-        case .right:
-            localX = bounds.maxX - 2
-            localY = bounds.minY + bounds.height * normalizedRemoteY()
-        case .left:
-            localX = bounds.minX + 2
-            localY = bounds.minY + bounds.height * normalizedRemoteY()
-        case .top:
-            localX = bounds.minX + bounds.width * normalizedRemoteX()
-            localY = bounds.minY + 2
-        case .bottom:
-            localX = bounds.minX + bounds.width * normalizedRemoteX()
-            localY = bounds.maxY - 2
+    private func clamp(_ point: CGPoint, to rect: CGRect) -> CGPoint {
+        CGPoint(x: min(max(point.x, rect.minX), rect.maxX), y: min(max(point.y, rect.minY), rect.maxY))
+    }
+
+    private func startRemoteCapture(target: ScreenLayoutEntry, canvasPoint: CGPoint, edge: ScreenEdge) {
+        virtualCursor = clamp(canvasPoint, to: target.rect)
+        activeScreenId = target.screenId
+        activeTargetDeviceId = target.deviceId
+        lastCrossedEdge = edge
+        sendCapture(action: "start", targetDeviceId: target.deviceId, screenId: target.screenId, edge: edge, entry: target)
+        sendMouseMoveNow()
+        updateStatus()
+    }
+
+    /// Walks the shared layout each time the virtual cursor leaves the currently active screen's
+    /// rect, handing capture off to whichever neighbor covers that boundary (which may be another
+    /// screen on the same remote machine, or one of this controller's own screens, ending remote
+    /// capture) and sticking at the edge when there's none.
+    private func advanceRemoteCursor() {
+        guard let activeScreenId, let activeTargetDeviceId, let activeEntry = layoutStore.entries[activeScreenId] else {
+            endRemoteCapture(returnToScreenId: nil)
+            return
         }
-        CGWarpMouseCursorPosition(CGPoint(x: localX, y: localY))
+
+        let rect = activeEntry.rect
+        guard let edge = exitedEdge(of: virtualCursor, rect: rect) else {
+            queueMouseMove()
+            return
+        }
+
+        let crossAxis = (edge == .left || edge == .right) ? virtualCursor.y : virtualCursor.x
+        guard let match = neighbor(beyond: edge, of: rect, excludingScreenIds: [activeScreenId], crossAxis: crossAxis) else {
+            virtualCursor = clamp(virtualCursor, to: rect)
+            queueMouseMove()
+            return
+        }
+
+        lastCrossedEdge = edge
+
+        if match.deviceId == deviceId {
+            virtualCursor = clamp(virtualCursor, to: match.rect)
+            endRemoteCapture(returnToScreenId: match.screenId)
+            return
+        }
+
+        cancelPendingMouseMove()
+        sendPressedModifierKeyUps()
+        sendCapture(action: "end", targetDeviceId: activeTargetDeviceId, screenId: activeScreenId, edge: edge, entry: activeEntry)
+        virtualCursor = clamp(virtualCursor, to: match.rect)
+        self.activeScreenId = match.screenId
+        self.activeTargetDeviceId = match.deviceId
+        sendCapture(action: "start", targetDeviceId: match.deviceId, screenId: match.screenId, edge: edge, entry: match)
+        sendMouseMoveNow()
+        updateStatus()
+    }
+
+    private func endRemoteCapture(returnToScreenId: String?) {
+        guard let currentScreenId = activeScreenId, let currentTargetDeviceId = activeTargetDeviceId else {
+            return
+        }
+        cancelPendingMouseMove()
+        sendPressedModifierKeyUps()
+        sendCapture(action: "end", targetDeviceId: currentTargetDeviceId, screenId: currentScreenId, edge: lastCrossedEdge, entry: layoutStore.entries[currentScreenId])
+        activeScreenId = nil
+        activeTargetDeviceId = nil
+        if let returnToScreenId {
+            warpLocalCursorToReturnPoint(screenId: returnToScreenId)
+        }
+        updateStatus()
+    }
+
+    private func warpLocalCursorToReturnPoint(screenId: String) {
+        guard let localEntry = layoutStore.entries[screenId] else {
+            return
+        }
+        let realRect = localScreenRealRect(forScreenId: screenId) ?? Self.desktopBounds()
+        let raw = CGPoint(
+            x: realRect.minX + (virtualCursor.x - localEntry.x),
+            y: realRect.minY + (virtualCursor.y - localEntry.y)
+        )
+        let clampedX = min(max(raw.x, realRect.minX), max(realRect.maxX - 2, realRect.minX))
+        let clampedY = min(max(raw.y, realRect.minY), max(realRect.maxY - 2, realRect.minY))
+        CGWarpMouseCursorPosition(CGPoint(x: clampedX, y: clampedY))
         suppressUntil = Date().addingTimeInterval(0.08)
     }
 
-    private func sendCapture(action: String) {
+    private func sendCapture(action: String, targetDeviceId: String, screenId: String, edge: ScreenEdge, entry: ScreenLayoutEntry?) {
+        let normalized = entry.map(normalizedPoint) ?? (x: 0, y: 0)
         onMessage?(InputMessage(
             type: "input",
             origin: deviceId,
-            target: remoteDeviceId,
+            target: targetDeviceId,
             kind: "capture",
             role: nil,
             deviceName: nil,
             deviceAddress: nil,
-            screen: nil,
+            screens: nil,
             enabled: nil,
             controlDeviceId: nil,
-            peerEdge: nil,
+            layout: nil,
             capture: InputCapturePayload(
                 action: action,
-                edge: config.peerEdge.rawValue,
-                normalizedX: normalizedRemoteX(),
-                normalizedY: normalizedRemoteY()
+                edge: edge.rawValue,
+                screenId: screenId,
+                normalizedX: normalized.x,
+                normalizedY: normalized.y
             ),
             mouse: nil,
             key: nil,
@@ -423,25 +522,35 @@ final class InputSharingCoordinator {
         ))
     }
 
+    private func normalizedPoint(in entry: ScreenLayoutEntry) -> (x: Double, y: Double) {
+        let x = min(max((virtualCursor.x - entry.x) / max(entry.width, 1), 0), 1)
+        let y = min(max((virtualCursor.y - entry.y) / max(entry.height, 1), 0), 1)
+        return (x, y)
+    }
+
     private func sendMouseMove() {
+        guard let target = activeTargetDeviceId, let screenId = activeScreenId, let entry = layoutStore.entries[screenId] else {
+            return
+        }
+        let normalized = normalizedPoint(in: entry)
         onMessage?(InputMessage(
             type: "input",
             origin: deviceId,
-            target: remoteDeviceId,
+            target: target,
             kind: "mouseMove",
             role: nil,
             deviceName: nil,
             deviceAddress: nil,
-            screen: nil,
+            screens: nil,
             enabled: nil,
             controlDeviceId: nil,
-            peerEdge: nil,
+            layout: nil,
             capture: nil,
             mouse: InputMousePayload(
                 action: "move",
                 button: nil,
-                normalizedX: normalizedRemoteX(),
-                normalizedY: normalizedRemoteY(),
+                normalizedX: normalized.x,
+                normalizedY: normalized.y,
                 deltaX: nil,
                 deltaY: nil
             ),
@@ -469,7 +578,7 @@ final class InputSharingCoordinator {
                 return
             }
             self.pendingMouseMoveTimer = nil
-            guard self.remoteActive else {
+            guard self.activeScreenId != nil else {
                 return
             }
             self.sendMouseMoveNow()
@@ -497,6 +606,9 @@ final class InputSharingCoordinator {
     }
 
     private func sendMouseButton(type: CGEventType) {
+        guard let target = activeTargetDeviceId, let screenId = activeScreenId, let entry = layoutStore.entries[screenId] else {
+            return
+        }
         let action = type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown ? "down" : "up"
         let button: String
         switch type {
@@ -507,24 +619,25 @@ final class InputSharingCoordinator {
         default:
             button = "left"
         }
+        let normalized = normalizedPoint(in: entry)
         onMessage?(InputMessage(
             type: "input",
             origin: deviceId,
-            target: remoteDeviceId,
+            target: target,
             kind: "mouseButton",
             role: nil,
             deviceName: nil,
             deviceAddress: nil,
-            screen: nil,
+            screens: nil,
             enabled: nil,
             controlDeviceId: nil,
-            peerEdge: nil,
+            layout: nil,
             capture: nil,
             mouse: InputMousePayload(
                 action: action,
                 button: button,
-                normalizedX: normalizedRemoteX(),
-                normalizedY: normalizedRemoteY(),
+                normalizedX: normalized.x,
+                normalizedY: normalized.y,
                 deltaX: nil,
                 deltaY: nil
             ),
@@ -534,24 +647,28 @@ final class InputSharingCoordinator {
     }
 
     private func sendMouseWheel(_ event: CGEvent) {
+        guard let target = activeTargetDeviceId, let screenId = activeScreenId, let entry = layoutStore.entries[screenId] else {
+            return
+        }
+        let normalized = normalizedPoint(in: entry)
         onMessage?(InputMessage(
             type: "input",
             origin: deviceId,
-            target: remoteDeviceId,
+            target: target,
             kind: "mouseWheel",
             role: nil,
             deviceName: nil,
             deviceAddress: nil,
-            screen: nil,
+            screens: nil,
             enabled: nil,
             controlDeviceId: nil,
-            peerEdge: nil,
+            layout: nil,
             capture: nil,
             mouse: InputMousePayload(
                 action: "wheel",
                 button: nil,
-                normalizedX: normalizedRemoteX(),
-                normalizedY: normalizedRemoteY(),
+                normalizedX: normalized.x,
+                normalizedY: normalized.y,
                 deltaX: event.getDoubleValueField(.scrollWheelEventDeltaAxis2),
                 deltaY: event.getDoubleValueField(.scrollWheelEventDeltaAxis1)
             ),
@@ -590,18 +707,21 @@ final class InputSharingCoordinator {
     }
 
     private func sendKeyPayload(key: String, action: String, modifiers: [String]) {
+        guard let target = activeTargetDeviceId else {
+            return
+        }
         onMessage?(InputMessage(
             type: "input",
             origin: deviceId,
-            target: remoteDeviceId,
+            target: target,
             kind: "key",
             role: nil,
             deviceName: nil,
             deviceAddress: nil,
-            screen: nil,
+            screens: nil,
             enabled: nil,
             controlDeviceId: nil,
-            peerEdge: nil,
+            layout: nil,
             capture: nil,
             mouse: nil,
             key: InputKeyPayload(action: action, key: key, modifiers: modifiers),
@@ -615,12 +735,14 @@ final class InputSharingCoordinator {
         }
         if capture.action == "start" {
             receivingRemote = true
+            receivingScreenId = capture.screenId
             remotePressedMouseButtons.removeAll()
             releaseRemoteModifiers()
             warpTo(normalizedX: capture.normalizedX, normalizedY: capture.normalizedY)
         } else if capture.action == "end" {
             releaseRemoteModifiers()
             receivingRemote = false
+            receivingScreenId = nil
             remotePressedMouseButtons.removeAll()
         }
     }
@@ -790,11 +912,14 @@ final class InputSharingCoordinator {
         suppressUntil = Date().addingTimeInterval(0.08)
     }
 
+    /// Maps a normalized 0...1 point onto the monitor we're currently receiving remote input for
+    /// (`receivingScreenId`), falling back to the whole local desktop union if that screen can't
+    /// be resolved (e.g. it was unplugged mid-session).
     private func pointFor(normalizedX: Double, normalizedY: Double) -> CGPoint {
-        let bounds = Self.desktopBounds()
+        let rect = receivingScreenId.flatMap(localScreenRealRect) ?? Self.desktopBounds()
         return CGPoint(
-            x: bounds.minX + CGFloat(min(max(normalizedX, 0), 1)) * bounds.width,
-            y: bounds.minY + CGFloat(min(max(normalizedY, 0), 1)) * bounds.height
+            x: rect.minX + CGFloat(min(max(normalizedX, 0), 1)) * rect.width,
+            y: rect.minY + CGFloat(min(max(normalizedY, 0), 1)) * rect.height
         )
     }
 
@@ -815,33 +940,39 @@ final class InputSharingCoordinator {
         CGEvent(source: nil)?.location ?? .zero
     }
 
-    private func normalizedRemoteX() -> Double {
-        guard let remoteScreen else {
-            return 0
+    static func currentScreens() -> [ScreenMetrics] {
+        let scale = Double(NSScreen.main?.backingScaleFactor ?? 1)
+        return activeDisplayIds().map { displayId in
+            let bounds = CGDisplayBounds(displayId)
+            return ScreenMetrics(
+                width: Double(bounds.width),
+                height: Double(bounds.height),
+                scale: scale,
+                localX: Double(bounds.origin.x),
+                localY: Double(bounds.origin.y)
+            )
         }
-        return min(max(Double(remotePosition.x) / max(remoteScreen.width, 1), 0), 1)
     }
 
-    private func normalizedRemoteY() -> Double {
-        guard let remoteScreen else {
-            return 0
+    /// This machine's own monitor for `screenId` (parsed as `"<deviceId>#<index>"`), resolved
+    /// against the current live display list. Used both to warp the local cursor back onto the
+    /// right monitor when returning from remote capture, and to warp a remote peer's input onto
+    /// the right one of our own monitors when receiving.
+    private func localScreenRealRect(forScreenId screenId: String) -> CGRect? {
+        guard screenId.hasPrefix("\(deviceId)#"), let index = Int(screenId.dropFirst(deviceId.count + 1)) else {
+            return nil
         }
-        return min(max(Double(remotePosition.y) / max(remoteScreen.height, 1), 0), 1)
+        let displays = Self.activeDisplayIds()
+        guard displays.indices.contains(index) else {
+            return nil
+        }
+        return CGDisplayBounds(displays[index])
     }
 
-    static func currentScreenMetrics() -> ScreenMetrics {
-        let bounds = desktopBounds()
-        return ScreenMetrics(
-            width: Double(bounds.width),
-            height: Double(bounds.height),
-            scale: Double(NSScreen.main?.backingScaleFactor ?? 1)
-        )
-    }
-
-    private static func desktopBounds() -> CGRect {
+    private static func activeDisplayIds() -> [CGDirectDisplayID] {
         var displayCount: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &displayCount) == .success, displayCount > 0 else {
-            return CGDisplayBounds(CGMainDisplayID())
+            return [CGMainDisplayID()]
         }
 
         var displays = [CGDirectDisplayID](repeating: 0, count: Int(displayCount))
@@ -849,10 +980,13 @@ final class InputSharingCoordinator {
             CGGetActiveDisplayList(displayCount, buffer.baseAddress, &displayCount)
         }
         guard error == .success else {
-            return CGDisplayBounds(CGMainDisplayID())
+            return [CGMainDisplayID()]
         }
+        return Array(displays.prefix(Int(displayCount)))
+    }
 
-        let bounds = displays.prefix(Int(displayCount)).reduce(CGRect.null) { result, display in
+    private static func desktopBounds() -> CGRect {
+        let bounds = activeDisplayIds().reduce(CGRect.null) { result, display in
             let displayBounds = CGDisplayBounds(display)
             return result.isNull ? displayBounds : result.union(displayBounds)
         }

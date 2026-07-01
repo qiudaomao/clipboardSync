@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 enum ClipboardLimits {
@@ -92,7 +93,7 @@ enum AppText {
             "menu.enableInputSharing": "Enable Input Sharing",
             "menu.controlDevice": "Control Device",
             "menu.controlDeviceWithTitle": "Control Device: %@",
-            "menu.peerPosition": "Peer Position",
+            "menu.screenLayout": "Screen Layout...",
             "menu.clientMode": "Client mode",
             "menu.serverMode": "Server mode",
             "menu.settings": "Settings...",
@@ -116,6 +117,7 @@ enum AppText {
             "input.waitingPeerScreen": "Input Sharing: waiting for peer screen",
             "input.controllingPeer": "Input Sharing: controlling peer (%@)",
             "input.receiving": "Input Sharing: receiving input",
+            "input.ready": "Input Sharing: ready",
             "input.grantBoth": "Input Sharing: grant Accessibility/Input Monitoring",
             "settings.title": "Clipboard Sync Settings",
             "settings.header": "Clipboard Sync",
@@ -125,7 +127,9 @@ enum AppText {
             "settings.port": "Port",
             "settings.password": "Password",
             "settings.input": "Input",
-            "settings.peer": "Peer",
+            "layout.title": "Screen Layout",
+            "layout.subtitle": "Drag each screen to match how your machines sit relative to each other.",
+            "layout.done": "Done",
             "settings.scroll": "Scroll",
             "settings.modifierKeys": "Keys",
             "settings.mapShift": "Shift",
@@ -191,7 +195,7 @@ enum AppText {
             "menu.enableInputSharing": "启用输入共享",
             "menu.controlDevice": "控制设备",
             "menu.controlDeviceWithTitle": "控制设备：%@",
-            "menu.peerPosition": "对端位置",
+            "menu.screenLayout": "屏幕布局...",
             "menu.clientMode": "客户端模式",
             "menu.serverMode": "服务器模式",
             "menu.settings": "设置...",
@@ -215,6 +219,7 @@ enum AppText {
             "input.waitingPeerScreen": "输入共享：等待对端屏幕信息",
             "input.controllingPeer": "输入共享：正在控制对端（%@）",
             "input.receiving": "输入共享：正在接收输入",
+            "input.ready": "输入共享：就绪",
             "input.grantBoth": "输入共享：请授权辅助功能/输入监控",
             "settings.title": "剪贴板同步设置",
             "settings.header": "剪贴板同步",
@@ -224,7 +229,9 @@ enum AppText {
             "settings.port": "端口",
             "settings.password": "密码",
             "settings.input": "输入",
-            "settings.peer": "对端",
+            "layout.title": "屏幕布局",
+            "layout.subtitle": "拖动每个屏幕以匹配设备之间的实际摆放位置。",
+            "layout.done": "完成",
             "settings.scroll": "滚动",
             "settings.modifierKeys": "按键",
             "settings.mapShift": "Shift",
@@ -290,7 +297,7 @@ enum AppText {
             "menu.enableInputSharing": "입력 공유 활성화",
             "menu.controlDevice": "제어 장치",
             "menu.controlDeviceWithTitle": "제어 장치: %@",
-            "menu.peerPosition": "상대 위치",
+            "menu.screenLayout": "화면 레이아웃...",
             "menu.clientMode": "클라이언트 모드",
             "menu.serverMode": "서버 모드",
             "menu.settings": "설정...",
@@ -314,6 +321,7 @@ enum AppText {
             "input.waitingPeerScreen": "입력 공유: 상대 화면 정보 대기 중",
             "input.controllingPeer": "입력 공유: 상대 제어 중 (%@)",
             "input.receiving": "입력 공유: 입력 수신 중",
+            "input.ready": "입력 공유: 준비됨",
             "input.grantBoth": "입력 공유: 손쉬운 사용/입력 모니터링 권한 필요",
             "settings.title": "클립보드 동기화 설정",
             "settings.header": "클립보드 동기화",
@@ -323,7 +331,9 @@ enum AppText {
             "settings.port": "포트",
             "settings.password": "암호",
             "settings.input": "입력",
-            "settings.peer": "상대",
+            "layout.title": "화면 레이아웃",
+            "layout.subtitle": "기기들의 실제 배치에 맞게 각 화면을 드래그하세요.",
+            "layout.done": "완료",
             "settings.scroll": "스크롤",
             "settings.modifierKeys": "키",
             "settings.mapShift": "Shift",
@@ -389,7 +399,7 @@ enum AppText {
             "menu.enableInputSharing": "入力共有を有効化",
             "menu.controlDevice": "制御デバイス",
             "menu.controlDeviceWithTitle": "制御デバイス: %@",
-            "menu.peerPosition": "相手の位置",
+            "menu.screenLayout": "画面レイアウト...",
             "menu.clientMode": "クライアントモード",
             "menu.serverMode": "サーバーモード",
             "menu.settings": "設定...",
@@ -413,6 +423,7 @@ enum AppText {
             "input.waitingPeerScreen": "入力共有: 相手の画面情報を待機中",
             "input.controllingPeer": "入力共有: 相手を制御中 (%@)",
             "input.receiving": "入力共有: 入力を受信中",
+            "input.ready": "入力共有: 準備完了",
             "input.grantBoth": "入力共有: アクセシビリティ/入力監視を許可してください",
             "settings.title": "クリップボード同期設定",
             "settings.header": "クリップボード同期",
@@ -422,7 +433,9 @@ enum AppText {
             "settings.port": "ポート",
             "settings.password": "パスワード",
             "settings.input": "入力",
-            "settings.peer": "相手",
+            "layout.title": "画面レイアウト",
+            "layout.subtitle": "実際の配置に合わせて各画面をドラッグしてください。",
+            "layout.done": "完了",
             "settings.scroll": "スクロール",
             "settings.modifierKeys": "キー",
             "settings.mapShift": "Shift",
@@ -518,7 +531,6 @@ struct AppConfig: Codable {
     var password: String
     var inputSharingEnabled: Bool
     var controlDeviceId: String?
-    var peerEdge: ScreenEdge
     var reverseMouseVerticalScroll: Bool
     var keyboardModifierMap: KeyboardModifierMap
 
@@ -529,7 +541,6 @@ struct AppConfig: Codable {
         password: "",
         inputSharingEnabled: false,
         controlDeviceId: nil,
-        peerEdge: .right,
         reverseMouseVerticalScroll: false,
         keyboardModifierMap: .identity
     )
@@ -542,7 +553,6 @@ struct AppConfig: Codable {
         password: String,
         inputSharingEnabled: Bool,
         controlDeviceId: String?,
-        peerEdge: ScreenEdge,
         reverseMouseVerticalScroll: Bool,
         keyboardModifierMap: KeyboardModifierMap = .identity
     ) {
@@ -552,7 +562,6 @@ struct AppConfig: Codable {
         self.password = password
         self.inputSharingEnabled = inputSharingEnabled
         self.controlDeviceId = controlDeviceId
-        self.peerEdge = peerEdge
         self.reverseMouseVerticalScroll = reverseMouseVerticalScroll
         self.keyboardModifierMap = keyboardModifierMap
     }
@@ -565,7 +574,6 @@ struct AppConfig: Codable {
         password = try container.decodeIfPresent(String.self, forKey: .password) ?? Self.defaults.password
         inputSharingEnabled = try container.decodeIfPresent(Bool.self, forKey: .inputSharingEnabled) ?? Self.defaults.inputSharingEnabled
         controlDeviceId = try container.decodeIfPresent(String.self, forKey: .controlDeviceId) ?? Self.defaults.controlDeviceId
-        peerEdge = try container.decodeIfPresent(ScreenEdge.self, forKey: .peerEdge) ?? Self.defaults.peerEdge
         reverseMouseVerticalScroll = try container.decodeIfPresent(Bool.self, forKey: .reverseMouseVerticalScroll) ?? Self.defaults.reverseMouseVerticalScroll
         keyboardModifierMap = try container.decodeIfPresent(KeyboardModifierMap.self, forKey: .keyboardModifierMap) ?? Self.defaults.keyboardModifierMap
     }
@@ -594,7 +602,6 @@ struct AppConfig: Codable {
             password: password,
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: controlDeviceId?.trimmingCharacters(in: .whitespacesAndNewlines),
-            peerEdge: peerEdge,
             reverseMouseVerticalScroll: reverseMouseVerticalScroll,
             keyboardModifierMap: keyboardModifierMap
         )
@@ -633,10 +640,10 @@ struct InputMessage: Codable {
     let role: String?
     let deviceName: String?
     let deviceAddress: String?
-    let screen: ScreenMetrics?
+    let screens: [ScreenMetrics]?
     let enabled: Bool?
     let controlDeviceId: String?
-    let peerEdge: String?
+    let layout: [ScreenLayoutEntry]?
     let capture: InputCapturePayload?
     let mouse: InputMousePayload?
     let key: InputKeyPayload?
@@ -647,10 +654,9 @@ struct InputMessage: Codable {
         role: SyncMode,
         deviceName: String,
         deviceAddress: String?,
-        screen: ScreenMetrics,
+        screens: [ScreenMetrics],
         enabled: Bool,
-        controlDeviceId: String?,
-        peerEdge: ScreenEdge
+        controlDeviceId: String?
     ) -> InputMessage {
         InputMessage(
             type: "input",
@@ -660,10 +666,10 @@ struct InputMessage: Codable {
             role: role.rawValue,
             deviceName: deviceName,
             deviceAddress: deviceAddress,
-            screen: screen,
+            screens: screens,
             enabled: enabled,
             controlDeviceId: controlDeviceId,
-            peerEdge: peerEdge.rawValue,
+            layout: nil,
             capture: nil,
             mouse: nil,
             key: nil,
@@ -672,15 +678,135 @@ struct InputMessage: Codable {
     }
 }
 
+/// Describes one physical monitor. `localX`/`localY` are that monitor's origin within its own
+/// machine's local coordinate space (macOS: Quartz global coordinates), used to preserve each
+/// machine's real monitor arrangement when first auto-placing its screens into the shared layout.
 struct ScreenMetrics: Codable {
     let width: Double
     let height: Double
     let scale: Double
+    let localX: Double
+    let localY: Double
+}
+
+/// One physical monitor's rect in the shared layout canvas. `screenId` (`"<deviceId>#<index>"`)
+/// identifies the individual monitor; `deviceId` is the machine that owns it — several entries
+/// can share the same `deviceId` when that machine has more than one screen.
+struct ScreenLayoutEntry: Codable, Equatable {
+    var screenId: String
+    var deviceId: String
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
+
+    var rect: CGRect {
+        CGRect(x: x, y: y, width: width, height: height)
+    }
+}
+
+final class ScreenLayoutStore {
+    private(set) var entries: [String: ScreenLayoutEntry] = [:]
+    private static let storageKey = "ClipboardSyncMac.screenLayout"
+
+    init() {
+        entries = Self.load()
+    }
+
+    /// Merges a device's current monitor list into the store: updates sizes for known screens
+    /// (keeping any dragged position), places newly-seen screens next to their siblings (or to
+    /// the right of everything, for a brand-new device) while preserving their real relative
+    /// arrangement, and drops entries for monitors that disappeared (unplugged). Returns whether
+    /// anything changed.
+    @discardableResult
+    func merge(deviceId: String, screens: [ScreenMetrics]) -> Bool {
+        var changed = false
+
+        let priorScreenIds = Set(entries.values.filter { $0.deviceId == deviceId }.map(\.screenId))
+        let nextScreenIds = Set((0..<screens.count).map { "\(deviceId)#\($0)" })
+        for staleId in priorScreenIds.subtracting(nextScreenIds) {
+            entries.removeValue(forKey: staleId)
+            changed = true
+        }
+
+        let isNewDevice = priorScreenIds.isEmpty
+        let groupOffsetX = isNewDevice ? (entries.values.map { $0.x + $0.width }.max() ?? 0) : 0
+        let localMinX = screens.map(\.localX).min() ?? 0
+        let localMinY = screens.map(\.localY).min() ?? 0
+
+        for (index, screen) in screens.enumerated() {
+            let screenId = "\(deviceId)#\(index)"
+            if let existing = entries[screenId] {
+                guard existing.width != screen.width || existing.height != screen.height else {
+                    continue
+                }
+                entries[screenId] = ScreenLayoutEntry(screenId: screenId, deviceId: deviceId, x: existing.x, y: existing.y, width: screen.width, height: screen.height)
+                changed = true
+                continue
+            }
+
+            let x: Double
+            let y: Double
+            if isNewDevice {
+                x = groupOffsetX + (screen.localX - localMinX)
+                y = screen.localY - localMinY
+            } else if let sibling = entries.values.filter({ $0.deviceId == deviceId }).max(by: { $0.x < $1.x }) {
+                x = sibling.x + sibling.width
+                y = sibling.y
+            } else {
+                x = entries.values.map { $0.x + $0.width }.max() ?? 0
+                y = 0
+            }
+            entries[screenId] = ScreenLayoutEntry(screenId: screenId, deviceId: deviceId, x: x, y: y, width: screen.width, height: screen.height)
+            changed = true
+        }
+
+        if changed {
+            save()
+        }
+        return changed
+    }
+
+    func applySnapshot(_ snapshot: [ScreenLayoutEntry]) {
+        entries = Dictionary(uniqueKeysWithValues: snapshot.map { ($0.screenId, $0) })
+        save()
+    }
+
+    func applyPositionUpdates(_ updates: [ScreenLayoutEntry]) {
+        for update in updates {
+            guard let existing = entries[update.screenId] else {
+                continue
+            }
+            entries[update.screenId] = ScreenLayoutEntry(screenId: update.screenId, deviceId: existing.deviceId, x: update.x, y: update.y, width: existing.width, height: existing.height)
+        }
+        save()
+    }
+
+    func snapshot() -> [ScreenLayoutEntry] {
+        Array(entries.values)
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder().encode(snapshot()) {
+            UserDefaults.standard.set(data, forKey: Self.storageKey)
+        }
+    }
+
+    private static func load() -> [String: ScreenLayoutEntry] {
+        guard
+            let data = UserDefaults.standard.data(forKey: storageKey),
+            let list = try? JSONDecoder().decode([ScreenLayoutEntry].self, from: data)
+        else {
+            return [:]
+        }
+        return Dictionary(uniqueKeysWithValues: list.map { ($0.screenId, $0) })
+    }
 }
 
 struct InputCapturePayload: Codable {
     let action: String
     let edge: String
+    let screenId: String
     let normalizedX: Double
     let normalizedY: Double
 }

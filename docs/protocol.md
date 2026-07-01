@@ -114,13 +114,20 @@ identified by device id and synchronized by the server.
   "role": "server",
   "deviceName": "Win-C",
   "deviceAddress": "192.168.1.30",
-  "screen": { "width": 3840, "height": 1080, "scale": 1.0 },
+  "screens": [
+    { "width": 3840, "height": 1080, "scale": 1.0, "localX": 0, "localY": 0 },
+    { "width": 1920, "height": 1080, "scale": 2.0, "localX": 3840, "localY": 0 }
+  ],
   "enabled": true,
   "controlDeviceId": "controller-device-id",
-  "peerEdge": "right",
   "sentAt": 1782835200.0
 }
 ```
+
+`screens` lists every physical monitor this device currently has, one entry per monitor.
+`localX`/`localY` are that monitor's origin within this device's own local coordinate space
+(its real, OS-configured monitor arrangement) — used only to seed each monitor's initial
+relative position when it's first placed into the shared layout.
 
 ### Capture
 
@@ -133,6 +140,7 @@ identified by device id and synchronized by the server.
   "capture": {
     "action": "start",
     "edge": "right",
+    "screenId": "peer-device-id#0",
     "normalizedX": 0.0,
     "normalizedY": 0.42
   },
@@ -152,7 +160,6 @@ identified by device id and synchronized by the server.
   "deviceName": "Win-C",
   "deviceAddress": "192.168.1.30",
   "controlDeviceId": "controller-device-id",
-  "peerEdge": "right",
   "sentAt": 1782835200.0
 }
 ```
@@ -161,6 +168,35 @@ identified by device id and synchronized by the server.
 send it as a change request. The server applies the request and broadcasts the
 accepted server config to all peers. Local input-sharing enablement is not
 synchronized; each device advertises its current receiver state with `hello`.
+
+### Layout
+
+```json
+{
+  "type": "input",
+  "origin": "device-id",
+  "target": null,
+  "kind": "layout",
+  "role": "server",
+  "layout": [
+    { "screenId": "mac-device-id#0", "deviceId": "mac-device-id", "x": 0, "y": 0, "width": 1920, "height": 1080 },
+    { "screenId": "win-device-id#0", "deviceId": "win-device-id", "x": 1920, "y": 0, "width": 1920, "height": 1080 },
+    { "screenId": "win-device-id#1", "deviceId": "win-device-id", "x": 3840, "y": 0, "width": 1920, "height": 1080 }
+  ],
+  "sentAt": 1782835200.0
+}
+```
+
+`kind: "layout"` carries the shared screen layout: every known device's monitors, each its
+own rect (`screenId`) in one common coordinate space (points), used to decide which screen is
+adjacent to which when the cursor crosses an edge. A device with several monitors contributes
+one entry per monitor, all sharing the same `deviceId`. Any device may send it to
+describe a drag from its Screen Layout window. The server is authoritative: it
+merges accepted position (`x`/`y`) changes into its canonical table — a
+screen's `width`/`height` stay authoritative from that device's own `hello`,
+so a stale client can't corrupt sizes it doesn't know about — and rebroadcasts
+the full table to all peers. A client receiving `kind: "layout"` from the
+server (`role: "server"`) replaces its local table wholesale.
 
 ### Mouse
 
@@ -220,15 +256,17 @@ Input message fields:
 - `type`: always `input`.
 - `origin`: sender device id.
 - `target`: optional receiver device id. Messages with another target are ignored.
-- `kind`: `hello`, `config`, `capture`, `mouseMove`, `mouseButton`, `mouseWheel`, or `key`.
-- `role`: sender role for `hello`, either `server` or `client`.
+- `kind`: `hello`, `config`, `layout`, `capture`, `mouseMove`, `mouseButton`, `mouseWheel`, or `key`.
+- `role`: sender role for `hello`/`config`/`layout`, either `server` or `client`.
 - `deviceName`: sender host/device name for UI display.
 - `deviceAddress`: sender LAN IP address for UI display.
-- `screen`: virtual desktop size and scale for `hello`.
+- `screens`: this device's physical monitors (size, scale, and local arrangement) for `hello`.
 - `enabled`: sender input-sharing runtime state for `hello`.
 - `controlDeviceId`: device id whose mouse and keyboard control remote input.
-- `peerEdge`: peer position relative to the controlling side: `left`, `right`, `top`, or `bottom`.
-- `normalizedX` / `normalizedY`: screen coordinates normalized to `0...1`.
+- `layout`: the shared screen layout table for `kind: "layout"` — see Layout above.
+- `edge`: the screen edge the cursor crossed to trigger a `capture`: `left`, `right`, `top`, or `bottom`. Computed dynamically from the shared layout, not configured.
+- `screenId`: which of the target device's monitors (`"<deviceId>#<index>"`) a `capture` is entering.
+- `normalizedX` / `normalizedY`: screen coordinates normalized to `0...1`, relative to the active monitor.
 Encrypted envelope fields:
 
 - `type`: always `encrypted`.
@@ -256,9 +294,9 @@ Encrypted envelope fields:
 - Input sharing is off by default and must be enabled in settings or the tray/menu.
 - Input-sharing enablement is local to each device. It is not synchronized by `kind: "config"`.
 - The configured control device is selected by device id. The server is authoritative for shared input config; clients may request changes with `kind: "config"`, and the server rebroadcasts the accepted config.
-- The peer edge defines where the remote virtual desktop sits relative to the controller's virtual desktop.
+- The Screen Layout window shows every known device's monitors as separate rects (a device with several monitors gets one rect per monitor), all drawn at one consistent scale and true aspect ratio, color-coded per device, and draggable to describe how the machines physically sit relative to each other. A machine's own monitors are fixed relative to each other (that arrangement belongs to the OS, not this tool) and always move together as one rigid group when dragged. Dragging enforces no overlap between different machines and snaps the moved machine to touch (zero gap) another machine's screen. Dragging sends `kind: "layout"`; the server is authoritative and rebroadcasts the accepted table, mirroring how `kind: "config"` is synchronized.
 - Reverse vertical scroll is a local receiver setting. It is not synchronized, flips only injected `deltaY`, and leaves horizontal wheel deltas unchanged.
-- The controller starts remote capture when the local pointer reaches the configured edge and ends capture when the remote pointer crosses back over the opposite edge.
+- The controller starts remote capture when the local pointer reaches an edge of its own screen and a neighboring screen is adjacent to it in the shared layout, and walks that layout as the pointer keeps moving: exiting a remote screen's edge hands capture to whichever screen is adjacent there (another remote screen, or back to the controller's own screen), and sticks at the edge when no neighbor is registered there.
 - macOS requires Accessibility/Input Monitoring permission for input capture and injection.
 - Windows uses low-level mouse/keyboard hooks and `SendInput` for capture and injection.
 - Input sharing covers mouse move, button, wheel, and basic physical keyboard events. IME, media keys, and system-reserved shortcuts are not guaranteed.

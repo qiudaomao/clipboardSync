@@ -8,7 +8,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let portField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let inputSharingButton = NSButton(checkboxWithTitle: AppText.text("settings.enableInputSharing"), target: nil, action: nil)
-    private let peerEdgePopup = NSPopUpButton()
     private let reverseScrollButton = NSButton(checkboxWithTitle: AppText.text("settings.reverseVerticalScroll"), target: nil, action: nil)
     private let shiftModifierPopup = NSPopUpButton()
     private let controlModifierPopup = NSPopUpButton()
@@ -50,7 +49,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         portField.stringValue = String(config.port)
         passwordField.stringValue = config.password
         inputSharingButton.state = config.inputSharingEnabled ? .on : .off
-        selectPeerEdge(config.peerEdge)
         reverseScrollButton.state = config.reverseMouseVerticalScroll ? .on : .off
         selectModifier(config.keyboardModifierMap.shift, in: shiftModifierPopup)
         selectModifier(config.keyboardModifierMap.control, in: controlModifierPopup)
@@ -105,12 +103,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             configureModifierPopup(popup)
         }
 
-        for edge in ScreenEdge.allCases {
-            peerEdgePopup.addItem(withTitle: edge.title)
-            peerEdgePopup.lastItem?.representedObject = edge.rawValue
-        }
-        peerEdgePopup.controlSize = .large
-
         hostHintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         hostHintLabel.textColor = .secondaryLabelColor
 
@@ -157,7 +149,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             formRow(label: AppText.text("settings.port"), control: portField),
             formRow(label: AppText.text("settings.password"), control: passwordField),
             formRow(label: AppText.text("settings.input"), control: inputSharingButton),
-            formRow(label: AppText.text("settings.peer"), control: peerEdgePopup),
             formRow(label: AppText.text("settings.scroll"), control: reverseScrollButton),
             formRow(label: AppText.text("settings.modifierKeys"), control: modifierMapStack)
         ])
@@ -189,7 +180,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             portField.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             passwordField.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             inputSharingButton.widthAnchor.constraint(equalTo: hostField.widthAnchor),
-            peerEdgePopup.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             reverseScrollButton.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             modifierMapStack.widthAnchor.constraint(equalTo: hostField.widthAnchor)
         ])
@@ -240,7 +230,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     private func updateInputSharingState() {
         let isEnabled = inputSharingButton.state == .on
-        peerEdgePopup.isEnabled = isEnabled
         reverseScrollButton.isEnabled = isEnabled
         for popup in modifierPopups {
             popup.isEnabled = isEnabled
@@ -253,7 +242,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let portText = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = passwordField.stringValue
         let inputSharingEnabled = inputSharingButton.state == .on
-        let peerEdge = selectedPeerEdge()
         let reverseMouseVerticalScroll = reverseScrollButton.state == .on
         let keyboardModifierMap = KeyboardModifierMap(
             shift: selectedModifier(in: shiftModifierPopup, fallback: .shift),
@@ -293,7 +281,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             password: password,
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: currentConfig.controlDeviceId,
-            peerEdge: peerEdge,
             reverseMouseVerticalScroll: reverseMouseVerticalScroll,
             keyboardModifierMap: keyboardModifierMap
         )
@@ -319,25 +306,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private func currentPortValue() -> Int {
         let portText = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         return Int(portText) ?? currentConfig.port
-    }
-
-    private func selectPeerEdge(_ edge: ScreenEdge) {
-        for item in peerEdgePopup.itemArray {
-            if item.representedObject as? String == edge.rawValue {
-                peerEdgePopup.select(item)
-                return
-            }
-        }
-    }
-
-    private func selectedPeerEdge() -> ScreenEdge {
-        guard
-            let rawValue = peerEdgePopup.selectedItem?.representedObject as? String,
-            let edge = ScreenEdge(rawValue: rawValue)
-        else {
-            return .right
-        }
-        return edge
     }
 
     private var modifierPopups: [NSPopUpButton] {
