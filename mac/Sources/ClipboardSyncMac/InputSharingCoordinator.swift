@@ -18,6 +18,7 @@ final class InputSharingCoordinator {
     private var receivingRemote = false
     private var remotePosition = CGPoint.zero
     private var remotePressedMouseButtons: Set<String> = []
+    private var remotePressedSourceModifierKeys: Set<String> = []
     private var remotePressedModifierKeys: Set<String> = []
     private var eventTap: CFMachPort?
     private var eventSource: CFRunLoopSource?
@@ -48,9 +49,13 @@ final class InputSharingCoordinator {
     }
 
     func update(config: AppConfig, role: SyncMode, peerCount: Int) {
+        let shouldReleaseRemoteModifiers = self.config.keyboardModifierMap != config.keyboardModifierMap
         self.config = config
         self.role = role
         self.peerCount = peerCount
+        if shouldReleaseRemoteModifiers {
+            releaseRemoteModifiers()
+        }
         updateInputState()
     }
 
@@ -714,28 +719,50 @@ final class InputSharingCoordinator {
     }
 
     private func handleRemoteKey(_ key: InputKeyPayload?) {
-        guard receivingRemote, let key, let keyCode = Self.canonicalToMacKey[key.key] else {
+        guard receivingRemote, let key else {
             return
         }
         if Self.modifierKeys.contains(key.key) {
             if key.action == "down" {
-                remotePressedModifierKeys.insert(key.key)
+                remotePressedSourceModifierKeys.insert(key.key)
             } else {
-                remotePressedModifierKeys.remove(key.key)
+                remotePressedSourceModifierKeys.remove(key.key)
             }
-            postModifierEvent(keyCode: keyCode, keyDown: key.action == "down")
+            reconcileRemoteModifierState()
             return
         }
 
+        guard let keyCode = Self.canonicalToMacKey[key.key] else {
+            return
+        }
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: key.action == "down") else {
             return
         }
-        let modifiers = remotePressedModifierKeys.union(key.modifiers)
+        let modifiers = mappedModifiers(remotePressedSourceModifierKeys.union(key.modifiers))
         event.flags = Self.flags(from: Array(modifiers))
         post(event)
     }
 
-    private func postModifierEvent(keyCode: CGKeyCode, keyDown: Bool) {
+    private func reconcileRemoteModifierState() {
+        let desired = mappedModifiers(remotePressedSourceModifierKeys)
+        for modifier in Self.modifierKeyOrder where !desired.contains(modifier) && remotePressedModifierKeys.contains(modifier) {
+            remotePressedModifierKeys.remove(modifier)
+            postModifierEvent(modifier: modifier, keyDown: false)
+        }
+        for modifier in Self.modifierKeyOrder where desired.contains(modifier) && !remotePressedModifierKeys.contains(modifier) {
+            remotePressedModifierKeys.insert(modifier)
+            postModifierEvent(modifier: modifier, keyDown: true)
+        }
+    }
+
+    private func mappedModifiers(_ modifiers: Set<String>) -> Set<String> {
+        Set(modifiers.map { config.keyboardModifierMap.target(for: $0) })
+    }
+
+    private func postModifierEvent(modifier: String, keyDown: Bool) {
+        guard let keyCode = Self.canonicalToMacKey[modifier] else {
+            return
+        }
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: keyDown) else {
             return
         }
@@ -746,14 +773,14 @@ final class InputSharingCoordinator {
 
     private func releaseRemoteModifiers() {
         guard !remotePressedModifierKeys.isEmpty else {
+            remotePressedSourceModifierKeys.removeAll()
             return
         }
         for key in Self.modifierKeyOrder where remotePressedModifierKeys.contains(key) {
             remotePressedModifierKeys.remove(key)
-            if let keyCode = Self.canonicalToMacKey[key] {
-                postModifierEvent(keyCode: keyCode, keyDown: false)
-            }
+            postModifierEvent(modifier: key, keyDown: false)
         }
+        remotePressedSourceModifierKeys.removeAll()
         remotePressedModifierKeys.removeAll()
     }
 

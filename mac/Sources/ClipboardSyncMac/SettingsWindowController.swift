@@ -10,6 +10,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let inputSharingButton = NSButton(checkboxWithTitle: AppText.text("settings.enableInputSharing"), target: nil, action: nil)
     private let peerEdgePopup = NSPopUpButton()
     private let reverseScrollButton = NSButton(checkboxWithTitle: AppText.text("settings.reverseVerticalScroll"), target: nil, action: nil)
+    private let shiftModifierPopup = NSPopUpButton()
+    private let controlModifierPopup = NSPopUpButton()
+    private let altModifierPopup = NSPopUpButton()
+    private let metaModifierPopup = NSPopUpButton()
     private let hostHintLabel = NSTextField(labelWithString: AppText.text("settings.hostDefaultHint"))
     private let validationLabel = NSTextField(labelWithString: "")
     private let saveButton = NSButton(title: AppText.text("settings.save"), target: nil, action: nil)
@@ -20,14 +24,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 470),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 580),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         window.title = AppText.text("settings.title")
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 480, height: 452)
+        window.minSize = NSSize(width: 480, height: 560)
 
         super.init(window: window)
 
@@ -48,6 +52,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         inputSharingButton.state = config.inputSharingEnabled ? .on : .off
         selectPeerEdge(config.peerEdge)
         reverseScrollButton.state = config.reverseMouseVerticalScroll ? .on : .off
+        selectModifier(config.keyboardModifierMap.shift, in: shiftModifierPopup)
+        selectModifier(config.keyboardModifierMap.control, in: controlModifierPopup)
+        selectModifier(config.keyboardModifierMap.alt, in: altModifierPopup)
+        selectModifier(config.keyboardModifierMap.meta, in: metaModifierPopup)
         validationLabel.stringValue = ""
         validationLabel.isHidden = true
         updateModeState()
@@ -93,6 +101,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         reverseScrollButton.target = self
         reverseScrollButton.action = #selector(inputSharingChanged)
 
+        for popup in modifierPopups {
+            configureModifierPopup(popup)
+        }
+
         for edge in ScreenEdge.allCases {
             peerEdgePopup.addItem(withTitle: edge.title)
             peerEdgePopup.lastItem?.representedObject = edge.rawValue
@@ -137,6 +149,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         hostField.widthAnchor.constraint(greaterThanOrEqualToConstant: 240).isActive = true
         hostHintLabel.widthAnchor.constraint(equalTo: hostField.widthAnchor).isActive = true
 
+        let modifierMapStack = makeModifierMapStack()
+
         let formStack = NSStackView(views: [
             formRow(label: AppText.text("settings.mode"), control: modeControl),
             formRow(label: AppText.text("settings.host"), control: hostStack),
@@ -144,7 +158,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             formRow(label: AppText.text("settings.password"), control: passwordField),
             formRow(label: AppText.text("settings.input"), control: inputSharingButton),
             formRow(label: AppText.text("settings.peer"), control: peerEdgePopup),
-            formRow(label: AppText.text("settings.scroll"), control: reverseScrollButton)
+            formRow(label: AppText.text("settings.scroll"), control: reverseScrollButton),
+            formRow(label: AppText.text("settings.modifierKeys"), control: modifierMapStack)
         ])
         formStack.orientation = .vertical
         formStack.alignment = .leading
@@ -175,7 +190,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             passwordField.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             inputSharingButton.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             peerEdgePopup.widthAnchor.constraint(equalTo: hostField.widthAnchor),
-            reverseScrollButton.widthAnchor.constraint(equalTo: hostField.widthAnchor)
+            reverseScrollButton.widthAnchor.constraint(equalTo: hostField.widthAnchor),
+            modifierMapStack.widthAnchor.constraint(equalTo: hostField.widthAnchor)
         ])
     }
 
@@ -226,6 +242,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let isEnabled = inputSharingButton.state == .on
         peerEdgePopup.isEnabled = isEnabled
         reverseScrollButton.isEnabled = isEnabled
+        for popup in modifierPopups {
+            popup.isEnabled = isEnabled
+        }
     }
 
     @objc private func save() {
@@ -236,6 +255,12 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let inputSharingEnabled = inputSharingButton.state == .on
         let peerEdge = selectedPeerEdge()
         let reverseMouseVerticalScroll = reverseScrollButton.state == .on
+        let keyboardModifierMap = KeyboardModifierMap(
+            shift: selectedModifier(in: shiftModifierPopup, fallback: .shift),
+            control: selectedModifier(in: controlModifierPopup, fallback: .control),
+            alt: selectedModifier(in: altModifierPopup, fallback: .alt),
+            meta: selectedModifier(in: metaModifierPopup, fallback: .meta)
+        )
 
         if mode == .client && host.isEmpty {
             showValidation(AppText.text("settings.validationHost"))
@@ -269,7 +294,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: currentConfig.controlDeviceId,
             peerEdge: peerEdge,
-            reverseMouseVerticalScroll: reverseMouseVerticalScroll
+            reverseMouseVerticalScroll: reverseMouseVerticalScroll,
+            keyboardModifierMap: keyboardModifierMap
         )
         onSave?(nextConfig)
         close()
@@ -312,5 +338,64 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             return .right
         }
         return edge
+    }
+
+    private var modifierPopups: [NSPopUpButton] {
+        [shiftModifierPopup, controlModifierPopup, altModifierPopup, metaModifierPopup]
+    }
+
+    private func configureModifierPopup(_ popup: NSPopUpButton) {
+        popup.removeAllItems()
+        for modifier in KeyboardModifier.allCases {
+            popup.addItem(withTitle: modifier.title)
+            popup.lastItem?.representedObject = modifier.rawValue
+        }
+        popup.controlSize = .large
+    }
+
+    private func makeModifierMapStack() -> NSStackView {
+        let rows = [
+            modifierMapRow(label: AppText.text("settings.mapShift"), popup: shiftModifierPopup),
+            modifierMapRow(label: AppText.text("settings.mapControl"), popup: controlModifierPopup),
+            modifierMapRow(label: AppText.text("settings.mapAlt"), popup: altModifierPopup),
+            modifierMapRow(label: AppText.text("settings.mapMeta"), popup: metaModifierPopup)
+        ]
+        let stack = NSStackView(views: rows)
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 6
+        return stack
+    }
+
+    private func modifierMapRow(label: String, popup: NSPopUpButton) -> NSStackView {
+        let labelView = NSTextField(labelWithString: label)
+        labelView.textColor = .secondaryLabelColor
+        labelView.widthAnchor.constraint(equalToConstant: 82).isActive = true
+        popup.widthAnchor.constraint(equalToConstant: 150).isActive = true
+
+        let row = NSStackView(views: [labelView, popup])
+        row.orientation = .horizontal
+        row.alignment = .firstBaseline
+        row.spacing = 8
+        return row
+    }
+
+    private func selectModifier(_ modifier: KeyboardModifier, in popup: NSPopUpButton) {
+        for item in popup.itemArray {
+            if item.representedObject as? String == modifier.rawValue {
+                popup.select(item)
+                return
+            }
+        }
+    }
+
+    private func selectedModifier(in popup: NSPopUpButton, fallback: KeyboardModifier) -> KeyboardModifier {
+        guard
+            let rawValue = popup.selectedItem?.representedObject as? String,
+            let modifier = KeyboardModifier(rawValue: rawValue)
+        else {
+            return fallback
+        }
+        return modifier
     }
 }

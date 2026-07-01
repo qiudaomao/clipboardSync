@@ -127,6 +127,11 @@ enum AppText {
             "settings.input": "Input",
             "settings.peer": "Peer",
             "settings.scroll": "Scroll",
+            "settings.modifierKeys": "Keys",
+            "settings.mapShift": "Shift",
+            "settings.mapControl": "Control",
+            "settings.mapAlt": "Alt",
+            "settings.mapMeta": "Win/Mac",
             "settings.client": "Client",
             "settings.server": "Server",
             "settings.enableInputSharing": "Enable Input Sharing",
@@ -140,7 +145,11 @@ enum AppText {
             "settings.validationHost": "Enter a server host for client mode.",
             "settings.validationLoopback": "Use the server Mac's LAN IP, not 127.0.0.1.",
             "settings.validationPort": "Port must be a number from 1 to 65535.",
-            "settings.validationPassword": "Enter the same sync password on every device."
+            "settings.validationPassword": "Enter the same sync password on every device.",
+            "modifier.shift": "Shift",
+            "modifier.control": "Control",
+            "modifier.alt": "Alt/Option",
+            "modifier.meta": "Win/Command"
         ],
         .chinese: [
             "app.name": "剪贴板同步",
@@ -217,6 +226,11 @@ enum AppText {
             "settings.input": "输入",
             "settings.peer": "对端",
             "settings.scroll": "滚动",
+            "settings.modifierKeys": "按键",
+            "settings.mapShift": "Shift",
+            "settings.mapControl": "Control",
+            "settings.mapAlt": "Alt",
+            "settings.mapMeta": "Win/Mac",
             "settings.client": "客户端",
             "settings.server": "服务器",
             "settings.enableInputSharing": "启用输入共享",
@@ -230,7 +244,11 @@ enum AppText {
             "settings.validationHost": "请输入客户端模式的服务器主机。",
             "settings.validationLoopback": "请使用服务器 Mac 的局域网 IP，不要用 127.0.0.1。",
             "settings.validationPort": "端口必须是 1 到 65535 之间的数字。",
-            "settings.validationPassword": "请在每台设备上输入相同的同步密码。"
+            "settings.validationPassword": "请在每台设备上输入相同的同步密码。",
+            "modifier.shift": "Shift",
+            "modifier.control": "Control",
+            "modifier.alt": "Alt/Option",
+            "modifier.meta": "Win/Command"
         ],
         .korean: [
             "app.name": "클립보드 동기화",
@@ -307,6 +325,11 @@ enum AppText {
             "settings.input": "입력",
             "settings.peer": "상대",
             "settings.scroll": "스크롤",
+            "settings.modifierKeys": "키",
+            "settings.mapShift": "Shift",
+            "settings.mapControl": "Control",
+            "settings.mapAlt": "Alt",
+            "settings.mapMeta": "Win/Mac",
             "settings.client": "클라이언트",
             "settings.server": "서버",
             "settings.enableInputSharing": "입력 공유 활성화",
@@ -320,7 +343,11 @@ enum AppText {
             "settings.validationHost": "클라이언트 모드의 서버 호스트를 입력하세요.",
             "settings.validationLoopback": "127.0.0.1이 아닌 서버 Mac의 LAN IP를 사용하세요.",
             "settings.validationPort": "포트는 1에서 65535 사이의 숫자여야 합니다.",
-            "settings.validationPassword": "모든 장치에 동일한 동기화 암호를 입력하세요."
+            "settings.validationPassword": "모든 장치에 동일한 동기화 암호를 입력하세요.",
+            "modifier.shift": "Shift",
+            "modifier.control": "Control",
+            "modifier.alt": "Alt/Option",
+            "modifier.meta": "Win/Command"
         ],
         .japanese: [
             "app.name": "クリップボード同期",
@@ -397,6 +424,11 @@ enum AppText {
             "settings.input": "入力",
             "settings.peer": "相手",
             "settings.scroll": "スクロール",
+            "settings.modifierKeys": "キー",
+            "settings.mapShift": "Shift",
+            "settings.mapControl": "Control",
+            "settings.mapAlt": "Alt",
+            "settings.mapMeta": "Win/Mac",
             "settings.client": "クライアント",
             "settings.server": "サーバー",
             "settings.enableInputSharing": "入力共有を有効化",
@@ -410,7 +442,11 @@ enum AppText {
             "settings.validationHost": "クライアントモードのサーバーホストを入力してください。",
             "settings.validationLoopback": "127.0.0.1 ではなくサーバー Mac の LAN IP を使用してください。",
             "settings.validationPort": "ポートは 1 から 65535 の数字である必要があります。",
-            "settings.validationPassword": "すべてのデバイスで同じ同期パスワードを入力してください。"
+            "settings.validationPassword": "すべてのデバイスで同じ同期パスワードを入力してください。",
+            "modifier.shift": "Shift",
+            "modifier.control": "Control",
+            "modifier.alt": "Alt/Option",
+            "modifier.meta": "Win/Command"
         ]
     ]
 
@@ -425,6 +461,54 @@ enum AppText {
     static func edgeTitle(_ edge: ScreenEdge) -> String {
         text("edge.\(edge.rawValue)")
     }
+
+    static func modifierTitle(_ modifier: KeyboardModifier) -> String {
+        text("modifier.\(modifier.key.lowercased())")
+    }
+}
+
+enum KeyboardModifier: String, Codable, CaseIterable {
+    case shift = "Shift"
+    case control = "Control"
+    case alt = "Alt"
+    case meta = "Meta"
+
+    var key: String {
+        rawValue
+    }
+
+    var title: String {
+        AppText.modifierTitle(self)
+    }
+}
+
+struct KeyboardModifierMap: Codable, Equatable {
+    var shift: KeyboardModifier
+    var control: KeyboardModifier
+    var alt: KeyboardModifier
+    var meta: KeyboardModifier
+
+    static let identity = KeyboardModifierMap(
+        shift: .shift,
+        control: .control,
+        alt: .alt,
+        meta: .meta
+    )
+
+    func target(for source: String) -> String {
+        switch source {
+        case "Shift":
+            return shift.key
+        case "Control":
+            return control.key
+        case "Alt":
+            return alt.key
+        case "Meta":
+            return meta.key
+        default:
+            return source
+        }
+    }
 }
 
 struct AppConfig: Codable {
@@ -436,6 +520,7 @@ struct AppConfig: Codable {
     var controlDeviceId: String?
     var peerEdge: ScreenEdge
     var reverseMouseVerticalScroll: Bool
+    var keyboardModifierMap: KeyboardModifierMap
 
     static let defaults = AppConfig(
         mode: .client,
@@ -445,7 +530,8 @@ struct AppConfig: Codable {
         inputSharingEnabled: false,
         controlDeviceId: nil,
         peerEdge: .right,
-        reverseMouseVerticalScroll: false
+        reverseMouseVerticalScroll: false,
+        keyboardModifierMap: .identity
     )
     private static let storageKey = "ClipboardSyncMac.config"
 
@@ -457,7 +543,8 @@ struct AppConfig: Codable {
         inputSharingEnabled: Bool,
         controlDeviceId: String?,
         peerEdge: ScreenEdge,
-        reverseMouseVerticalScroll: Bool
+        reverseMouseVerticalScroll: Bool,
+        keyboardModifierMap: KeyboardModifierMap = .identity
     ) {
         self.mode = mode
         self.host = host
@@ -467,6 +554,7 @@ struct AppConfig: Codable {
         self.controlDeviceId = controlDeviceId
         self.peerEdge = peerEdge
         self.reverseMouseVerticalScroll = reverseMouseVerticalScroll
+        self.keyboardModifierMap = keyboardModifierMap
     }
 
     init(from decoder: Decoder) throws {
@@ -479,6 +567,7 @@ struct AppConfig: Codable {
         controlDeviceId = try container.decodeIfPresent(String.self, forKey: .controlDeviceId) ?? Self.defaults.controlDeviceId
         peerEdge = try container.decodeIfPresent(ScreenEdge.self, forKey: .peerEdge) ?? Self.defaults.peerEdge
         reverseMouseVerticalScroll = try container.decodeIfPresent(Bool.self, forKey: .reverseMouseVerticalScroll) ?? Self.defaults.reverseMouseVerticalScroll
+        keyboardModifierMap = try container.decodeIfPresent(KeyboardModifierMap.self, forKey: .keyboardModifierMap) ?? Self.defaults.keyboardModifierMap
     }
 
     static func load() -> AppConfig {
@@ -506,7 +595,8 @@ struct AppConfig: Codable {
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: controlDeviceId?.trimmingCharacters(in: .whitespacesAndNewlines),
             peerEdge: peerEdge,
-            reverseMouseVerticalScroll: reverseMouseVerticalScroll
+            reverseMouseVerticalScroll: reverseMouseVerticalScroll,
+            keyboardModifierMap: keyboardModifierMap
         )
     }
 }

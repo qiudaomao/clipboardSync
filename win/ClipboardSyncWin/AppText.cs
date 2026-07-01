@@ -87,6 +87,11 @@ internal static class AppText
                 ["settings.input"] = "Input",
                 ["settings.peer"] = "Peer",
                 ["settings.scroll"] = "Scroll",
+                ["settings.modifierKeys"] = "Keys",
+                ["settings.mapShift"] = "Shift",
+                ["settings.mapControl"] = "Control",
+                ["settings.mapAlt"] = "Alt",
+                ["settings.mapMeta"] = "Win/Mac",
                 ["settings.client"] = "Client",
                 ["settings.server"] = "Server",
                 ["settings.enableInputSharing"] = "Enable Input Sharing",
@@ -97,7 +102,11 @@ internal static class AppText
                 ["settings.hostServerHint"] = "Share this address with clients on the same LAN.",
                 ["settings.validationHost"] = "Enter the server LAN IP for client mode.",
                 ["settings.validationLoopback"] = "Use the server machine's LAN IP, not 127.0.0.1.",
-                ["settings.validationPassword"] = "Enter the same sync password on every device."
+                ["settings.validationPassword"] = "Enter the same sync password on every device.",
+                ["modifier.shift"] = "Shift",
+                ["modifier.control"] = "Control",
+                ["modifier.alt"] = "Alt/Option",
+                ["modifier.meta"] = "Win/Command"
             },
             [Language.Chinese] = new Dictionary<string, string>
             {
@@ -167,6 +176,11 @@ internal static class AppText
                 ["settings.input"] = "输入",
                 ["settings.peer"] = "对端",
                 ["settings.scroll"] = "滚动",
+                ["settings.modifierKeys"] = "按键",
+                ["settings.mapShift"] = "Shift",
+                ["settings.mapControl"] = "Control",
+                ["settings.mapAlt"] = "Alt",
+                ["settings.mapMeta"] = "Win/Mac",
                 ["settings.client"] = "客户端",
                 ["settings.server"] = "服务器",
                 ["settings.enableInputSharing"] = "启用输入共享",
@@ -177,7 +191,11 @@ internal static class AppText
                 ["settings.hostServerHint"] = "将此地址分享给同一局域网内的客户端。",
                 ["settings.validationHost"] = "请输入客户端模式的服务器局域网 IP。",
                 ["settings.validationLoopback"] = "请使用服务器的局域网 IP，不要用 127.0.0.1。",
-                ["settings.validationPassword"] = "请在每台设备上输入相同的同步密码。"
+                ["settings.validationPassword"] = "请在每台设备上输入相同的同步密码。",
+                ["modifier.shift"] = "Shift",
+                ["modifier.control"] = "Control",
+                ["modifier.alt"] = "Alt/Option",
+                ["modifier.meta"] = "Win/Command"
             },
             [Language.Korean] = new Dictionary<string, string>
             {
@@ -247,6 +265,11 @@ internal static class AppText
                 ["settings.input"] = "입력",
                 ["settings.peer"] = "상대",
                 ["settings.scroll"] = "스크롤",
+                ["settings.modifierKeys"] = "키",
+                ["settings.mapShift"] = "Shift",
+                ["settings.mapControl"] = "Control",
+                ["settings.mapAlt"] = "Alt",
+                ["settings.mapMeta"] = "Win/Mac",
                 ["settings.client"] = "클라이언트",
                 ["settings.server"] = "서버",
                 ["settings.enableInputSharing"] = "입력 공유 활성화",
@@ -257,7 +280,11 @@ internal static class AppText
                 ["settings.hostServerHint"] = "같은 LAN의 클라이언트와 이 주소를 공유하세요.",
                 ["settings.validationHost"] = "클라이언트 모드의 서버 LAN IP를 입력하세요.",
                 ["settings.validationLoopback"] = "127.0.0.1이 아닌 서버의 LAN IP를 사용하세요.",
-                ["settings.validationPassword"] = "모든 장치에 동일한 동기화 암호를 입력하세요."
+                ["settings.validationPassword"] = "모든 장치에 동일한 동기화 암호를 입력하세요.",
+                ["modifier.shift"] = "Shift",
+                ["modifier.control"] = "Control",
+                ["modifier.alt"] = "Alt/Option",
+                ["modifier.meta"] = "Win/Command"
             },
             [Language.Japanese] = new Dictionary<string, string>
             {
@@ -327,6 +354,11 @@ internal static class AppText
                 ["settings.input"] = "入力",
                 ["settings.peer"] = "相手",
                 ["settings.scroll"] = "スクロール",
+                ["settings.modifierKeys"] = "キー",
+                ["settings.mapShift"] = "Shift",
+                ["settings.mapControl"] = "Control",
+                ["settings.mapAlt"] = "Alt",
+                ["settings.mapMeta"] = "Win/Mac",
                 ["settings.client"] = "クライアント",
                 ["settings.server"] = "サーバー",
                 ["settings.enableInputSharing"] = "入力共有を有効化",
@@ -337,7 +369,11 @@ internal static class AppText
                 ["settings.hostServerHint"] = "同じ LAN のクライアントにこのアドレスを共有してください。",
                 ["settings.validationHost"] = "クライアントモードのサーバー LAN IP を入力してください。",
                 ["settings.validationLoopback"] = "127.0.0.1 ではなくサーバーの LAN IP を使用してください。",
-                ["settings.validationPassword"] = "すべてのデバイスで同じ同期パスワードを入力してください。"
+                ["settings.validationPassword"] = "すべてのデバイスで同じ同期パスワードを入力してください。",
+                ["modifier.shift"] = "Shift",
+                ["modifier.control"] = "Control",
+                ["modifier.alt"] = "Alt/Option",
+                ["modifier.meta"] = "Win/Command"
             }
         };
 
@@ -363,6 +399,17 @@ internal static class AppText
             ScreenEdge.Top => "edge.top",
             ScreenEdge.Bottom => "edge.bottom",
             _ => "edge.right"
+        });
+    }
+
+    public static string ModifierTitle(KeyboardModifier modifier)
+    {
+        return Text(modifier switch
+        {
+            KeyboardModifier.Control => "modifier.control",
+            KeyboardModifier.Alt => "modifier.alt",
+            KeyboardModifier.Meta => "modifier.meta",
+            _ => "modifier.shift"
         });
     }
 

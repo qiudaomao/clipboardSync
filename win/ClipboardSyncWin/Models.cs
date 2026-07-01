@@ -29,6 +29,61 @@ internal enum ScreenEdge
     Bottom
 }
 
+internal enum KeyboardModifier
+{
+    Shift,
+    Control,
+    Alt,
+    Meta
+}
+
+internal sealed class KeyboardModifierMap
+{
+    public KeyboardModifier Shift { get; set; } = KeyboardModifier.Shift;
+    public KeyboardModifier Control { get; set; } = KeyboardModifier.Control;
+    public KeyboardModifier Alt { get; set; } = KeyboardModifier.Alt;
+    public KeyboardModifier Meta { get; set; } = KeyboardModifier.Meta;
+
+    public static KeyboardModifierMap Identity()
+    {
+        return new KeyboardModifierMap();
+    }
+
+    public KeyboardModifierMap Clone()
+    {
+        return new KeyboardModifierMap
+        {
+            Shift = Shift,
+            Control = Control,
+            Alt = Alt,
+            Meta = Meta
+        };
+    }
+
+    public string TargetFor(string source)
+    {
+        return source switch
+        {
+            "Shift" => ModifierKey(Shift),
+            "Control" => ModifierKey(Control),
+            "Alt" => ModifierKey(Alt),
+            "Meta" => ModifierKey(Meta),
+            _ => source
+        };
+    }
+
+    public static string ModifierKey(KeyboardModifier modifier)
+    {
+        return modifier switch
+        {
+            KeyboardModifier.Control => "Control",
+            KeyboardModifier.Alt => "Alt",
+            KeyboardModifier.Meta => "Meta",
+            _ => "Shift"
+        };
+    }
+}
+
 internal sealed class AppConfig
 {
     public SyncMode Mode { get; set; } = SyncMode.Client;
@@ -39,6 +94,7 @@ internal sealed class AppConfig
     public string? ControlDeviceId { get; set; }
     public ScreenEdge PeerEdge { get; set; } = ScreenEdge.Right;
     public bool ReverseMouseVerticalScroll { get; set; }
+    public KeyboardModifierMap KeyboardModifierMap { get; set; } = new();
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
 
     public void Normalize()
@@ -46,6 +102,10 @@ internal sealed class AppConfig
         Host = Host?.Trim() ?? "";
         Port = Math.Clamp(Port, 1, 65_535);
         ControlDeviceId = string.IsNullOrWhiteSpace(ControlDeviceId) ? null : ControlDeviceId.Trim();
+        if (KeyboardModifierMap is null)
+        {
+            KeyboardModifierMap = new KeyboardModifierMap();
+        }
 
         if (string.IsNullOrWhiteSpace(DeviceId))
         {
@@ -55,6 +115,7 @@ internal sealed class AppConfig
 
     public AppConfig Clone()
     {
+        var modifierMap = KeyboardModifierMap ?? new KeyboardModifierMap();
         return new AppConfig
         {
             Mode = Mode,
@@ -65,6 +126,7 @@ internal sealed class AppConfig
             ControlDeviceId = ControlDeviceId,
             PeerEdge = PeerEdge,
             ReverseMouseVerticalScroll = ReverseMouseVerticalScroll,
+            KeyboardModifierMap = modifierMap.Clone(),
             DeviceId = DeviceId
         };
     }

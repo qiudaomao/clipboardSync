@@ -43,6 +43,7 @@ internal sealed class InputSharingCoordinator : IDisposable
     private bool remoteActive;
     private bool receivingRemote;
     private readonly HashSet<string> pressedModifierKeys = [];
+    private readonly HashSet<string> remotePressedSourceModifierKeys = [];
     private readonly HashSet<string> remotePressedModifierKeys = [];
     private (double X, double Y)? pendingRemoteMouseMove;
     private System.Threading.Timer? pendingRemoteMouseMoveTimer;
@@ -69,9 +70,14 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     public void Update(AppConfig nextConfig, SyncMode nextRole, int nextPeerCount)
     {
+        var shouldReleaseRemoteModifiers = !ModifierMapsEqual(config.KeyboardModifierMap, nextConfig.KeyboardModifierMap);
         config = nextConfig.Clone();
         role = nextRole;
         peerCount = nextPeerCount;
+        if (shouldReleaseRemoteModifiers)
+        {
+            ReleaseRemoteModifiers();
+        }
         UpdateInputState();
     }
 
@@ -631,17 +637,30 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private void HandleRemoteKey(InputKeyPayload? key)
     {
-        if (!receivingRemote || key is null || !CanonicalToWindowsKey.TryGetValue(key.Key, out var virtualKey))
+        if (!receivingRemote || key is null)
         {
             return;
         }
         if (IsModifierKey(key.Key))
         {
-            SetRemoteModifierState(key.Key, key.Action == "down");
+            if (key.Action == "down")
+            {
+                remotePressedSourceModifierKeys.Add(key.Key);
+            }
+            else
+            {
+                remotePressedSourceModifierKeys.Remove(key.Key);
+            }
+            ApplyMappedRemoteModifierState(remotePressedSourceModifierKeys);
             return;
         }
 
-        ApplyRemoteModifierState(key.Modifiers);
+        if (!CanonicalToWindowsKey.TryGetValue(key.Key, out var virtualKey))
+        {
+            return;
+        }
+
+        ApplyMappedRemoteModifierState(key.Modifiers);
         SendKeyboardInput((ushort)virtualKey, key.Action == "up");
     }
 
@@ -802,9 +821,9 @@ internal sealed class InputSharingCoordinator : IDisposable
         return modifiers;
     }
 
-    private void ApplyRemoteModifierState(IEnumerable<string>? modifiers)
+    private void ApplyMappedRemoteModifierState(IEnumerable<string>? modifiers)
     {
-        var desired = modifiers is null ? new HashSet<string>() : new HashSet<string>(modifiers);
+        var desired = MapModifiers(modifiers);
         foreach (var modifier in ModifierKeyOrder)
         {
             SetRemoteModifierState(modifier, desired.Contains(modifier));
@@ -838,7 +857,30 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             SetRemoteModifierState(modifier, down: false);
         }
+        remotePressedSourceModifierKeys.Clear();
         remotePressedModifierKeys.Clear();
+    }
+
+    private HashSet<string> MapModifiers(IEnumerable<string>? modifiers)
+    {
+        var result = new HashSet<string>();
+        if (modifiers is null)
+        {
+            return result;
+        }
+        foreach (var modifier in modifiers)
+        {
+            result.Add(config.KeyboardModifierMap.TargetFor(modifier));
+        }
+        return result;
+    }
+
+    private static bool ModifierMapsEqual(KeyboardModifierMap left, KeyboardModifierMap right)
+    {
+        return left.Shift == right.Shift &&
+            left.Control == right.Control &&
+            left.Alt == right.Alt &&
+            left.Meta == right.Meta;
     }
 
     private static void SendMouseInput(MouseFlags flags, int data, int dx = 0, int dy = 0)
