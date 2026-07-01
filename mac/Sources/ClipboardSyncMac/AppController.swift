@@ -24,9 +24,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var clientModeItem = NSMenuItem()
     private var inputStatusMenuItem = NSMenuItem()
     private var inputSharingItem = NSMenuItem()
-    private var serverControlsClientItem = NSMenuItem()
-    private var clientControlsServerItem = NSMenuItem()
+    private var controlDeviceMenuItem = NSMenuItem(title: "Control Device", action: nil, keyEquivalent: "")
+    private var controlDeviceMenu = NSMenu(title: "Control Device")
     private var peerEdgeItems: [ScreenEdge: NSMenuItem] = [:]
+    private var inputDevices: [String: InputDeviceMenuDevice] = [:]
     private var historyMenu = NSMenu(title: "History")
     private var historyMenuItem = NSMenuItem(title: "History", action: nil, keyEquivalent: "")
     private var history: [ClipboardHistoryEntry] = []
@@ -37,6 +38,28 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         return controller
     }()
+
+    private struct InputDeviceMenuDevice {
+        let id: String
+        var name: String?
+        var address: String?
+        var role: String?
+        var lastSeen: Date
+
+        var title: String {
+            let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let baseName: String
+            if let trimmedName, !trimmedName.isEmpty {
+                baseName = trimmedName
+            } else {
+                baseName = "Unknown Device"
+            }
+            guard let address, !address.isEmpty else {
+                return baseName
+            }
+            return "\(baseName) (\(address))"
+        }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
@@ -113,18 +136,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         inputSharingItem.target = self
         menu.addItem(inputSharingItem)
 
-        let directionMenu = NSMenu(title: "Control Direction")
-        serverControlsClientItem = NSMenuItem(title: "Server -> Client", action: #selector(setInputDirection), keyEquivalent: "")
-        serverControlsClientItem.target = self
-        serverControlsClientItem.representedObject = InputSharingDirection.serverControlsClient.rawValue
-        directionMenu.addItem(serverControlsClientItem)
-        clientControlsServerItem = NSMenuItem(title: "Client -> Server", action: #selector(setInputDirection), keyEquivalent: "")
-        clientControlsServerItem.target = self
-        clientControlsServerItem.representedObject = InputSharingDirection.clientControlsServer.rawValue
-        directionMenu.addItem(clientControlsServerItem)
-        let directionItem = NSMenuItem(title: "Control Direction", action: nil, keyEquivalent: "")
-        directionItem.submenu = directionMenu
-        menu.addItem(directionItem)
+        controlDeviceMenuItem.submenu = controlDeviceMenu
+        menu.addItem(controlDeviceMenuItem)
 
         let edgeMenu = NSMenu(title: "Peer Position")
         for edge in ScreenEdge.allCases {
@@ -194,12 +207,75 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clientModeItem.state = config.mode == .client ? .on : .off
         serverModeItem.state = config.mode == .server ? .on : .off
         inputSharingItem.state = config.inputSharingEnabled ? .on : .off
-        serverControlsClientItem.state = config.inputSharingDirection == .serverControlsClient ? .on : .off
-        clientControlsServerItem.state = config.inputSharingDirection == .clientControlsServer ? .on : .off
+        refreshControlDeviceMenu()
         for (edge, item) in peerEdgeItems {
             item.state = config.peerEdge == edge ? .on : .off
         }
         refreshHistoryMenu()
+    }
+
+    private var effectiveControlDeviceId: String {
+        guard let controlDeviceId = config.controlDeviceId, !controlDeviceId.isEmpty else {
+            return deviceId
+        }
+        return controlDeviceId
+    }
+
+    private var localInputDevice: InputDeviceMenuDevice {
+        InputDeviceMenuDevice(
+            id: deviceId,
+            name: DeviceIdentity.displayName,
+            address: DeviceIdentity.address,
+            role: config.mode.rawValue,
+            lastSeen: Date()
+        )
+    }
+
+    private func refreshControlDeviceMenu() {
+        controlDeviceMenu.removeAllItems()
+
+        let selectedId = effectiveControlDeviceId
+        var devices = [localInputDevice]
+        devices.append(contentsOf: inputDevices.values
+            .filter { $0.id != deviceId }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending })
+
+        if !devices.contains(where: { $0.id == selectedId }) {
+            devices.append(InputDeviceMenuDevice(
+                id: selectedId,
+                name: "Unknown Device",
+                address: nil,
+                role: nil,
+                lastSeen: Date.distantPast
+            ))
+        }
+
+        let selectedTitle = devices.first { $0.id == selectedId }?.title ?? "Unknown Device"
+        controlDeviceMenuItem.title = "Control Device: \(selectedTitle)"
+
+        for device in devices {
+            let item = NSMenuItem(title: device.title, action: #selector(setControlDevice), keyEquivalent: "")
+            item.target = self
+            item.representedObject = device.id
+            item.state = device.id == selectedId ? .on : .off
+            controlDeviceMenu.addItem(item)
+        }
+    }
+
+    private func rememberInputDevice(from message: InputMessage) {
+        guard message.origin != deviceId else {
+            return
+        }
+
+        let existing = inputDevices[message.origin]
+        inputDevices[message.origin] = InputDeviceMenuDevice(
+            id: message.origin,
+            name: message.deviceName ?? existing?.name,
+            address: message.deviceAddress ?? existing?.address,
+            role: message.role ?? existing?.role,
+            lastSeen: Date()
+        )
+        updateMenu()
     }
 
     @objc private func setClientMode() {
@@ -245,14 +321,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         syncInputConfig()
     }
 
-    @objc private func setInputDirection(_ sender: NSMenuItem) {
-        guard
-            let rawValue = sender.representedObject as? String,
-            let direction = InputSharingDirection(rawValue: rawValue)
-        else {
+    @objc private func setControlDevice(_ sender: NSMenuItem) {
+        guard let controlDeviceId = sender.representedObject as? String else {
             return
         }
-        config.inputSharingDirection = direction
+        config.controlDeviceId = controlDeviceId
         config.save()
         updateInputCoordinator()
         syncInputConfig()
@@ -434,6 +507,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        rememberInputDevice(from: message)
+
         if message.kind == "config" {
             handleInputConfig(message)
             return
@@ -441,12 +516,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if message.kind == "hello", config.mode == .client, message.role == SyncMode.server.rawValue {
             var changed = false
-            if let direction = message.direction.flatMap(InputSharingDirection.init(rawValue:)), config.inputSharingDirection != direction {
-                config.inputSharingDirection = direction
-                changed = true
-            }
             if let edge = message.peerEdge.flatMap(ScreenEdge.init(rawValue:)), config.peerEdge != edge {
                 config.peerEdge = edge
+                changed = true
+            }
+            if let controlDeviceId = message.controlDeviceId, config.controlDeviceId != controlDeviceId {
+                config.controlDeviceId = controlDeviceId
                 changed = true
             }
             if changed {
@@ -484,8 +559,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             config.inputSharingEnabled = enabled
             changed = true
         }
-        if let direction = message.direction.flatMap(InputSharingDirection.init(rawValue:)), config.inputSharingDirection != direction {
-            config.inputSharingDirection = direction
+        if let controlDeviceId = message.controlDeviceId, config.controlDeviceId != controlDeviceId {
+            config.controlDeviceId = controlDeviceId
             changed = true
         }
         if let edge = message.peerEdge.flatMap(ScreenEdge.init(rawValue:)), config.peerEdge != edge {
@@ -511,7 +586,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard transport != nil, !config.password.isEmpty else {
             return
         }
-        publishInput(inputCoordinator.makeHello())
+        publishInput(inputCoordinator.makeHello(
+            deviceName: DeviceIdentity.displayName,
+            deviceAddress: DeviceIdentity.address
+        ))
     }
 
     private func sendInputConfig() {
@@ -524,9 +602,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             target: nil,
             kind: "config",
             role: config.mode.rawValue,
+            deviceName: DeviceIdentity.displayName,
+            deviceAddress: DeviceIdentity.address,
             screen: nil,
             enabled: config.inputSharingEnabled,
-            direction: config.inputSharingDirection.rawValue,
+            controlDeviceId: effectiveControlDeviceId,
             peerEdge: config.peerEdge.rawValue,
             capture: nil,
             mouse: nil,

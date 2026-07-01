@@ -21,7 +21,6 @@ internal sealed class ConfigForm : Form
     };
     private readonly TextBox passwordBox = new() { UseSystemPasswordChar = true };
     private readonly CheckBox inputSharingBox = new() { Text = "Enable Input Sharing", AutoSize = true };
-    private readonly ComboBox directionBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox peerEdgeBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private string clientHostDraft = "";
 
@@ -46,8 +45,6 @@ internal sealed class ConfigForm : Form
         portBox.Value = Math.Clamp(Config.Port, 1, 65_535);
         passwordBox.Text = Config.Password;
         inputSharingBox.Checked = Config.InputSharingEnabled;
-        directionBox.Items.AddRange(new object[] { "Server -> Client", "Client -> Server" });
-        directionBox.SelectedIndex = Config.InputSharingDirection == InputSharingDirection.ClientControlsServer ? 1 : 0;
         peerEdgeBox.Items.AddRange(new object[] { "Right", "Left", "Top", "Bottom" });
         peerEdgeBox.SelectedIndex = Config.PeerEdge switch
         {
@@ -91,8 +88,7 @@ internal sealed class ConfigForm : Form
         AddRow(layout, 2, "Port", portBox);
         AddRow(layout, 3, "Password", passwordBox);
         AddRow(layout, 4, "Input", inputSharingBox);
-        AddRow(layout, 5, "Direction", directionBox);
-        AddRow(layout, 6, "Peer", peerEdgeBox);
+        AddRow(layout, 5, "Peer", peerEdgeBox);
 
         var buttons = new FlowLayoutPanel
         {
@@ -167,7 +163,6 @@ internal sealed class ConfigForm : Form
 
     private void UpdateInputSharingState()
     {
-        directionBox.Enabled = inputSharingBox.Checked;
         peerEdgeBox.Enabled = inputSharingBox.Checked;
     }
 
@@ -202,9 +197,6 @@ internal sealed class ConfigForm : Form
         Config.Port = (int)portBox.Value;
         Config.Password = password;
         Config.InputSharingEnabled = inputSharingBox.Checked;
-        Config.InputSharingDirection = directionBox.SelectedIndex == 1
-            ? InputSharingDirection.ClientControlsServer
-            : InputSharingDirection.ServerControlsClient;
         Config.PeerEdge = peerEdgeBox.SelectedIndex switch
         {
             1 => ScreenEdge.Left,

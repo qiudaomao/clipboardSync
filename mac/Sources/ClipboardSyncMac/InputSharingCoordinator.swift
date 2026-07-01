@@ -50,13 +50,15 @@ final class InputSharingCoordinator {
         updateInputState()
     }
 
-    func makeHello() -> InputMessage {
+    func makeHello(deviceName: String, deviceAddress: String?) -> InputMessage {
         InputMessage.hello(
             origin: deviceId,
             role: role,
+            deviceName: deviceName,
+            deviceAddress: deviceAddress,
             screen: Self.currentScreenMetrics(),
-            enabled: config.inputSharingEnabled && peerCount == 1,
-            direction: config.inputSharingDirection,
+            enabled: config.inputSharingEnabled && peerCount > 0,
+            controlDeviceId: effectiveControlDeviceId,
             peerEdge: config.peerEdge
         )
     }
@@ -67,9 +69,11 @@ final class InputSharingCoordinator {
         }
 
         if message.kind == "hello" {
-            remoteDeviceId = message.origin
-            remoteScreen = message.screen
-            remoteInputEnabled = message.enabled
+            if shouldUseAsRemotePeer(message) {
+                remoteDeviceId = message.origin
+                remoteScreen = message.screen
+                remoteInputEnabled = message.enabled
+            }
             updateStatus()
             return
         }
@@ -94,28 +98,33 @@ final class InputSharingCoordinator {
         }
     }
 
+    private var effectiveControlDeviceId: String {
+        guard let controlDeviceId = config.controlDeviceId, !controlDeviceId.isEmpty else {
+            return deviceId
+        }
+        return controlDeviceId
+    }
+
     private var isController: Bool {
-        guard config.inputSharingEnabled, peerCount == 1 else {
-            return false
-        }
-        switch (role, config.inputSharingDirection) {
-        case (.server, .serverControlsClient), (.client, .clientControlsServer):
-            return true
-        default:
-            return false
-        }
+        config.inputSharingEnabled && peerCount > 0 && effectiveControlDeviceId == deviceId
     }
 
     private var canReceiveRemoteInput: Bool {
-        guard config.inputSharingEnabled, peerCount == 1, hasAccessibilityPermission else {
+        guard config.inputSharingEnabled, peerCount > 0, hasAccessibilityPermission else {
             return false
         }
-        switch (role, config.inputSharingDirection) {
-        case (.server, .clientControlsServer), (.client, .serverControlsClient):
-            return true
-        default:
-            return false
+        return effectiveControlDeviceId != deviceId
+    }
+
+    private func shouldUseAsRemotePeer(_ message: InputMessage) -> Bool {
+        if isController {
+            if role == .client {
+                return message.role == SyncMode.server.rawValue
+            }
+            return message.role == SyncMode.client.rawValue &&
+                (remoteDeviceId == nil || remoteDeviceId == message.origin || peerCount <= 1)
         }
+        return message.origin == effectiveControlDeviceId
     }
 
     private func updateInputState() {
@@ -140,8 +149,6 @@ final class InputSharingCoordinator {
         let status: String
         if !config.inputSharingEnabled {
             status = "Input Sharing: off"
-        } else if peerCount > 1 {
-            status = "Input Sharing: disabled, multiple peers"
         } else if peerCount == 0 {
             status = "Input Sharing: waiting for peer"
         } else if !hasAccessibilityPermission {
@@ -385,9 +392,11 @@ final class InputSharingCoordinator {
             target: remoteDeviceId,
             kind: "capture",
             role: nil,
+            deviceName: nil,
+            deviceAddress: nil,
             screen: nil,
             enabled: nil,
-            direction: nil,
+            controlDeviceId: nil,
             peerEdge: nil,
             capture: InputCapturePayload(
                 action: action,
@@ -408,9 +417,11 @@ final class InputSharingCoordinator {
             target: remoteDeviceId,
             kind: "mouseMove",
             role: nil,
+            deviceName: nil,
+            deviceAddress: nil,
             screen: nil,
             enabled: nil,
-            direction: nil,
+            controlDeviceId: nil,
             peerEdge: nil,
             capture: nil,
             mouse: InputMousePayload(
@@ -443,9 +454,11 @@ final class InputSharingCoordinator {
             target: remoteDeviceId,
             kind: "mouseButton",
             role: nil,
+            deviceName: nil,
+            deviceAddress: nil,
             screen: nil,
             enabled: nil,
-            direction: nil,
+            controlDeviceId: nil,
             peerEdge: nil,
             capture: nil,
             mouse: InputMousePayload(
@@ -468,9 +481,11 @@ final class InputSharingCoordinator {
             target: remoteDeviceId,
             kind: "mouseWheel",
             role: nil,
+            deviceName: nil,
+            deviceAddress: nil,
             screen: nil,
             enabled: nil,
-            direction: nil,
+            controlDeviceId: nil,
             peerEdge: nil,
             capture: nil,
             mouse: InputMousePayload(
@@ -522,9 +537,11 @@ final class InputSharingCoordinator {
             target: remoteDeviceId,
             kind: "key",
             role: nil,
+            deviceName: nil,
+            deviceAddress: nil,
             screen: nil,
             enabled: nil,
-            direction: nil,
+            controlDeviceId: nil,
             peerEdge: nil,
             capture: nil,
             mouse: nil,

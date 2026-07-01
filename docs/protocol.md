@@ -93,8 +93,8 @@ Plaintext structures are never sent directly.
 
 ## Input Message
 
-Input sharing uses the same encrypted envelope. Version 1 supports one peer for
-mouse and basic keyboard sharing.
+Input sharing uses the same encrypted envelope. The selected control device is
+identified by device id and synchronized by the server.
 
 ### Hello
 
@@ -105,9 +105,11 @@ mouse and basic keyboard sharing.
   "target": null,
   "kind": "hello",
   "role": "server",
+  "deviceName": "Win-C",
+  "deviceAddress": "192.168.1.30",
   "screen": { "width": 3840, "height": 1080, "scale": 1.0 },
   "enabled": true,
-  "direction": "serverControlsClient",
+  "controlDeviceId": "controller-device-id",
   "peerEdge": "right",
   "sentAt": 1782835200.0
 }
@@ -140,8 +142,10 @@ mouse and basic keyboard sharing.
   "target": null,
   "kind": "config",
   "role": "server",
+  "deviceName": "Win-C",
+  "deviceAddress": "192.168.1.30",
   "enabled": true,
-  "direction": "serverControlsClient",
+  "controlDeviceId": "controller-device-id",
   "peerEdge": "right",
   "sentAt": 1782835200.0
 }
@@ -211,9 +215,11 @@ Input message fields:
 - `target`: optional receiver device id. Messages with another target are ignored.
 - `kind`: `hello`, `config`, `capture`, `mouseMove`, `mouseButton`, `mouseWheel`, or `key`.
 - `role`: sender role for `hello`, either `server` or `client`.
+- `deviceName`: sender host/device name for UI display.
+- `deviceAddress`: sender LAN IP address for UI display.
 - `screen`: virtual desktop size and scale for `hello`.
 - `enabled`: sender input-sharing runtime state for `hello`; configured input-sharing state for `config`.
-- `direction`: `serverControlsClient` or `clientControlsServer`.
+- `controlDeviceId`: device id whose mouse and keyboard control remote input.
 - `peerEdge`: peer position relative to the controlling side: `left`, `right`, `top`, or `bottom`.
 - `normalizedX` / `normalizedY`: screen coordinates normalized to `0...1`.
 Encrypted envelope fields:
@@ -230,7 +236,6 @@ Encrypted envelope fields:
 - Clipboard history keeps the latest 10 unique items in memory.
 - Each image or file payload is capped at 10 MB raw bytes.
 - WebSocket JSON messages are capped at 16 MB to allow for base64 expansion.
-- Input sharing v1 supports one peer. If multiple clients connect, clipboard sync continues and input sharing is disabled.
 
 ## Behavior
 
@@ -242,7 +247,7 @@ Encrypted envelope fields:
 - A server broadcasts the encrypted envelope from one client to other clients.
 - A server applies remote messages locally only when it is configured with the same password.
 - Input sharing is off by default and must be enabled in settings or the tray/menu.
-- The configured direction is either server controls client or client controls server. The server is authoritative for input-sharing config; clients may request changes with `kind: "config"`, and the server rebroadcasts the accepted config.
+- The configured control device is selected by device id. The server is authoritative for input-sharing config; clients may request changes with `kind: "config"`, and the server rebroadcasts the accepted config.
 - The peer edge defines where the remote virtual desktop sits relative to the controller's virtual desktop.
 - The controller starts remote capture when the local pointer reaches the configured edge and ends capture when the remote pointer crosses back over the opposite edge.
 - macOS requires Accessibility/Input Monitoring permission for input capture and injection.

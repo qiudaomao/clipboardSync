@@ -22,9 +22,9 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem historyItem;
     private readonly ToolStripMenuItem inputStatusItem;
     private readonly ToolStripMenuItem inputSharingItem;
-    private readonly ToolStripMenuItem serverControlsClientItem;
-    private readonly ToolStripMenuItem clientControlsServerItem;
+    private readonly ToolStripMenuItem controlDeviceItem;
     private readonly Dictionary<ScreenEdge, ToolStripMenuItem> peerEdgeItems = [];
+    private readonly Dictionary<string, InputDeviceMenuDevice> inputDevices = [];
     private readonly ToolStripMenuItem clientModeItem;
     private readonly ToolStripMenuItem serverModeItem;
     private readonly ClipboardMonitor clipboardMonitor;
@@ -39,6 +39,24 @@ internal sealed class TrayAppContext : ApplicationContext
     private bool pendingInputConfigSync;
     private string status = "stopped";
 
+    private sealed class InputDeviceMenuDevice
+    {
+        public string Id { get; init; } = "";
+        public string? Name { get; init; }
+        public string? Address { get; init; }
+        public string? Role { get; init; }
+        public DateTimeOffset LastSeen { get; init; } = DateTimeOffset.UtcNow;
+
+        public string Title
+        {
+            get
+            {
+                var name = string.IsNullOrWhiteSpace(Name) ? "Unknown Device" : Name!;
+                return string.IsNullOrWhiteSpace(Address) ? name : $"{name} ({Address})";
+            }
+        }
+    }
+
     public TrayAppContext()
     {
         uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
@@ -48,8 +66,7 @@ internal sealed class TrayAppContext : ApplicationContext
         historyItem = new ToolStripMenuItem("History");
         inputStatusItem = new ToolStripMenuItem("Input Sharing: off") { Enabled = false };
         inputSharingItem = new ToolStripMenuItem("Enable Input Sharing", null, (_, _) => ToggleInputSharing());
-        serverControlsClientItem = new ToolStripMenuItem("Server -> Client", null, (_, _) => SetInputDirection(InputSharingDirection.ServerControlsClient));
-        clientControlsServerItem = new ToolStripMenuItem("Client -> Server", null, (_, _) => SetInputDirection(InputSharingDirection.ClientControlsServer));
+        controlDeviceItem = new ToolStripMenuItem("Control Device");
         clientModeItem = new ToolStripMenuItem("Client mode", null, (_, _) => SetMode(SyncMode.Client));
         serverModeItem = new ToolStripMenuItem("Server mode", null, (_, _) => SetMode(SyncMode.Server));
         trayIcon = LoadTrayIcon();
@@ -104,7 +121,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(inputStatusItem);
         menu.Items.Add(inputSharingItem);
-        menu.Items.Add(BuildDirectionMenu());
+        menu.Items.Add(controlDeviceItem);
         menu.Items.Add(BuildPeerEdgeMenu());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(clientModeItem);
@@ -116,14 +133,6 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripMenuItem("Stop", null, (_, _) => StopTransport()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
-        return menu;
-    }
-
-    private ToolStripMenuItem BuildDirectionMenu()
-    {
-        var menu = new ToolStripMenuItem("Control Direction");
-        menu.DropDownItems.Add(serverControlsClientItem);
-        menu.DropDownItems.Add(clientControlsServerItem);
         return menu;
     }
 
@@ -156,13 +165,79 @@ internal sealed class TrayAppContext : ApplicationContext
         clientModeItem.Checked = config.Mode == SyncMode.Client;
         serverModeItem.Checked = config.Mode == SyncMode.Server;
         inputSharingItem.Checked = config.InputSharingEnabled;
-        serverControlsClientItem.Checked = config.InputSharingDirection == InputSharingDirection.ServerControlsClient;
-        clientControlsServerItem.Checked = config.InputSharingDirection == InputSharingDirection.ClientControlsServer;
+        RefreshControlDeviceMenu();
         foreach (var item in peerEdgeItems)
         {
             item.Value.Checked = config.PeerEdge == item.Key;
         }
         RefreshHistoryMenu();
+    }
+
+    private string EffectiveControlDeviceId => string.IsNullOrWhiteSpace(config.ControlDeviceId)
+        ? config.DeviceId
+        : config.ControlDeviceId!;
+
+    private InputDeviceMenuDevice LocalInputDevice => new()
+    {
+        Id = config.DeviceId,
+        Name = Environment.MachineName,
+        Address = NetworkAddress.LocalLanIPv4Address(),
+        Role = config.Mode == SyncMode.Server ? "server" : "client",
+        LastSeen = DateTimeOffset.UtcNow
+    };
+
+    private void RefreshControlDeviceMenu()
+    {
+        controlDeviceItem.DropDownItems.Clear();
+
+        var selectedId = EffectiveControlDeviceId;
+        var devices = new List<InputDeviceMenuDevice> { LocalInputDevice };
+        devices.AddRange(inputDevices.Values
+            .Where(item => item.Id != config.DeviceId)
+            .OrderBy(item => item.Title, StringComparer.CurrentCultureIgnoreCase));
+
+        if (!devices.Any(item => item.Id == selectedId))
+        {
+            devices.Add(new InputDeviceMenuDevice
+            {
+                Id = selectedId,
+                Name = "Unknown Device",
+                LastSeen = DateTimeOffset.MinValue
+            });
+        }
+
+        var selectedTitle = devices.FirstOrDefault(item => item.Id == selectedId)?.Title ?? "Unknown Device";
+        controlDeviceItem.Text = $"Control Device: {selectedTitle}";
+
+        foreach (var device in devices)
+        {
+            var item = new ToolStripMenuItem(device.Title)
+            {
+                Checked = device.Id == selectedId,
+                Tag = device.Id
+            };
+            item.Click += (_, _) => SetControlDevice(device.Id);
+            controlDeviceItem.DropDownItems.Add(item);
+        }
+    }
+
+    private void RememberInputDevice(InputMessage message)
+    {
+        if (message.Origin == config.DeviceId)
+        {
+            return;
+        }
+
+        inputDevices.TryGetValue(message.Origin, out var existing);
+        inputDevices[message.Origin] = new InputDeviceMenuDevice
+        {
+            Id = message.Origin,
+            Name = message.DeviceName ?? existing?.Name,
+            Address = message.DeviceAddress ?? existing?.Address,
+            Role = message.Role ?? existing?.Role,
+            LastSeen = DateTimeOffset.UtcNow
+        };
+        UpdateMenu();
     }
 
     private void SetMode(SyncMode mode)
@@ -180,9 +255,9 @@ internal sealed class TrayAppContext : ApplicationContext
         SyncInputConfig();
     }
 
-    private void SetInputDirection(InputSharingDirection direction)
+    private void SetControlDevice(string controlDeviceId)
     {
-        config.InputSharingDirection = direction;
+        config.ControlDeviceId = controlDeviceId;
         ConfigStore.Save(config);
         UpdateInputCoordinator();
         SyncInputConfig();
@@ -425,6 +500,8 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
+        RememberInputDevice(message);
+
         if (message.Kind == "config")
         {
             HandleInputConfig(message);
@@ -434,16 +511,6 @@ internal sealed class TrayAppContext : ApplicationContext
         if (message.Kind == "hello" && config.Mode == SyncMode.Client && message.Role == "server")
         {
             var changed = false;
-            if (message.Direction is not null)
-            {
-                var direction = InputSharingWire.ParseDirection(message.Direction);
-                if (config.InputSharingDirection != direction)
-                {
-                    config.InputSharingDirection = direction;
-                    changed = true;
-                }
-            }
-
             if (message.PeerEdge is not null)
             {
                 var edge = InputSharingWire.ParseEdge(message.PeerEdge);
@@ -452,6 +519,11 @@ internal sealed class TrayAppContext : ApplicationContext
                     config.PeerEdge = edge;
                     changed = true;
                 }
+            }
+            if (message.ControlDeviceId is not null && config.ControlDeviceId != message.ControlDeviceId)
+            {
+                config.ControlDeviceId = message.ControlDeviceId;
+                changed = true;
             }
 
             if (changed)
@@ -495,14 +567,10 @@ internal sealed class TrayAppContext : ApplicationContext
             config.InputSharingEnabled = message.Enabled.Value;
             changed = true;
         }
-        if (message.Direction is not null)
+        if (message.ControlDeviceId is not null && config.ControlDeviceId != message.ControlDeviceId)
         {
-            var direction = InputSharingWire.ParseDirection(message.Direction);
-            if (config.InputSharingDirection != direction)
-            {
-                config.InputSharingDirection = direction;
-                changed = true;
-            }
+            config.ControlDeviceId = message.ControlDeviceId;
+            changed = true;
         }
         if (message.PeerEdge is not null)
         {
@@ -537,7 +605,7 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             return;
         }
-        PublishInput(inputCoordinator.MakeHello());
+        PublishInput(inputCoordinator.MakeHello(Environment.MachineName, NetworkAddress.LocalLanIPv4Address()));
     }
 
     private void SendInputConfig()
@@ -553,8 +621,10 @@ internal sealed class TrayAppContext : ApplicationContext
             Origin = config.DeviceId,
             Kind = "config",
             Role = config.Mode == SyncMode.Server ? "server" : "client",
+            DeviceName = Environment.MachineName,
+            DeviceAddress = NetworkAddress.LocalLanIPv4Address(),
             Enabled = config.InputSharingEnabled,
-            Direction = InputSharingWire.DirectionValue(config.InputSharingDirection),
+            ControlDeviceId = EffectiveControlDeviceId,
             PeerEdge = InputSharingWire.EdgeValue(config.PeerEdge),
             SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
         });

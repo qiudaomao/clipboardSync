@@ -27,7 +27,7 @@ internal static class NetworkAddress
             : normalized.StartsWith("127.", StringComparison.Ordinal);
     }
 
-    private static string? LocalLanIPv4Address()
+    public static string? LocalLanIPv4Address()
     {
         var interfaces = NetworkInterface.GetAllNetworkInterfaces()
             .Where(item =>

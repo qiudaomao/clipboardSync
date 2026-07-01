@@ -69,14 +69,16 @@ internal sealed class InputSharingCoordinator : IDisposable
         UpdateInputState();
     }
 
-    public InputMessage MakeHello()
+    public InputMessage MakeHello(string deviceName, string? deviceAddress)
     {
         return InputMessage.Hello(
             deviceId,
             role,
+            deviceName,
+            deviceAddress,
             CurrentScreenMetrics(),
-            config.InputSharingEnabled && peerCount == 1,
-            config.InputSharingDirection,
+            config.InputSharingEnabled && peerCount > 0,
+            EffectiveControlDeviceId,
             config.PeerEdge);
     }
 
@@ -89,9 +91,12 @@ internal sealed class InputSharingCoordinator : IDisposable
 
         if (message.Kind == "hello")
         {
-            remoteDeviceId = message.Origin;
-            remoteScreen = message.Screen;
-            remoteInputEnabled = message.Enabled;
+            if (ShouldUseAsRemotePeer(message))
+            {
+                remoteDeviceId = message.Origin;
+                remoteScreen = message.Screen;
+                remoteInputEnabled = message.Enabled;
+            }
             UpdateStatus();
             return;
         }
@@ -128,17 +133,15 @@ internal sealed class InputSharingCoordinator : IDisposable
         RemoveHooks();
     }
 
+    private string EffectiveControlDeviceId => string.IsNullOrWhiteSpace(config.ControlDeviceId)
+        ? deviceId
+        : config.ControlDeviceId!;
+
     private bool IsController
     {
         get
         {
-            if (!config.InputSharingEnabled || peerCount != 1)
-            {
-                return false;
-            }
-
-            return (role == SyncMode.Server && config.InputSharingDirection == InputSharingDirection.ServerControlsClient) ||
-                (role == SyncMode.Client && config.InputSharingDirection == InputSharingDirection.ClientControlsServer);
+            return config.InputSharingEnabled && peerCount > 0 && EffectiveControlDeviceId == deviceId;
         }
     }
 
@@ -146,14 +149,29 @@ internal sealed class InputSharingCoordinator : IDisposable
     {
         get
         {
-            if (!config.InputSharingEnabled || peerCount != 1)
+            if (!config.InputSharingEnabled || peerCount == 0)
             {
                 return false;
             }
 
-            return (role == SyncMode.Server && config.InputSharingDirection == InputSharingDirection.ClientControlsServer) ||
-                (role == SyncMode.Client && config.InputSharingDirection == InputSharingDirection.ServerControlsClient);
+            return EffectiveControlDeviceId != deviceId;
         }
+    }
+
+    private bool ShouldUseAsRemotePeer(InputMessage message)
+    {
+        if (IsController)
+        {
+            if (role == SyncMode.Client)
+            {
+                return message.Role == "server";
+            }
+
+            return message.Role == "client" &&
+                (remoteDeviceId is null || remoteDeviceId == message.Origin || peerCount <= 1);
+        }
+
+        return message.Origin == EffectiveControlDeviceId;
     }
 
     private void UpdateInputState()
@@ -185,17 +203,15 @@ internal sealed class InputSharingCoordinator : IDisposable
     {
         var status = !config.InputSharingEnabled
             ? "Input Sharing: off"
-            : peerCount > 1
-                ? "Input Sharing: disabled, multiple peers"
-                : peerCount == 0
-                    ? "Input Sharing: waiting for peer"
-                    : IsController && remoteInputEnabled == false
-                        ? "Input Sharing: peer disabled"
-                        : IsController && (remoteScreen is null || remoteInputEnabled is null)
-                        ? "Input Sharing: waiting for peer screen"
-                        : IsController
-                            ? $"Input Sharing: controlling peer ({InputSharingWire.EdgeValue(config.PeerEdge)})"
-                            : "Input Sharing: receiving input";
+            : peerCount == 0
+                ? "Input Sharing: waiting for peer"
+                : IsController && remoteInputEnabled == false
+                    ? "Input Sharing: peer disabled"
+                    : IsController && (remoteScreen is null || remoteInputEnabled is null)
+                    ? "Input Sharing: waiting for peer screen"
+                    : IsController
+                        ? $"Input Sharing: controlling peer ({InputSharingWire.EdgeValue(config.PeerEdge)})"
+                        : "Input Sharing: receiving input";
         StatusChanged?.Invoke(status);
     }
 

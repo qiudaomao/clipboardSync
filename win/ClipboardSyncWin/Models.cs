@@ -21,12 +21,6 @@ internal enum SyncMode
     Server
 }
 
-internal enum InputSharingDirection
-{
-    ServerControlsClient,
-    ClientControlsServer
-}
-
 internal enum ScreenEdge
 {
     Left,
@@ -42,7 +36,7 @@ internal sealed class AppConfig
     public int Port { get; set; } = 8787;
     public string Password { get; set; } = "";
     public bool InputSharingEnabled { get; set; }
-    public InputSharingDirection InputSharingDirection { get; set; } = InputSharingDirection.ServerControlsClient;
+    public string? ControlDeviceId { get; set; }
     public ScreenEdge PeerEdge { get; set; } = ScreenEdge.Right;
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
 
@@ -50,6 +44,7 @@ internal sealed class AppConfig
     {
         Host = Host?.Trim() ?? "";
         Port = Math.Clamp(Port, 1, 65_535);
+        ControlDeviceId = string.IsNullOrWhiteSpace(ControlDeviceId) ? null : ControlDeviceId.Trim();
 
         if (string.IsNullOrWhiteSpace(DeviceId))
         {
@@ -66,7 +61,7 @@ internal sealed class AppConfig
             Port = Port,
             Password = Password,
             InputSharingEnabled = InputSharingEnabled,
-            InputSharingDirection = InputSharingDirection,
+            ControlDeviceId = ControlDeviceId,
             PeerEdge = PeerEdge,
             DeviceId = DeviceId
         };
@@ -107,9 +102,11 @@ internal sealed class InputMessage
     public string? Target { get; set; }
     public string Kind { get; set; } = "";
     public string? Role { get; set; }
+    public string? DeviceName { get; set; }
+    public string? DeviceAddress { get; set; }
     public ScreenMetrics? Screen { get; set; }
     public bool? Enabled { get; set; }
-    public string? Direction { get; set; }
+    public string? ControlDeviceId { get; set; }
     public string? PeerEdge { get; set; }
     public InputCapturePayload? Capture { get; set; }
     public InputMousePayload? Mouse { get; set; }
@@ -119,9 +116,11 @@ internal sealed class InputMessage
     public static InputMessage Hello(
         string origin,
         SyncMode role,
+        string deviceName,
+        string? deviceAddress,
         ScreenMetrics screen,
         bool enabled,
-        InputSharingDirection direction,
+        string? controlDeviceId,
         ScreenEdge peerEdge)
     {
         return new InputMessage
@@ -130,9 +129,11 @@ internal sealed class InputMessage
             Origin = origin,
             Kind = "hello",
             Role = role == SyncMode.Server ? "server" : "client",
+            DeviceName = deviceName,
+            DeviceAddress = deviceAddress,
             Screen = screen,
             Enabled = enabled,
-            Direction = InputSharingWire.DirectionValue(direction),
+            ControlDeviceId = controlDeviceId,
             PeerEdge = InputSharingWire.EdgeValue(peerEdge),
             SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
         };
@@ -173,20 +174,6 @@ internal sealed class InputKeyPayload
 
 internal static class InputSharingWire
 {
-    public static string DirectionValue(InputSharingDirection direction)
-    {
-        return direction == InputSharingDirection.ClientControlsServer
-            ? "clientControlsServer"
-            : "serverControlsClient";
-    }
-
-    public static InputSharingDirection ParseDirection(string? value)
-    {
-        return string.Equals(value, "clientControlsServer", StringComparison.OrdinalIgnoreCase)
-            ? InputSharingDirection.ClientControlsServer
-            : InputSharingDirection.ServerControlsClient;
-    }
-
     public static string EdgeValue(ScreenEdge edge)
     {
         return edge switch

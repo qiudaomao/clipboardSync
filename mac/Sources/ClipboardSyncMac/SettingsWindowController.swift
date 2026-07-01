@@ -8,7 +8,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let portField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let inputSharingButton = NSButton(checkboxWithTitle: "Enable Input Sharing", target: nil, action: nil)
-    private let directionControl = NSSegmentedControl(labels: ["Server -> Client", "Client -> Server"], trackingMode: .selectOne, target: nil, action: nil)
     private let peerEdgePopup = NSPopUpButton()
     private let hostHintLabel = NSTextField(labelWithString: "Used only in client mode.")
     private let validationLabel = NSTextField(labelWithString: "")
@@ -46,7 +45,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         portField.stringValue = String(config.port)
         passwordField.stringValue = config.password
         inputSharingButton.state = config.inputSharingEnabled ? .on : .off
-        directionControl.selectedSegment = config.inputSharingDirection == .serverControlsClient ? 0 : 1
         selectPeerEdge(config.peerEdge)
         validationLabel.stringValue = ""
         validationLabel.isHidden = true
@@ -89,8 +87,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         inputSharingButton.target = self
         inputSharingButton.action = #selector(inputSharingChanged)
-
-        directionControl.segmentStyle = .rounded
 
         for edge in ScreenEdge.allCases {
             peerEdgePopup.addItem(withTitle: edge.title)
@@ -142,7 +138,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             formRow(label: "Port", control: portField),
             formRow(label: "Password", control: passwordField),
             formRow(label: "Input", control: inputSharingButton),
-            formRow(label: "Direction", control: directionControl),
             formRow(label: "Peer", control: peerEdgePopup)
         ])
         formStack.orientation = .vertical
@@ -173,7 +168,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             portField.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             passwordField.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             inputSharingButton.widthAnchor.constraint(equalTo: hostField.widthAnchor),
-            directionControl.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             peerEdgePopup.widthAnchor.constraint(equalTo: hostField.widthAnchor)
         ])
     }
@@ -223,7 +217,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     private func updateInputSharingState() {
         let isEnabled = inputSharingButton.state == .on
-        directionControl.isEnabled = isEnabled
         peerEdgePopup.isEnabled = isEnabled
     }
 
@@ -233,7 +226,6 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let portText = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = passwordField.stringValue
         let inputSharingEnabled = inputSharingButton.state == .on
-        let inputSharingDirection: InputSharingDirection = directionControl.selectedSegment == 1 ? .clientControlsServer : .serverControlsClient
         let peerEdge = selectedPeerEdge()
 
         if mode == .client && host.isEmpty {
@@ -266,7 +258,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             port: port,
             password: password,
             inputSharingEnabled: inputSharingEnabled,
-            inputSharingDirection: inputSharingDirection,
+            controlDeviceId: currentConfig.controlDeviceId,
             peerEdge: peerEdge
         )
         onSave?(nextConfig)

@@ -11,20 +11,6 @@ enum SyncMode: String, Codable {
     case server
 }
 
-enum InputSharingDirection: String, Codable {
-    case serverControlsClient
-    case clientControlsServer
-
-    var title: String {
-        switch self {
-        case .serverControlsClient:
-            return "Server -> Client"
-        case .clientControlsServer:
-            return "Client -> Server"
-        }
-    }
-}
-
 enum ScreenEdge: String, Codable, CaseIterable {
     case left
     case right
@@ -55,7 +41,7 @@ struct AppConfig: Codable {
     var port: Int
     var password: String
     var inputSharingEnabled: Bool
-    var inputSharingDirection: InputSharingDirection
+    var controlDeviceId: String?
     var peerEdge: ScreenEdge
 
     static let defaults = AppConfig(
@@ -64,7 +50,7 @@ struct AppConfig: Codable {
         port: 8787,
         password: "",
         inputSharingEnabled: false,
-        inputSharingDirection: .serverControlsClient,
+        controlDeviceId: nil,
         peerEdge: .right
     )
     private static let storageKey = "ClipboardSyncMac.config"
@@ -75,7 +61,7 @@ struct AppConfig: Codable {
         port: Int,
         password: String,
         inputSharingEnabled: Bool,
-        inputSharingDirection: InputSharingDirection,
+        controlDeviceId: String?,
         peerEdge: ScreenEdge
     ) {
         self.mode = mode
@@ -83,7 +69,7 @@ struct AppConfig: Codable {
         self.port = port
         self.password = password
         self.inputSharingEnabled = inputSharingEnabled
-        self.inputSharingDirection = inputSharingDirection
+        self.controlDeviceId = controlDeviceId
         self.peerEdge = peerEdge
     }
 
@@ -94,7 +80,7 @@ struct AppConfig: Codable {
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? Self.defaults.port
         password = try container.decodeIfPresent(String.self, forKey: .password) ?? Self.defaults.password
         inputSharingEnabled = try container.decodeIfPresent(Bool.self, forKey: .inputSharingEnabled) ?? Self.defaults.inputSharingEnabled
-        inputSharingDirection = try container.decodeIfPresent(InputSharingDirection.self, forKey: .inputSharingDirection) ?? Self.defaults.inputSharingDirection
+        controlDeviceId = try container.decodeIfPresent(String.self, forKey: .controlDeviceId) ?? Self.defaults.controlDeviceId
         peerEdge = try container.decodeIfPresent(ScreenEdge.self, forKey: .peerEdge) ?? Self.defaults.peerEdge
     }
 
@@ -121,7 +107,7 @@ struct AppConfig: Codable {
             port: min(max(port, 1), 65_535),
             password: password,
             inputSharingEnabled: inputSharingEnabled,
-            inputSharingDirection: inputSharingDirection,
+            controlDeviceId: controlDeviceId?.trimmingCharacters(in: .whitespacesAndNewlines),
             peerEdge: peerEdge
         )
     }
@@ -157,9 +143,11 @@ struct InputMessage: Codable {
     let target: String?
     let kind: String
     let role: String?
+    let deviceName: String?
+    let deviceAddress: String?
     let screen: ScreenMetrics?
     let enabled: Bool?
-    let direction: String?
+    let controlDeviceId: String?
     let peerEdge: String?
     let capture: InputCapturePayload?
     let mouse: InputMousePayload?
@@ -169,9 +157,11 @@ struct InputMessage: Codable {
     static func hello(
         origin: String,
         role: SyncMode,
+        deviceName: String,
+        deviceAddress: String?,
         screen: ScreenMetrics,
         enabled: Bool,
-        direction: InputSharingDirection,
+        controlDeviceId: String?,
         peerEdge: ScreenEdge
     ) -> InputMessage {
         InputMessage(
@@ -180,9 +170,11 @@ struct InputMessage: Codable {
             target: nil,
             kind: "hello",
             role: role.rawValue,
+            deviceName: deviceName,
+            deviceAddress: deviceAddress,
             screen: screen,
             enabled: enabled,
-            direction: direction.rawValue,
+            controlDeviceId: controlDeviceId,
             peerEdge: peerEdge.rawValue,
             capture: nil,
             mouse: nil,
@@ -352,5 +344,13 @@ enum DeviceIdentity {
         let created = UUID().uuidString
         UserDefaults.standard.set(created, forKey: storageKey)
         return created
+    }
+
+    static var displayName: String {
+        Host.current().localizedName ?? Host.current().name ?? ProcessInfo.processInfo.hostName
+    }
+
+    static var address: String? {
+        NetworkAddress.localLANIPv4Address()
     }
 }
