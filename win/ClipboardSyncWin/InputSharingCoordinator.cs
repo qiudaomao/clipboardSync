@@ -26,6 +26,7 @@ internal sealed class InputSharingCoordinator : IDisposable
     private const int WM_SYSKEYUP = 0x0105;
     private const uint LLMHF_INJECTED = 0x00000001;
     private const uint LLKHF_INJECTED = 0x00000010;
+    private static readonly string[] ModifierKeyOrder = ["Shift", "Control", "Alt", "Meta"];
 
     private readonly string deviceId;
     private readonly LowLevelProc mouseProc;
@@ -38,6 +39,8 @@ internal sealed class InputSharingCoordinator : IDisposable
     private bool? remoteInputEnabled;
     private bool remoteActive;
     private bool receivingRemote;
+    private readonly HashSet<string> pressedModifierKeys = [];
+    private readonly HashSet<string> remotePressedModifierKeys = [];
     private PointF remotePosition;
     private IntPtr mouseHook;
     private IntPtr keyboardHook;
@@ -120,6 +123,8 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     public void Dispose()
     {
+        ReleaseRemoteModifiers();
+        SendPressedModifierKeyUps();
         RemoveHooks();
     }
 
@@ -159,8 +164,19 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
         else
         {
+            if (remoteActive)
+            {
+                SendPressedModifierKeyUps();
+                SendCapture("end");
+            }
             RemoveHooks();
             remoteActive = false;
+            pressedModifierKeys.Clear();
+        }
+        if (!CanReceiveRemoteInput)
+        {
+            ReleaseRemoteModifiers();
+            receivingRemote = false;
         }
         UpdateStatus();
     }
@@ -178,7 +194,7 @@ internal sealed class InputSharingCoordinator : IDisposable
                         : IsController && (remoteScreen is null || remoteInputEnabled is null)
                         ? "Input Sharing: waiting for peer screen"
                         : IsController
-                            ? "Input Sharing: controlling peer"
+                            ? $"Input Sharing: controlling peer ({InputSharingWire.EdgeValue(config.PeerEdge)})"
                             : "Input Sharing: receiving input";
         StatusChanged?.Invoke(status);
     }
@@ -288,6 +304,7 @@ internal sealed class InputSharingCoordinator : IDisposable
             }
 
             remoteActive = true;
+            pressedModifierKeys.Clear();
             remotePosition = EntryPosition(remoteScreen, config.PeerEdge, point);
             localAnchor = CenterOfScreenContaining(point);
             SendCapture("start");
@@ -304,8 +321,10 @@ internal sealed class InputSharingCoordinator : IDisposable
 
         if (ShouldEndCapture(dx, dy))
         {
+            SendPressedModifierKeyUps();
             SendCapture("end");
             remoteActive = false;
+            pressedModifierKeys.Clear();
             var returnPoint = ReturnPoint();
             SetCursorPos(returnPoint.X, returnPoint.Y);
             UpdateStatus();
@@ -471,6 +490,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             return;
         }
+        UpdatePressedModifiers(key, action);
 
         MessageReady?.Invoke(new InputMessage
         {
@@ -482,10 +502,34 @@ internal sealed class InputSharingCoordinator : IDisposable
             {
                 Action = action,
                 Key = key,
-                Modifiers = CurrentModifiers()
+                Modifiers = CurrentPressedModifiers()
             },
             SentAt = Now()
         });
+    }
+
+    private void SendPressedModifierKeyUps()
+    {
+        foreach (var modifier in ModifierKeyOrder)
+        {
+            if (pressedModifierKeys.Contains(modifier))
+            {
+                MessageReady?.Invoke(new InputMessage
+                {
+                    Type = "input",
+                    Origin = deviceId,
+                    Target = remoteDeviceId,
+                    Kind = "key",
+                    Key = new InputKeyPayload
+                    {
+                        Action = "up",
+                        Key = modifier,
+                        Modifiers = []
+                    },
+                    SentAt = Now()
+                });
+            }
+        }
     }
 
     private void HandleCapture(InputCapturePayload? capture)
@@ -498,10 +542,12 @@ internal sealed class InputSharingCoordinator : IDisposable
         if (capture.Action == "start")
         {
             receivingRemote = true;
+            ReleaseRemoteModifiers();
             WarpTo(capture.NormalizedX, capture.NormalizedY);
         }
         else if (capture.Action == "end")
         {
+            ReleaseRemoteModifiers();
             receivingRemote = false;
         }
     }
@@ -560,15 +606,33 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             return;
         }
+        if (IsModifierKey(key.Key))
+        {
+            SetRemoteModifierState(key.Key, key.Action == "down");
+            return;
+        }
+
+        ApplyRemoteModifierState(key.Modifiers);
         SendKeyboardInput((ushort)virtualKey, key.Action == "up");
     }
 
     private static void WarpTo(double normalizedX, double normalizedY)
     {
+        var point = PointFor(normalizedX, normalizedY);
         var bounds = DesktopBounds();
-        var x = bounds.Left + (int)(Math.Clamp(normalizedX, 0, 1) * bounds.Width);
-        var y = bounds.Top + (int)(Math.Clamp(normalizedY, 0, 1) * bounds.Height);
-        SetCursorPos(x, y);
+        SendMouseInput(
+            MouseFlags.Move | MouseFlags.Absolute | MouseFlags.VirtualDesk,
+            0,
+            ToAbsoluteMouseCoordinate(point.X, bounds.Left, bounds.Width),
+            ToAbsoluteMouseCoordinate(point.Y, bounds.Top, bounds.Height));
+    }
+
+    private static Point PointFor(double normalizedX, double normalizedY)
+    {
+        var bounds = DesktopBounds();
+        return new Point(
+            bounds.Left + (int)(Math.Clamp(normalizedX, 0, 1) * Math.Max(bounds.Width - 1, 0)),
+            bounds.Top + (int)(Math.Clamp(normalizedY, 0, 1) * Math.Max(bounds.Height - 1, 0)));
     }
 
     private double NormalizedRemoteX()
@@ -608,36 +672,107 @@ internal sealed class InputSharingCoordinator : IDisposable
         return unchecked((short)((value >> 16) & 0xffff));
     }
 
-    private static List<string> CurrentModifiers()
+    private void UpdatePressedModifiers(string key, string action)
+    {
+        if (!IsModifierKey(key))
+        {
+            return;
+        }
+        if (action == "down")
+        {
+            pressedModifierKeys.Add(key);
+        }
+        else
+        {
+            pressedModifierKeys.Remove(key);
+        }
+    }
+
+    private List<string> CurrentPressedModifiers()
     {
         var modifiers = new List<string>();
-        var keys = Control.ModifierKeys;
-        if (keys.HasFlag(Keys.Shift))
+        foreach (var modifier in ModifierKeyOrder)
         {
-            modifiers.Add("Shift");
-        }
-        if (keys.HasFlag(Keys.Control))
-        {
-            modifiers.Add("Control");
-        }
-        if (keys.HasFlag(Keys.Alt))
-        {
-            modifiers.Add("Alt");
+            if (pressedModifierKeys.Contains(modifier))
+            {
+                modifiers.Add(modifier);
+            }
         }
         return modifiers;
     }
 
-    private static void SendMouseInput(MouseFlags flags, int data)
+    private void ApplyRemoteModifierState(IEnumerable<string>? modifiers)
+    {
+        var desired = modifiers is null ? new HashSet<string>() : new HashSet<string>(modifiers);
+        foreach (var modifier in ModifierKeyOrder)
+        {
+            SetRemoteModifierState(modifier, desired.Contains(modifier));
+        }
+    }
+
+    private void SetRemoteModifierState(string modifier, bool down)
+    {
+        var key = WindowsModifierKey(modifier);
+        if (key is null)
+        {
+            return;
+        }
+
+        if (down)
+        {
+            if (remotePressedModifierKeys.Add(modifier))
+            {
+                SendKeyboardInput((ushort)key.Value, keyUp: false);
+            }
+        }
+        else if (remotePressedModifierKeys.Remove(modifier))
+        {
+            SendKeyboardInput((ushort)key.Value, keyUp: true);
+        }
+    }
+
+    private void ReleaseRemoteModifiers()
+    {
+        foreach (var modifier in ModifierKeyOrder)
+        {
+            SetRemoteModifierState(modifier, down: false);
+        }
+        remotePressedModifierKeys.Clear();
+    }
+
+    private static void SendMouseInput(MouseFlags flags, int data, int dx = 0, int dy = 0)
     {
         var input = new INPUT
         {
             type = InputType.Mouse,
             U = new InputUnion
             {
-                mi = new MOUSEINPUT { dwFlags = flags, mouseData = data }
+                mi = new MOUSEINPUT { dx = dx, dy = dy, dwFlags = flags, mouseData = data }
             }
         };
         SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+    }
+
+    private static int ToAbsoluteMouseCoordinate(int value, int origin, int length)
+    {
+        return (int)Math.Round((value - origin) * 65535.0 / Math.Max(length - 1, 1));
+    }
+
+    private static bool IsModifierKey(string key)
+    {
+        return WindowsModifierKey(key) is not null;
+    }
+
+    private static Keys? WindowsModifierKey(string key)
+    {
+        return key switch
+        {
+            "Shift" => Keys.ShiftKey,
+            "Control" => Keys.ControlKey,
+            "Alt" => Keys.Menu,
+            "Meta" => Keys.LWin,
+            _ => null
+        };
     }
 
     private static void SendKeyboardInput(ushort virtualKey, bool keyUp)
@@ -752,6 +887,7 @@ internal sealed class InputSharingCoordinator : IDisposable
     [Flags]
     private enum MouseFlags : uint
     {
+        Move = 0x0001,
         LeftDown = 0x0002,
         LeftUp = 0x0004,
         RightDown = 0x0008,
@@ -759,7 +895,9 @@ internal sealed class InputSharingCoordinator : IDisposable
         MiddleDown = 0x0020,
         MiddleUp = 0x0040,
         Wheel = 0x0800,
-        HWheel = 0x1000
+        HWheel = 0x1000,
+        VirtualDesk = 0x4000,
+        Absolute = 0x8000
     }
 
     [Flags]

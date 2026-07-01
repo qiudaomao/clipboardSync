@@ -17,6 +17,8 @@ final class InputSharingCoordinator {
     private var remoteActive = false
     private var receivingRemote = false
     private var remotePosition = CGPoint.zero
+    private var remotePressedMouseButtons: Set<String> = []
+    private var remotePressedModifierKeys: Set<String> = []
     private var eventTap: CFMachPort?
     private var eventSource: CFRunLoopSource?
     private var lastModifierKeys: Set<String> = []
@@ -33,9 +35,12 @@ final class InputSharingCoordinator {
     }
 
     func stop() {
+        sendPressedModifierKeyUps()
         removeEventTap()
         remoteActive = false
         receivingRemote = false
+        remotePressedMouseButtons.removeAll()
+        releaseRemoteModifiers()
     }
 
     func update(config: AppConfig, role: SyncMode, peerCount: Int) {
@@ -121,6 +126,10 @@ final class InputSharingCoordinator {
         if isController, hasAccessibilityPermission, hasInputMonitoringPermission {
             ensureEventTap()
         } else {
+            if remoteActive {
+                sendPressedModifierKeyUps()
+                sendCapture(action: "end")
+            }
             removeEventTap()
             remoteActive = false
         }
@@ -144,7 +153,7 @@ final class InputSharingCoordinator {
         } else if isController && (remoteScreen == nil || remoteInputEnabled == nil) {
             status = "Input Sharing: waiting for peer screen"
         } else if isController {
-            status = "Input Sharing: controlling peer"
+            status = "Input Sharing: controlling peer (\(config.peerEdge.rawValue))"
         } else {
             status = "Input Sharing: receiving input"
         }
@@ -281,6 +290,7 @@ final class InputSharingCoordinator {
         remotePosition.y += dy
 
         if shouldEndCapture(deltaX: dx, deltaY: dy) {
+            sendPressedModifierKeyUps()
             sendCapture(action: "end")
             remoteActive = false
             warpLocalCursorToReturnPoint()
@@ -495,6 +505,16 @@ final class InputSharingCoordinator {
         lastModifierKeys = next
     }
 
+    private func sendPressedModifierKeyUps() {
+        guard !lastModifierKeys.isEmpty else {
+            return
+        }
+        for key in lastModifierKeys.sorted() {
+            sendKeyPayload(key: key, action: "up", modifiers: [])
+        }
+        lastModifierKeys.removeAll()
+    }
+
     private func sendKeyPayload(key: String, action: String, modifiers: [String]) {
         onMessage?(InputMessage(
             type: "input",
@@ -519,9 +539,13 @@ final class InputSharingCoordinator {
         }
         if capture.action == "start" {
             receivingRemote = true
+            remotePressedMouseButtons.removeAll()
+            releaseRemoteModifiers()
             warpTo(normalizedX: capture.normalizedX, normalizedY: capture.normalizedY)
         } else if capture.action == "end" {
+            releaseRemoteModifiers()
             receivingRemote = false
+            remotePressedMouseButtons.removeAll()
         }
     }
 
@@ -529,36 +553,46 @@ final class InputSharingCoordinator {
         guard receivingRemote, let mouse, let x = mouse.normalizedX, let y = mouse.normalizedY else {
             return
         }
-        warpTo(normalizedX: x, normalizedY: y)
+        let point = pointFor(normalizedX: x, normalizedY: y)
+        if let eventType = remoteDragEventType {
+            postMouseEvent(type: eventType, button: remoteDragButton, at: point)
+        } else {
+            postMouseEvent(type: .mouseMoved, button: .left, at: point)
+        }
     }
 
     private func handleRemoteMouseButton(_ mouse: InputMousePayload?) {
         guard receivingRemote, let mouse else {
             return
         }
-        if let x = mouse.normalizedX, let y = mouse.normalizedY {
-            warpTo(normalizedX: x, normalizedY: y)
-        }
-        let button = mouse.button == "right" ? CGMouseButton.right : mouse.button == "middle" ? CGMouseButton.center : CGMouseButton.left
+        let buttonName = canonicalMouseButton(mouse.button)
+        let button = cgMouseButton(for: buttonName)
+        let point = mouse.normalizedX.flatMap { x in
+            mouse.normalizedY.map { y in pointFor(normalizedX: x, normalizedY: y) }
+        } ?? currentCursorLocation()
         let eventType: CGEventType
-        switch (mouse.button, mouse.action) {
+        switch (buttonName, mouse.action) {
         case ("right", "down"):
             eventType = .rightMouseDown
-        case ("right", _):
+        case ("right", "up"):
             eventType = .rightMouseUp
         case ("middle", "down"):
             eventType = .otherMouseDown
-        case ("middle", _):
+        case ("middle", "up"):
             eventType = .otherMouseUp
         case (_, "down"):
             eventType = .leftMouseDown
         default:
             eventType = .leftMouseUp
         }
-        guard let event = CGEvent(mouseEventSource: nil, mouseType: eventType, mouseCursorPosition: currentCursorLocation(), mouseButton: button) else {
-            return
+
+        if mouse.action == "down" {
+            remotePressedMouseButtons.insert(buttonName)
         }
-        post(event)
+        postMouseEvent(type: eventType, button: button, at: point)
+        if mouse.action == "up" {
+            remotePressedMouseButtons.remove(buttonName)
+        }
     }
 
     private func handleRemoteMouseWheel(_ mouse: InputMousePayload?) {
@@ -581,25 +615,96 @@ final class InputSharingCoordinator {
         post(event)
     }
 
+    private var remoteDragEventType: CGEventType? {
+        if remotePressedMouseButtons.contains("left") {
+            return .leftMouseDragged
+        }
+        if remotePressedMouseButtons.contains("right") {
+            return .rightMouseDragged
+        }
+        if remotePressedMouseButtons.contains("middle") {
+            return .otherMouseDragged
+        }
+        return nil
+    }
+
+    private var remoteDragButton: CGMouseButton {
+        if remotePressedMouseButtons.contains("left") {
+            return .left
+        }
+        if remotePressedMouseButtons.contains("right") {
+            return .right
+        }
+        if remotePressedMouseButtons.contains("middle") {
+            return .center
+        }
+        return .left
+    }
+
     private func handleRemoteKey(_ key: InputKeyPayload?) {
         guard receivingRemote, let key, let keyCode = Self.canonicalToMacKey[key.key] else {
             return
         }
+        if Self.modifierKeys.contains(key.key) {
+            if key.action == "down" {
+                remotePressedModifierKeys.insert(key.key)
+            } else {
+                remotePressedModifierKeys.remove(key.key)
+            }
+            postModifierEvent(keyCode: keyCode, keyDown: key.action == "down")
+            return
+        }
+
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: key.action == "down") else {
             return
         }
-        event.flags = Self.flags(from: key.modifiers)
+        let modifiers = remotePressedModifierKeys.union(key.modifiers)
+        event.flags = Self.flags(from: Array(modifiers))
         post(event)
     }
 
+    private func postModifierEvent(keyCode: CGKeyCode, keyDown: Bool) {
+        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: keyDown) else {
+            return
+        }
+        event.type = .flagsChanged
+        event.flags = Self.flags(from: Array(remotePressedModifierKeys))
+        post(event)
+    }
+
+    private func releaseRemoteModifiers() {
+        guard !remotePressedModifierKeys.isEmpty else {
+            return
+        }
+        for key in Self.modifierKeyOrder where remotePressedModifierKeys.contains(key) {
+            remotePressedModifierKeys.remove(key)
+            if let keyCode = Self.canonicalToMacKey[key] {
+                postModifierEvent(keyCode: keyCode, keyDown: false)
+            }
+        }
+        remotePressedModifierKeys.removeAll()
+    }
+
     private func warpTo(normalizedX: Double, normalizedY: Double) {
+        let point = pointFor(normalizedX: normalizedX, normalizedY: normalizedY)
+        CGWarpMouseCursorPosition(point)
+        suppressUntil = Date().addingTimeInterval(0.08)
+    }
+
+    private func pointFor(normalizedX: Double, normalizedY: Double) -> CGPoint {
         let bounds = Self.desktopBounds()
-        let point = CGPoint(
+        return CGPoint(
             x: bounds.minX + CGFloat(min(max(normalizedX, 0), 1)) * bounds.width,
             y: bounds.minY + CGFloat(min(max(normalizedY, 0), 1)) * bounds.height
         )
+    }
+
+    private func postMouseEvent(type: CGEventType, button: CGMouseButton, at point: CGPoint) {
+        guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button) else {
+            return
+        }
         CGWarpMouseCursorPosition(point)
-        suppressUntil = Date().addingTimeInterval(0.08)
+        post(event)
     }
 
     private func post(_ event: CGEvent) {
@@ -654,6 +759,31 @@ final class InputSharingCoordinator {
         }
         return bounds.isNull ? CGDisplayBounds(CGMainDisplayID()) : bounds
     }
+
+    private func canonicalMouseButton(_ button: String?) -> String {
+        switch button {
+        case "right":
+            return "right"
+        case "middle":
+            return "middle"
+        default:
+            return "left"
+        }
+    }
+
+    private func cgMouseButton(for button: String) -> CGMouseButton {
+        switch button {
+        case "right":
+            return .right
+        case "middle":
+            return .center
+        default:
+            return .left
+        }
+    }
+
+    private static let modifierKeyOrder = ["Shift", "Control", "Alt", "Meta"]
+    private static let modifierKeys = Set(modifierKeyOrder)
 
     private var hasAccessibilityPermission: Bool {
         AXIsProcessTrusted()

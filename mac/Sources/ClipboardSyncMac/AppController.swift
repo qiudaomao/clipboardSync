@@ -12,6 +12,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var config = AppConfig.load()
     private var transport: Transport?
     private var peerCount = 0
+    private var pendingInputConfigSync = false
     private var statusText = "stopped" {
         didSet {
             updateMenu()
@@ -156,6 +157,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startItem.target = self
         menu.addItem(startItem)
 
+        let restartItem = NSMenuItem(title: "Restart", action: #selector(restartTransportFromMenu), keyEquivalent: "")
+        restartItem.target = self
+        menu.addItem(restartItem)
+
         let stopItem = NSMenuItem(title: "Stop", action: #selector(stopTransport), keyEquivalent: "")
         stopItem.target = self
         menu.addItem(stopItem)
@@ -213,6 +218,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         restartTransport()
     }
 
+    @objc private func restartTransportFromMenu() {
+        restartTransport()
+    }
+
     @objc private func stopTransport() {
         transport?.stop()
         transport = nil
@@ -232,7 +241,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleInputSharing() {
         config.inputSharingEnabled.toggle()
         config.save()
-        updateInputCoordinator(sendHello: true)
+        updateInputCoordinator()
+        syncInputConfig()
     }
 
     @objc private func setInputDirection(_ sender: NSMenuItem) {
@@ -244,7 +254,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         config.inputSharingDirection = direction
         config.save()
-        updateInputCoordinator(sendHello: true)
+        updateInputCoordinator()
+        syncInputConfig()
     }
 
     @objc private func setPeerEdge(_ sender: NSMenuItem) {
@@ -256,7 +267,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         config.peerEdge = edge
         config.save()
-        updateInputCoordinator(sendHello: true)
+        updateInputCoordinator()
+        syncInputConfig()
     }
 
     @objc private func sendFilesFromClipboard() {
@@ -280,7 +292,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func applyConfig(_ nextConfig: AppConfig) {
         config = nextConfig
         config.save()
-        updateInputCoordinator(sendHello: true)
+        updateInputCoordinator()
+        pendingInputConfigSync = true
         restartTransport()
     }
 
@@ -328,6 +341,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 self.peerCount = count
                 self.updateInputCoordinator(sendHello: true)
+                if self.config.mode == .server || self.pendingInputConfigSync {
+                    self.sendInputConfig()
+                    self.pendingInputConfigSync = false
+                }
             }
         }
 
@@ -417,6 +434,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        if message.kind == "config" {
+            handleInputConfig(message)
+            return
+        }
+
         if message.kind == "hello", config.mode == .client, message.role == SyncMode.server.rawValue {
             var changed = false
             if let direction = message.direction.flatMap(InputSharingDirection.init(rawValue:)), config.inputSharingDirection != direction {
@@ -439,6 +461,44 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func handleInputConfig(_ message: InputMessage) {
+        switch config.mode {
+        case .server:
+            guard message.role == SyncMode.client.rawValue else {
+                return
+            }
+            _ = applyInputConfig(message)
+            sendInputConfig()
+        case .client:
+            guard message.role == SyncMode.server.rawValue else {
+                return
+            }
+            _ = applyInputConfig(message)
+        }
+    }
+
+    @discardableResult
+    private func applyInputConfig(_ message: InputMessage) -> Bool {
+        var changed = false
+        if let enabled = message.enabled, config.inputSharingEnabled != enabled {
+            config.inputSharingEnabled = enabled
+            changed = true
+        }
+        if let direction = message.direction.flatMap(InputSharingDirection.init(rawValue:)), config.inputSharingDirection != direction {
+            config.inputSharingDirection = direction
+            changed = true
+        }
+        if let edge = message.peerEdge.flatMap(ScreenEdge.init(rawValue:)), config.peerEdge != edge {
+            config.peerEdge = edge
+            changed = true
+        }
+        if changed {
+            config.save()
+            updateInputCoordinator()
+        }
+        return changed
+    }
+
     private func updateInputCoordinator(sendHello: Bool = false) {
         inputCoordinator.update(config: config, role: config.mode, peerCount: peerCount)
         updateMenu()
@@ -452,6 +512,35 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         publishInput(inputCoordinator.makeHello())
+    }
+
+    private func sendInputConfig() {
+        guard transport != nil, !config.password.isEmpty else {
+            return
+        }
+        publishInput(InputMessage(
+            type: "input",
+            origin: deviceId,
+            target: nil,
+            kind: "config",
+            role: config.mode.rawValue,
+            screen: nil,
+            enabled: config.inputSharingEnabled,
+            direction: config.inputSharingDirection.rawValue,
+            peerEdge: config.peerEdge.rawValue,
+            capture: nil,
+            mouse: nil,
+            key: nil,
+            sentAt: Date().timeIntervalSince1970
+        ))
+    }
+
+    private func syncInputConfig() {
+        pendingInputConfigSync = true
+        sendInputConfig()
+        if transport != nil, !config.password.isEmpty {
+            pendingInputConfigSync = false
+        }
     }
 
     private func addHistory(_ content: ClipboardContent) {

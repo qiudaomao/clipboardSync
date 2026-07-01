@@ -36,6 +36,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private AppConfig config;
     private ISyncTransport? transport;
     private int peerCount;
+    private bool pendingInputConfigSync;
     private string status = "stopped";
 
     public TrayAppContext()
@@ -111,6 +112,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Configure...", null, (_, _) => ShowConfiguration()));
         menu.Items.Add(new ToolStripMenuItem("Start", null, (_, _) => RestartTransport()));
+        menu.Items.Add(new ToolStripMenuItem("Restart", null, (_, _) => RestartTransport()));
         menu.Items.Add(new ToolStripMenuItem("Stop", null, (_, _) => StopTransport()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Exit", null, (_, _) => ExitThread()));
@@ -174,21 +176,24 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         config.InputSharingEnabled = !config.InputSharingEnabled;
         ConfigStore.Save(config);
-        UpdateInputCoordinator(sendHello: true);
+        UpdateInputCoordinator();
+        SyncInputConfig();
     }
 
     private void SetInputDirection(InputSharingDirection direction)
     {
         config.InputSharingDirection = direction;
         ConfigStore.Save(config);
-        UpdateInputCoordinator(sendHello: true);
+        UpdateInputCoordinator();
+        SyncInputConfig();
     }
 
     private void SetPeerEdge(ScreenEdge edge)
     {
         config.PeerEdge = edge;
         ConfigStore.Save(config);
-        UpdateInputCoordinator(sendHello: true);
+        UpdateInputCoordinator();
+        SyncInputConfig();
     }
 
     private void ShowConfiguration()
@@ -203,7 +208,8 @@ internal sealed class TrayAppContext : ApplicationContext
         nextConfig.DeviceId = config.DeviceId;
         config = nextConfig;
         ConfigStore.Save(config);
-        UpdateInputCoordinator(sendHello: true);
+        UpdateInputCoordinator();
+        pendingInputConfigSync = true;
         RestartTransport();
     }
 
@@ -251,6 +257,11 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             peerCount = count;
             UpdateInputCoordinator(sendHello: true);
+            if (config.Mode == SyncMode.Server || pendingInputConfigSync)
+            {
+                SendInputConfig();
+                pendingInputConfigSync = false;
+            }
         });
         transport.Start();
         UpdateMenu();
@@ -414,21 +425,33 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
+        if (message.Kind == "config")
+        {
+            HandleInputConfig(message);
+            return;
+        }
+
         if (message.Kind == "hello" && config.Mode == SyncMode.Client && message.Role == "server")
         {
             var changed = false;
-            var direction = InputSharingWire.ParseDirection(message.Direction);
-            if (config.InputSharingDirection != direction)
+            if (message.Direction is not null)
             {
-                config.InputSharingDirection = direction;
-                changed = true;
+                var direction = InputSharingWire.ParseDirection(message.Direction);
+                if (config.InputSharingDirection != direction)
+                {
+                    config.InputSharingDirection = direction;
+                    changed = true;
+                }
             }
 
-            var edge = InputSharingWire.ParseEdge(message.PeerEdge);
-            if (config.PeerEdge != edge)
+            if (message.PeerEdge is not null)
             {
-                config.PeerEdge = edge;
-                changed = true;
+                var edge = InputSharingWire.ParseEdge(message.PeerEdge);
+                if (config.PeerEdge != edge)
+                {
+                    config.PeerEdge = edge;
+                    changed = true;
+                }
             }
 
             if (changed)
@@ -443,6 +466,59 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             SendInputHello();
         }
+    }
+
+    private void HandleInputConfig(InputMessage message)
+    {
+        if (config.Mode == SyncMode.Server)
+        {
+            if (message.Role != "client")
+            {
+                return;
+            }
+            ApplyInputConfig(message);
+            SendInputConfig();
+            return;
+        }
+
+        if (message.Role == "server")
+        {
+            ApplyInputConfig(message);
+        }
+    }
+
+    private bool ApplyInputConfig(InputMessage message)
+    {
+        var changed = false;
+        if (message.Enabled is not null && config.InputSharingEnabled != message.Enabled.Value)
+        {
+            config.InputSharingEnabled = message.Enabled.Value;
+            changed = true;
+        }
+        if (message.Direction is not null)
+        {
+            var direction = InputSharingWire.ParseDirection(message.Direction);
+            if (config.InputSharingDirection != direction)
+            {
+                config.InputSharingDirection = direction;
+                changed = true;
+            }
+        }
+        if (message.PeerEdge is not null)
+        {
+            var edge = InputSharingWire.ParseEdge(message.PeerEdge);
+            if (config.PeerEdge != edge)
+            {
+                config.PeerEdge = edge;
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            ConfigStore.Save(config);
+            UpdateInputCoordinator();
+        }
+        return changed;
     }
 
     private void UpdateInputCoordinator(bool sendHello = false)
@@ -462,6 +538,36 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
         PublishInput(inputCoordinator.MakeHello());
+    }
+
+    private void SendInputConfig()
+    {
+        if (transport is null || string.IsNullOrEmpty(config.Password))
+        {
+            return;
+        }
+
+        PublishInput(new InputMessage
+        {
+            Type = "input",
+            Origin = config.DeviceId,
+            Kind = "config",
+            Role = config.Mode == SyncMode.Server ? "server" : "client",
+            Enabled = config.InputSharingEnabled,
+            Direction = InputSharingWire.DirectionValue(config.InputSharingDirection),
+            PeerEdge = InputSharingWire.EdgeValue(config.PeerEdge),
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        });
+    }
+
+    private void SyncInputConfig()
+    {
+        pendingInputConfigSync = true;
+        SendInputConfig();
+        if (transport is not null && !string.IsNullOrEmpty(config.Password))
+        {
+            pendingInputConfigSync = false;
+        }
     }
 
     private void AddHistory(ClipboardContent content)

@@ -11,6 +11,9 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
     private var task: URLSessionWebSocketTask?
     private var shouldRun = false
     private var reconnectScheduled = false
+    private let keepAliveInterval: TimeInterval = 10
+    private var keepAliveTimer: DispatchSourceTimer?
+    private var pingInFlight = false
 
     init(host: String, port: Int) {
         self.host = host
@@ -26,6 +29,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
     func stop() {
         shouldRun = false
         reconnectScheduled = false
+        stopKeepAlive()
         task?.cancel(with: .goingAway, reason: nil)
         session?.invalidateAndCancel()
         task = nil
@@ -47,6 +51,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
             return
         }
 
+        pingInFlight = false
         onStatus?("connecting \(host):\(port)")
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: url)
@@ -57,8 +62,12 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
     }
 
     private func receiveLoop() {
-        task?.receive { [weak self] result in
-            guard let self else {
+        guard let activeTask = task else {
+            return
+        }
+
+        activeTask.receive { [weak self, weak activeTask] result in
+            guard let self, self.task === activeTask else {
                 return
             }
 
@@ -92,6 +101,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         }
 
         reconnectScheduled = true
+        stopKeepAlive()
         task?.cancel(with: .goingAway, reason: nil)
         session?.invalidateAndCancel()
         task = nil
@@ -106,13 +116,65 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         }
     }
 
+    private func startKeepAlive() {
+        stopKeepAlive()
+
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + keepAliveInterval, repeating: keepAliveInterval)
+        timer.setEventHandler { [weak self] in
+            self?.sendKeepAlivePing()
+        }
+        keepAliveTimer = timer
+        timer.resume()
+    }
+
+    private func stopKeepAlive() {
+        keepAliveTimer?.cancel()
+        keepAliveTimer = nil
+        pingInFlight = false
+    }
+
+    private func sendKeepAlivePing() {
+        guard shouldRun, let activeTask = task else {
+            return
+        }
+
+        if pingInFlight {
+            onPeerCount?(0)
+            onStatus?("disconnected: keepalive timeout")
+            scheduleReconnect()
+            return
+        }
+
+        pingInFlight = true
+        activeTask.sendPing { [weak self, weak activeTask] error in
+            DispatchQueue.main.async {
+                guard let self, self.task === activeTask else {
+                    return
+                }
+
+                if let error {
+                    self.onPeerCount?(0)
+                    self.onStatus?("disconnected: \(error.localizedDescription)")
+                    self.scheduleReconnect()
+                } else {
+                    self.pingInFlight = false
+                }
+            }
+        }
+    }
+
     func urlSession(
         _ session: URLSession,
         webSocketTask: URLSessionWebSocketTask,
         didOpenWithProtocol protocol: String?
     ) {
+        guard shouldRun, task === webSocketTask else {
+            return
+        }
         onPeerCount?(1)
         onStatus?("connected \(host):\(port)")
+        startKeepAlive()
     }
 
     func urlSession(
@@ -121,6 +183,9 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
+        guard task === webSocketTask else {
+            return
+        }
         if shouldRun {
             onPeerCount?(0)
             onStatus?("disconnected; retrying")

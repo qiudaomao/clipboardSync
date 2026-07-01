@@ -25,6 +25,8 @@ internal interface ISyncTransport : IDisposable
 
 internal sealed class ClientTransport : ISyncTransport
 {
+    private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan KeepAliveTimeout = TimeSpan.FromSeconds(5);
     private readonly string host;
     private readonly int port;
     private readonly SemaphoreSlim sendLock = new(1, 1);
@@ -96,6 +98,7 @@ internal sealed class ClientTransport : ISyncTransport
             try
             {
                 using var ws = new ClientWebSocket();
+                ConfigureKeepAlive(ws);
                 socket = ws;
                 StatusChanged?.Invoke($"connecting {host}:{port}");
                 await ws.ConnectAsync(new Uri($"ws://{host}:{port}/"), token).ConfigureAwait(false);
@@ -127,6 +130,17 @@ internal sealed class ClientTransport : ISyncTransport
                     break;
                 }
             }
+        }
+    }
+
+    private static void ConfigureKeepAlive(ClientWebSocket ws)
+    {
+        ws.Options.KeepAliveInterval = KeepAliveInterval;
+
+        var timeoutProperty = ws.Options.GetType().GetProperty("KeepAliveTimeout");
+        if (timeoutProperty?.CanWrite == true)
+        {
+            timeoutProperty.SetValue(ws.Options, KeepAliveTimeout);
         }
     }
 

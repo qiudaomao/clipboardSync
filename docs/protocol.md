@@ -11,6 +11,10 @@ The server accepts WebSocket upgrade requests on:
 ws://<host>:<port>/
 ```
 
+Clients send WebSocket keepalive traffic about every 10 seconds. Custom servers
+reply to standard ping frames with pong frames; clients that can wait for pong
+responses treat a missing pong as a disconnect and reconnect.
+
 ## Encrypted Message
 
 Every WebSocket text message is an AES-256-GCM envelope:
@@ -127,6 +131,26 @@ mouse and basic keyboard sharing.
 }
 ```
 
+### Config
+
+```json
+{
+  "type": "input",
+  "origin": "device-id",
+  "target": null,
+  "kind": "config",
+  "role": "server",
+  "enabled": true,
+  "direction": "serverControlsClient",
+  "peerEdge": "right",
+  "sentAt": 1782835200.0
+}
+```
+
+`kind: "config"` synchronizes the input-sharing setting. A client may send it
+as a change request. The server applies the request and broadcasts the accepted
+server config to all peers.
+
 ### Mouse
 
 ```json
@@ -185,10 +209,10 @@ Input message fields:
 - `type`: always `input`.
 - `origin`: sender device id.
 - `target`: optional receiver device id. Messages with another target are ignored.
-- `kind`: `hello`, `capture`, `mouseMove`, `mouseButton`, `mouseWheel`, or `key`.
+- `kind`: `hello`, `config`, `capture`, `mouseMove`, `mouseButton`, `mouseWheel`, or `key`.
 - `role`: sender role for `hello`, either `server` or `client`.
 - `screen`: virtual desktop size and scale for `hello`.
-- `enabled`: sender input-sharing runtime state for `hello`.
+- `enabled`: sender input-sharing runtime state for `hello`; configured input-sharing state for `config`.
 - `direction`: `serverControlsClient` or `clientControlsServer`.
 - `peerEdge`: peer position relative to the controlling side: `left`, `right`, `top`, or `bottom`.
 - `normalizedX` / `normalizedY`: screen coordinates normalized to `0...1`.
@@ -218,7 +242,7 @@ Encrypted envelope fields:
 - A server broadcasts the encrypted envelope from one client to other clients.
 - A server applies remote messages locally only when it is configured with the same password.
 - Input sharing is off by default and must be enabled in settings or the tray/menu.
-- The configured direction is either server controls client or client controls server. On reconnect conflicts, the server's direction and peer-edge settings win.
+- The configured direction is either server controls client or client controls server. The server is authoritative for input-sharing config; clients may request changes with `kind: "config"`, and the server rebroadcasts the accepted config.
 - The peer edge defines where the remote virtual desktop sits relative to the controller's virtual desktop.
 - The controller starts remote capture when the local pointer reaches the configured edge and ends capture when the remote pointer crosses back over the opposite edge.
 - macOS requires Accessibility/Input Monitoring permission for input capture and injection.
