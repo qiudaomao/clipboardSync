@@ -673,11 +673,12 @@ final class InputSharingCoordinator {
         if let x = mouse.normalizedX, let y = mouse.normalizedY {
             warpTo(normalizedX: x, normalizedY: y)
         }
+        let deltaY = config.reverseMouseVerticalScroll ? -(mouse.deltaY ?? 0) : (mouse.deltaY ?? 0)
         guard let event = CGEvent(
             scrollWheelEvent2Source: nil,
             units: .line,
             wheelCount: 2,
-            wheel1: Int32(mouse.deltaY ?? 0),
+            wheel1: Int32(deltaY),
             wheel2: Int32(mouse.deltaX ?? 0),
             wheel3: 0
         ) else {

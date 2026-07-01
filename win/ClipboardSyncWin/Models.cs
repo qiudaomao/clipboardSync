@@ -38,6 +38,7 @@ internal sealed class AppConfig
     public bool InputSharingEnabled { get; set; }
     public string? ControlDeviceId { get; set; }
     public ScreenEdge PeerEdge { get; set; } = ScreenEdge.Right;
+    public bool ReverseMouseVerticalScroll { get; set; }
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
 
     public void Normalize()
@@ -63,6 +64,7 @@ internal sealed class AppConfig
             InputSharingEnabled = InputSharingEnabled,
             ControlDeviceId = ControlDeviceId,
             PeerEdge = PeerEdge,
+            ReverseMouseVerticalScroll = ReverseMouseVerticalScroll,
             DeviceId = DeviceId
         };
     }

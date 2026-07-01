@@ -9,6 +9,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let passwordField = NSSecureTextField()
     private let inputSharingButton = NSButton(checkboxWithTitle: "Enable Input Sharing", target: nil, action: nil)
     private let peerEdgePopup = NSPopUpButton()
+    private let reverseScrollButton = NSButton(checkboxWithTitle: "Reverse Vertical Scroll", target: nil, action: nil)
     private let hostHintLabel = NSTextField(labelWithString: "Used only in client mode.")
     private let validationLabel = NSTextField(labelWithString: "")
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
@@ -19,14 +20,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 438),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 470),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         window.title = "Clipboard Sync Settings"
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 480, height: 420)
+        window.minSize = NSSize(width: 480, height: 452)
 
         super.init(window: window)
 
@@ -46,6 +47,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         passwordField.stringValue = config.password
         inputSharingButton.state = config.inputSharingEnabled ? .on : .off
         selectPeerEdge(config.peerEdge)
+        reverseScrollButton.state = config.reverseMouseVerticalScroll ? .on : .off
         validationLabel.stringValue = ""
         validationLabel.isHidden = true
         updateModeState()
@@ -87,6 +89,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
         inputSharingButton.target = self
         inputSharingButton.action = #selector(inputSharingChanged)
+
+        reverseScrollButton.target = self
+        reverseScrollButton.action = #selector(inputSharingChanged)
 
         for edge in ScreenEdge.allCases {
             peerEdgePopup.addItem(withTitle: edge.title)
@@ -138,7 +143,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             formRow(label: "Port", control: portField),
             formRow(label: "Password", control: passwordField),
             formRow(label: "Input", control: inputSharingButton),
-            formRow(label: "Peer", control: peerEdgePopup)
+            formRow(label: "Peer", control: peerEdgePopup),
+            formRow(label: "Scroll", control: reverseScrollButton)
         ])
         formStack.orientation = .vertical
         formStack.alignment = .leading
@@ -168,7 +174,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             portField.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             passwordField.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             inputSharingButton.widthAnchor.constraint(equalTo: hostField.widthAnchor),
-            peerEdgePopup.widthAnchor.constraint(equalTo: hostField.widthAnchor)
+            peerEdgePopup.widthAnchor.constraint(equalTo: hostField.widthAnchor),
+            reverseScrollButton.widthAnchor.constraint(equalTo: hostField.widthAnchor)
         ])
     }
 
@@ -218,6 +225,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private func updateInputSharingState() {
         let isEnabled = inputSharingButton.state == .on
         peerEdgePopup.isEnabled = isEnabled
+        reverseScrollButton.isEnabled = isEnabled
     }
 
     @objc private func save() {
@@ -227,6 +235,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let password = passwordField.stringValue
         let inputSharingEnabled = inputSharingButton.state == .on
         let peerEdge = selectedPeerEdge()
+        let reverseMouseVerticalScroll = reverseScrollButton.state == .on
 
         if mode == .client && host.isEmpty {
             showValidation("Enter a server host for client mode.")
@@ -259,7 +268,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             password: password,
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: currentConfig.controlDeviceId,
-            peerEdge: peerEdge
+            peerEdge: peerEdge,
+            reverseMouseVerticalScroll: reverseMouseVerticalScroll
         )
         onSave?(nextConfig)
         close()

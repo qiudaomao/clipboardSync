@@ -620,7 +620,8 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
         if (mouse.DeltaY is not null)
         {
-            SendMouseInput(MouseFlags.Wheel, (int)(mouse.DeltaY.Value * 120));
+            var deltaY = config.ReverseMouseVerticalScroll ? -mouse.DeltaY.Value : mouse.DeltaY.Value;
+            SendMouseInput(MouseFlags.Wheel, (int)(deltaY * 120));
         }
         if (mouse.DeltaX is not null)
         {

@@ -43,6 +43,7 @@ struct AppConfig: Codable {
     var inputSharingEnabled: Bool
     var controlDeviceId: String?
     var peerEdge: ScreenEdge
+    var reverseMouseVerticalScroll: Bool
 
     static let defaults = AppConfig(
         mode: .client,
@@ -51,7 +52,8 @@ struct AppConfig: Codable {
         password: "",
         inputSharingEnabled: false,
         controlDeviceId: nil,
-        peerEdge: .right
+        peerEdge: .right,
+        reverseMouseVerticalScroll: false
     )
     private static let storageKey = "ClipboardSyncMac.config"
 
@@ -62,7 +64,8 @@ struct AppConfig: Codable {
         password: String,
         inputSharingEnabled: Bool,
         controlDeviceId: String?,
-        peerEdge: ScreenEdge
+        peerEdge: ScreenEdge,
+        reverseMouseVerticalScroll: Bool
     ) {
         self.mode = mode
         self.host = host
@@ -71,6 +74,7 @@ struct AppConfig: Codable {
         self.inputSharingEnabled = inputSharingEnabled
         self.controlDeviceId = controlDeviceId
         self.peerEdge = peerEdge
+        self.reverseMouseVerticalScroll = reverseMouseVerticalScroll
     }
 
     init(from decoder: Decoder) throws {
@@ -82,6 +86,7 @@ struct AppConfig: Codable {
         inputSharingEnabled = try container.decodeIfPresent(Bool.self, forKey: .inputSharingEnabled) ?? Self.defaults.inputSharingEnabled
         controlDeviceId = try container.decodeIfPresent(String.self, forKey: .controlDeviceId) ?? Self.defaults.controlDeviceId
         peerEdge = try container.decodeIfPresent(ScreenEdge.self, forKey: .peerEdge) ?? Self.defaults.peerEdge
+        reverseMouseVerticalScroll = try container.decodeIfPresent(Bool.self, forKey: .reverseMouseVerticalScroll) ?? Self.defaults.reverseMouseVerticalScroll
     }
 
     static func load() -> AppConfig {
@@ -108,7 +113,8 @@ struct AppConfig: Codable {
             password: password,
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: controlDeviceId?.trimmingCharacters(in: .whitespacesAndNewlines),
-            peerEdge: peerEdge
+            peerEdge: peerEdge,
+            reverseMouseVerticalScroll: reverseMouseVerticalScroll
         )
     }
 }

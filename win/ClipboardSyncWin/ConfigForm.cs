@@ -22,6 +22,7 @@ internal sealed class ConfigForm : Form
     private readonly TextBox passwordBox = new() { UseSystemPasswordChar = true };
     private readonly CheckBox inputSharingBox = new() { Text = "Enable Input Sharing", AutoSize = true };
     private readonly ComboBox peerEdgeBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly CheckBox reverseScrollBox = new() { Text = "Reverse Vertical Scroll", AutoSize = true };
     private string clientHostDraft = "";
 
     public AppConfig Config { get; private set; }
@@ -36,7 +37,7 @@ internal sealed class ConfigForm : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(430, 324);
+        ClientSize = new Size(430, 360);
 
         modeBox.Items.AddRange(new object[] { "Client", "Server" });
         modeBox.SelectedIndex = Config.Mode == SyncMode.Client ? 0 : 1;
@@ -45,6 +46,7 @@ internal sealed class ConfigForm : Form
         portBox.Value = Math.Clamp(Config.Port, 1, 65_535);
         passwordBox.Text = Config.Password;
         inputSharingBox.Checked = Config.InputSharingEnabled;
+        reverseScrollBox.Checked = Config.ReverseMouseVerticalScroll;
         peerEdgeBox.Items.AddRange(new object[] { "Right", "Left", "Top", "Bottom" });
         peerEdgeBox.SelectedIndex = Config.PeerEdge switch
         {
@@ -81,7 +83,7 @@ internal sealed class ConfigForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
 
         AddRow(layout, 0, "Mode", modeBox);
         AddRow(layout, 1, "Host", BuildHostControl());
@@ -89,6 +91,7 @@ internal sealed class ConfigForm : Form
         AddRow(layout, 3, "Password", passwordBox);
         AddRow(layout, 4, "Input", inputSharingBox);
         AddRow(layout, 5, "Peer", peerEdgeBox);
+        AddRow(layout, 6, "Scroll", reverseScrollBox);
 
         var buttons = new FlowLayoutPanel
         {
@@ -164,6 +167,7 @@ internal sealed class ConfigForm : Form
     private void UpdateInputSharingState()
     {
         peerEdgeBox.Enabled = inputSharingBox.Checked;
+        reverseScrollBox.Enabled = inputSharingBox.Checked;
     }
 
     private void Save()
@@ -197,6 +201,7 @@ internal sealed class ConfigForm : Form
         Config.Port = (int)portBox.Value;
         Config.Password = password;
         Config.InputSharingEnabled = inputSharingBox.Checked;
+        Config.ReverseMouseVerticalScroll = reverseScrollBox.Checked;
         Config.PeerEdge = peerEdgeBox.SelectedIndex switch
         {
             1 => ScreenEdge.Left,

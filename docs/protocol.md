@@ -256,6 +256,7 @@ Encrypted envelope fields:
 - Input sharing is off by default and must be enabled in settings or the tray/menu.
 - The configured control device is selected by device id. The server is authoritative for input-sharing config; clients may request changes with `kind: "config"`, and the server rebroadcasts the accepted config.
 - The peer edge defines where the remote virtual desktop sits relative to the controller's virtual desktop.
+- Reverse vertical scroll is a local receiver setting. It is not synchronized, flips only injected `deltaY`, and leaves horizontal wheel deltas unchanged.
 - The controller starts remote capture when the local pointer reaches the configured edge and ends capture when the remote pointer crosses back over the opposite edge.
 - macOS requires Accessibility/Input Monitoring permission for input capture and injection.
 - Windows uses low-level mouse/keyboard hooks and `SendInput` for capture and injection.
