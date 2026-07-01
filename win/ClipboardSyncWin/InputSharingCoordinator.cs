@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace ClipboardSyncWin;
@@ -27,10 +28,12 @@ internal sealed class InputSharingCoordinator : IDisposable
     private const uint LLMHF_INJECTED = 0x00000001;
     private const uint LLKHF_INJECTED = 0x00000010;
     private static readonly string[] ModifierKeyOrder = ["Shift", "Control", "Alt", "Meta"];
+    private static readonly TimeSpan RemoteMouseMoveInterval = TimeSpan.FromMilliseconds(8);
 
     private readonly string deviceId;
     private readonly LowLevelProc mouseProc;
     private readonly LowLevelProc keyboardProc;
+    private readonly object remoteMouseMoveLock = new();
     private AppConfig config = new();
     private SyncMode role = SyncMode.Client;
     private int peerCount;
@@ -41,6 +44,9 @@ internal sealed class InputSharingCoordinator : IDisposable
     private bool receivingRemote;
     private readonly HashSet<string> pressedModifierKeys = [];
     private readonly HashSet<string> remotePressedModifierKeys = [];
+    private (double X, double Y)? pendingRemoteMouseMove;
+    private System.Threading.Timer? pendingRemoteMouseMoveTimer;
+    private DateTimeOffset lastRemoteMouseMoveAt = DateTimeOffset.MinValue;
     private PointF remotePosition;
     private IntPtr mouseHook;
     private IntPtr keyboardHook;
@@ -130,6 +136,7 @@ internal sealed class InputSharingCoordinator : IDisposable
     {
         ReleaseRemoteModifiers();
         SendPressedModifierKeyUps();
+        ClearPendingRemoteMouseMove();
         RemoveHooks();
     }
 
@@ -195,6 +202,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             ReleaseRemoteModifiers();
             receivingRemote = false;
+            ClearPendingRemoteMouseMove();
         }
         UpdateStatus();
     }
@@ -558,11 +566,13 @@ internal sealed class InputSharingCoordinator : IDisposable
         if (capture.Action == "start")
         {
             receivingRemote = true;
+            ClearPendingRemoteMouseMove();
             ReleaseRemoteModifiers();
             WarpTo(capture.NormalizedX, capture.NormalizedY);
         }
         else if (capture.Action == "end")
         {
+            ClearPendingRemoteMouseMove();
             ReleaseRemoteModifiers();
             receivingRemote = false;
         }
@@ -574,7 +584,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             return;
         }
-        WarpTo(mouse.NormalizedX.Value, mouse.NormalizedY.Value);
+        QueueRemoteMouseMove(mouse.NormalizedX.Value, mouse.NormalizedY.Value);
     }
 
     private void HandleRemoteMouseButton(InputMousePayload? mouse)
@@ -583,6 +593,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             return;
         }
+        ClearPendingRemoteMouseMove();
         if (mouse.NormalizedX is not null && mouse.NormalizedY is not null)
         {
             WarpTo(mouse.NormalizedX.Value, mouse.NormalizedY.Value);
@@ -602,6 +613,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             return;
         }
+        ClearPendingRemoteMouseMove();
         if (mouse.NormalizedX is not null && mouse.NormalizedY is not null)
         {
             WarpTo(mouse.NormalizedX.Value, mouse.NormalizedY.Value);
@@ -630,6 +642,78 @@ internal sealed class InputSharingCoordinator : IDisposable
 
         ApplyRemoteModifierState(key.Modifiers);
         SendKeyboardInput((ushort)virtualKey, key.Action == "up");
+    }
+
+    private void QueueRemoteMouseMove(double normalizedX, double normalizedY)
+    {
+        (double X, double Y)? moveToApply = null;
+        lock (remoteMouseMoveLock)
+        {
+            pendingRemoteMouseMove = (normalizedX, normalizedY);
+            var now = DateTimeOffset.UtcNow;
+            var elapsed = now - lastRemoteMouseMoveAt;
+            if (elapsed >= RemoteMouseMoveInterval && pendingRemoteMouseMoveTimer is null)
+            {
+                moveToApply = pendingRemoteMouseMove;
+                pendingRemoteMouseMove = null;
+                lastRemoteMouseMoveAt = now;
+            }
+            else if (pendingRemoteMouseMoveTimer is null)
+            {
+                var delay = RemoteMouseMoveInterval - elapsed;
+                if (delay < TimeSpan.Zero)
+                {
+                    delay = TimeSpan.Zero;
+                }
+                pendingRemoteMouseMoveTimer = new System.Threading.Timer(
+                    _ => FlushPendingRemoteMouseMove(),
+                    null,
+                    delay,
+                    Timeout.InfiniteTimeSpan);
+            }
+        }
+
+        if (moveToApply is { } move)
+        {
+            WarpTo(move.X, move.Y);
+        }
+    }
+
+    private void FlushPendingRemoteMouseMove()
+    {
+        (double X, double Y)? moveToApply = null;
+        lock (remoteMouseMoveLock)
+        {
+            pendingRemoteMouseMoveTimer?.Dispose();
+            pendingRemoteMouseMoveTimer = null;
+            if (!receivingRemote)
+            {
+                pendingRemoteMouseMove = null;
+                return;
+            }
+
+            if (pendingRemoteMouseMove is { } move)
+            {
+                moveToApply = move;
+                pendingRemoteMouseMove = null;
+                lastRemoteMouseMoveAt = DateTimeOffset.UtcNow;
+            }
+        }
+
+        if (moveToApply is { } point)
+        {
+            WarpTo(point.X, point.Y);
+        }
+    }
+
+    private void ClearPendingRemoteMouseMove()
+    {
+        lock (remoteMouseMoveLock)
+        {
+            pendingRemoteMouseMoveTimer?.Dispose();
+            pendingRemoteMouseMoveTimer = null;
+            pendingRemoteMouseMove = null;
+        }
     }
 
     private static void WarpTo(double normalizedX, double normalizedY)

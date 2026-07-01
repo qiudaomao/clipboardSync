@@ -5,11 +5,15 @@ import Foundation
 enum CryptoBox {
     private static let type = "encrypted"
     private static let version = 1
+    private static let realtimeVersion = 2
     private static let saltBytes = 16
     private static let nonceBytes = 12
     private static let tagBytes = 16
     private static let keyBytes = 32
     private static let pbkdf2Rounds = 100_000
+    private static let realtimeSalt = Data("ClipboardSync realtime input v1".utf8)
+    private static let keyCacheQueue = DispatchQueue(label: "ClipboardSyncMac.crypto.keyCache")
+    private static var cachedKeys: [String: SymmetricKey] = [:]
 
     static func encrypt(_ plaintext: Data, password: String) throws -> EncryptedEnvelope {
         let salt = randomData(count: saltBytes)
@@ -28,8 +32,24 @@ enum CryptoBox {
         )
     }
 
+    static func encryptRealtime(_ plaintext: Data, password: String) throws -> EncryptedEnvelope {
+        let nonceData = randomData(count: nonceBytes)
+        let key = try cachedKey(password: password, salt: realtimeSalt)
+        let nonce = try AES.GCM.Nonce(data: nonceData)
+        let sealedBox = try AES.GCM.seal(plaintext, using: key, nonce: nonce)
+
+        return EncryptedEnvelope(
+            type: type,
+            version: realtimeVersion,
+            salt: realtimeSalt.base64EncodedString(),
+            nonce: nonceData.base64EncodedString(),
+            ciphertext: sealedBox.ciphertext.base64EncodedString(),
+            tag: sealedBox.tag.base64EncodedString()
+        )
+    }
+
     static func decrypt(_ envelope: EncryptedEnvelope, password: String) throws -> Data {
-        guard envelope.type == type, envelope.version == version else {
+        guard envelope.type == type, envelope.version == version || envelope.version == realtimeVersion else {
             throw CryptoError.unsupportedEnvelope
         }
         guard
@@ -42,10 +62,25 @@ enum CryptoBox {
             throw CryptoError.invalidEnvelope
         }
 
-        let key = try deriveKey(password: password, salt: salt)
+        let key = envelope.version == realtimeVersion
+            ? try cachedKey(password: password, salt: salt)
+            : try deriveKey(password: password, salt: salt)
         let nonce = try AES.GCM.Nonce(data: nonceData)
         let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
         return try AES.GCM.open(sealedBox, using: key)
+    }
+
+    private static func cachedKey(password: String, salt: Data) throws -> SymmetricKey {
+        let cacheKey = "\(password)\u{0}\(salt.base64EncodedString())"
+        if let key = keyCacheQueue.sync(execute: { cachedKeys[cacheKey] }) {
+            return key
+        }
+
+        let key = try deriveKey(password: password, salt: salt)
+        keyCacheQueue.sync {
+            cachedKeys[cacheKey] = key
+        }
+        return key
     }
 
     private static func deriveKey(password: String, salt: Data) throws -> SymmetricKey {

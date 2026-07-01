@@ -440,7 +440,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func publishInput(_ message: InputMessage) {
-        _ = sendEncrypted(message)
+        _ = sendEncryptedInput(message)
     }
 
     @discardableResult
@@ -457,6 +457,27 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         guard envelopeData.count <= ClipboardLimits.maxWebSocketMessageBytes else {
             statusText = "clipboard payload too large"
+            return false
+        }
+
+        transport?.send(payload)
+        return true
+    }
+
+    @discardableResult
+    private func sendEncryptedInput(_ message: InputMessage) -> Bool {
+        guard
+            let data = try? jsonEncoder.encode(message),
+            let envelope = try? CryptoBox.encryptRealtime(data, password: config.password),
+            let envelopeData = try? jsonEncoder.encode(envelope),
+            let payload = String(data: envelopeData, encoding: .utf8)
+        else {
+            statusText = "encryption failed"
+            return false
+        }
+
+        guard envelopeData.count <= ClipboardLimits.maxWebSocketMessageBytes else {
+            statusText = "input payload too large"
             return false
         }
 

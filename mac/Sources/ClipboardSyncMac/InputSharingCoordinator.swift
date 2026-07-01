@@ -22,6 +22,9 @@ final class InputSharingCoordinator {
     private var eventTap: CFMachPort?
     private var eventSource: CFRunLoopSource?
     private var lastModifierKeys: Set<String> = []
+    private let mouseMoveSendInterval: TimeInterval = 1.0 / 60.0
+    private var lastMouseMoveSentAt = Date.distantPast
+    private var pendingMouseMoveTimer: DispatchSourceTimer?
     private var suppressUntil = Date.distantPast
     private var didRequestAccessibility = false
     private var didRequestInputMonitoring = false
@@ -40,6 +43,7 @@ final class InputSharingCoordinator {
         remoteActive = false
         receivingRemote = false
         remotePressedMouseButtons.removeAll()
+        cancelPendingMouseMove()
         releaseRemoteModifiers()
     }
 
@@ -141,6 +145,7 @@ final class InputSharingCoordinator {
             }
             removeEventTap()
             remoteActive = false
+            cancelPendingMouseMove()
         }
         updateStatus()
     }
@@ -253,12 +258,14 @@ final class InputSharingCoordinator {
             guard remoteActive else {
                 return Unmanaged.passUnretained(event)
             }
+            flushPendingMouseMove()
             sendMouseButton(type: type)
             return nil
         case .scrollWheel:
             guard remoteActive else {
                 return Unmanaged.passUnretained(event)
             }
+            flushPendingMouseMove()
             sendMouseWheel(event)
             return nil
         case .keyDown, .keyUp:
@@ -286,7 +293,7 @@ final class InputSharingCoordinator {
             remoteActive = true
             remotePosition = entryPosition(on: remoteScreen, edge: config.peerEdge, location: event.location)
             sendCapture(action: "start")
-            sendMouseMove()
+            sendMouseMoveNow()
             updateStatus()
             return nil
         }
@@ -297,6 +304,7 @@ final class InputSharingCoordinator {
         remotePosition.y += dy
 
         if shouldEndCapture(deltaX: dx, deltaY: dy) {
+            cancelPendingMouseMove()
             sendPressedModifierKeyUps()
             sendCapture(action: "end")
             remoteActive = false
@@ -309,7 +317,7 @@ final class InputSharingCoordinator {
             remotePosition.x = min(max(remotePosition.x, 0), max(remoteScreen.width - 1, 0))
             remotePosition.y = min(max(remotePosition.y, 0), max(remoteScreen.height - 1, 0))
         }
-        sendMouseMove()
+        queueMouseMove()
         return nil
     }
 
@@ -435,6 +443,52 @@ final class InputSharingCoordinator {
             key: nil,
             sentAt: Date().timeIntervalSince1970
         ))
+    }
+
+    private func queueMouseMove() {
+        let elapsed = Date().timeIntervalSince(lastMouseMoveSentAt)
+        if elapsed >= mouseMoveSendInterval {
+            sendMouseMoveNow()
+            return
+        }
+
+        guard pendingMouseMoveTimer == nil else {
+            return
+        }
+
+        let delay = mouseMoveSendInterval - elapsed
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + delay)
+        timer.setEventHandler { [weak self] in
+            guard let self else {
+                return
+            }
+            self.pendingMouseMoveTimer = nil
+            guard self.remoteActive else {
+                return
+            }
+            self.sendMouseMoveNow()
+        }
+        pendingMouseMoveTimer = timer
+        timer.resume()
+    }
+
+    private func sendMouseMoveNow() {
+        cancelPendingMouseMove()
+        lastMouseMoveSentAt = Date()
+        sendMouseMove()
+    }
+
+    private func flushPendingMouseMove() {
+        guard pendingMouseMoveTimer != nil else {
+            return
+        }
+        sendMouseMoveNow()
+    }
+
+    private func cancelPendingMouseMove() {
+        pendingMouseMoveTimer?.cancel()
+        pendingMouseMoveTimer = nil
     }
 
     private func sendMouseButton(type: CGEventType) {

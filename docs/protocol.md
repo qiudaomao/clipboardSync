@@ -30,10 +30,17 @@ Every WebSocket text message is an AES-256-GCM envelope:
 }
 ```
 
-The AES key is derived from the configured sync password with PBKDF2-HMAC-SHA256,
-100,000 rounds, a per-message 16-byte salt, and a 32-byte output key. AES-GCM
-uses a per-message 12-byte nonce and 16-byte authentication tag. Devices must
-use the same password; messages encrypted with a different password are ignored.
+Version `1` is used for clipboard messages. Its AES key is derived from the
+configured sync password with PBKDF2-HMAC-SHA256, 100,000 rounds, a per-message
+16-byte salt, and a 32-byte output key.
+
+Version `2` is used for input-sharing messages. It uses the same password,
+PBKDF2 parameters, and AES-GCM format, but derives a cached realtime key from a
+fixed input salt so mouse/key packets do not run PBKDF2 for every event.
+
+All encrypted messages use a per-message 12-byte nonce and 16-byte
+authentication tag. Devices must use the same password; messages encrypted with
+a different password are ignored.
 
 ## Plaintext Messages
 
@@ -225,8 +232,8 @@ Input message fields:
 Encrypted envelope fields:
 
 - `type`: always `encrypted`.
-- `version`: encryption envelope version, currently `1`.
-- `salt`: base64-encoded random PBKDF2 salt.
+- `version`: encryption envelope version, `1` for clipboard and `2` for input sharing.
+- `salt`: base64-encoded PBKDF2 salt; random for version `1`, fixed input salt for version `2`.
 - `nonce`: base64-encoded AES-GCM nonce.
 - `ciphertext`: base64-encoded encrypted clipboard JSON.
 - `tag`: base64-encoded AES-GCM authentication tag.
@@ -253,4 +260,5 @@ Encrypted envelope fields:
 - macOS requires Accessibility/Input Monitoring permission for input capture and injection.
 - Windows uses low-level mouse/keyboard hooks and `SendInput` for capture and injection.
 - Input sharing covers mouse move, button, wheel, and basic physical keyboard events. IME, media keys, and system-reserved shortcuts are not guaranteed.
+- Mouse move packets are send-side throttled and receive-side coalesced; the latest pointer position wins when the receiver is under load.
 - Binary WebSocket messages are ignored.

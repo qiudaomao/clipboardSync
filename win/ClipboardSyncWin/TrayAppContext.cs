@@ -29,6 +29,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem serverModeItem;
     private readonly ClipboardMonitor clipboardMonitor;
     private readonly InputSharingCoordinator inputCoordinator;
+    private readonly object inputCoordinatorLock = new();
     private readonly SynchronizationContext uiContext;
     private readonly Icon trayIcon;
     private readonly List<ClipboardHistoryEntry> history = [];
@@ -327,7 +328,7 @@ internal sealed class TrayAppContext : ApplicationContext
             status = text;
             UpdateMenu();
         });
-        transport.MessageReceived += payload => OnUi(() => HandleMessage(payload));
+        transport.MessageReceived += HandleMessage;
         transport.PeerCountChanged += count => OnUi(() =>
         {
             peerCount = count;
@@ -397,17 +398,19 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void PublishInput(InputMessage message)
     {
-        _ = SendEncrypted(message);
+        _ = SendEncrypted(message, realtime: true);
     }
 
-    private bool SendEncrypted<T>(T message)
+    private bool SendEncrypted<T>(T message, bool realtime = false)
     {
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(message, MessageJsonOptions);
         EncryptedEnvelope envelope;
         byte[] envelopeBytes;
         try
         {
-            envelope = CryptoBox.Encrypt(payloadBytes, config.Password);
+            envelope = realtime
+                ? CryptoBox.EncryptRealtime(payloadBytes, config.Password)
+                : CryptoBox.Encrypt(payloadBytes, config.Password);
             envelopeBytes = JsonSerializer.SerializeToUtf8Bytes(envelope, MessageJsonOptions);
         }
         catch
@@ -451,7 +454,7 @@ internal sealed class TrayAppContext : ApplicationContext
         switch (header?.Type)
         {
             case "clipboard":
-                HandleClipboardMessage(plaintext);
+                OnUi(() => HandleClipboardMessage(plaintext));
                 break;
             case "input":
                 HandleInputMessage(plaintext);
@@ -500,6 +503,30 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
+        if (IsRealtimeInputMessage(message))
+        {
+            HandleRealtimeInputMessage(message);
+            return;
+        }
+
+        OnUi(() => HandleInputControlMessage(message));
+    }
+
+    private static bool IsRealtimeInputMessage(InputMessage message)
+    {
+        return message.Kind is "capture" or "mouseMove" or "mouseButton" or "mouseWheel" or "key";
+    }
+
+    private void HandleRealtimeInputMessage(InputMessage message)
+    {
+        lock (inputCoordinatorLock)
+        {
+            inputCoordinator.Handle(message);
+        }
+    }
+
+    private void HandleInputControlMessage(InputMessage message)
+    {
         RememberInputDevice(message);
 
         if (message.Kind == "config")
@@ -533,7 +560,10 @@ internal sealed class TrayAppContext : ApplicationContext
             }
         }
 
-        inputCoordinator.Handle(message);
+        lock (inputCoordinatorLock)
+        {
+            inputCoordinator.Handle(message);
+        }
         if (message.Kind == "hello" && config.Mode == SyncMode.Server)
         {
             SendInputHello();
@@ -591,7 +621,10 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void UpdateInputCoordinator(bool sendHello = false)
     {
-        inputCoordinator.Update(config, config.Mode, peerCount);
+        lock (inputCoordinatorLock)
+        {
+            inputCoordinator.Update(config, config.Mode, peerCount);
+        }
         UpdateMenu();
         if (sendHello)
         {
@@ -605,7 +638,12 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             return;
         }
-        PublishInput(inputCoordinator.MakeHello(Environment.MachineName, NetworkAddress.LocalLanIPv4Address()));
+        InputMessage hello;
+        lock (inputCoordinatorLock)
+        {
+            hello = inputCoordinator.MakeHello(Environment.MachineName, NetworkAddress.LocalLanIPv4Address());
+        }
+        PublishInput(hello);
     }
 
     private void SendInputConfig()
