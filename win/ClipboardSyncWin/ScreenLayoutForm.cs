@@ -528,15 +528,21 @@ internal sealed class ScreenLayoutCanvas : Panel
     /// axis where the two rects already share some span (so screens don't "touch" at a bare corner).
     private static IEnumerable<PointF> TouchCandidates(RectangleF rect, RectangleF other)
     {
-        var horizontalOverlap = rect.Top < other.Bottom && rect.Bottom > other.Top;
-        var verticalOverlap = rect.Left < other.Right && rect.Right > other.Left;
+        // How much the two rects already overlap along each axis - a larger Y-overlap means
+        // they're better aligned to sit beside each other (left/right); a larger X-overlap means
+        // they're better aligned to stack (top/bottom). Restricting to whichever is larger, rather
+        // than offering both whenever there's any overlap at all, keeps a drag that's clearly
+        // meant to go above/below from snapping back beside the other screen (or vice versa) just
+        // because that happens to be marginally closer to the drop point in raw distance.
+        var horizontalOverlap = Math.Min(rect.Bottom, other.Bottom) - Math.Max(rect.Top, other.Top);
+        var verticalOverlap = Math.Min(rect.Right, other.Right) - Math.Max(rect.Left, other.Left);
 
-        if (horizontalOverlap)
+        if (horizontalOverlap > 0 && horizontalOverlap >= verticalOverlap)
         {
             yield return new PointF(other.Right, rect.Y);
             yield return new PointF(other.Left - rect.Width, rect.Y);
         }
-        if (verticalOverlap)
+        else if (verticalOverlap > 0)
         {
             yield return new PointF(rect.X, other.Bottom);
             yield return new PointF(rect.X, other.Top - rect.Height);

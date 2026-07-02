@@ -448,15 +448,20 @@ final class ScreenLayoutCanvasView: NSView {
     /// Candidate origins placing `rect` flush against one edge of `other`, only offered along an
     /// axis where the two rects already share some span (so screens don't "touch" at a bare corner).
     private func touchCandidates(moving rect: CGRect, toTouch other: CGRect) -> [CGPoint] {
-        var candidates: [CGPoint] = []
-        let horizontalOverlap = rect.minY < other.maxY && rect.maxY > other.minY
-        let verticalOverlap = rect.minX < other.maxX && rect.maxX > other.minX
+        // How much the two rects already overlap along each axis — a larger Y-overlap means
+        // they're better aligned to sit beside each other (left/right); a larger X-overlap means
+        // they're better aligned to stack (top/bottom). Restricting to whichever is larger, rather
+        // than offering both whenever there's any overlap at all, keeps a drag that's clearly
+        // meant to go above/below from snapping back beside the other screen (or vice versa) just
+        // because that happens to be marginally closer to the drop point in raw distance.
+        let horizontalOverlap = min(rect.maxY, other.maxY) - max(rect.minY, other.minY)
+        let verticalOverlap = min(rect.maxX, other.maxX) - max(rect.minX, other.minX)
 
-        if horizontalOverlap {
+        var candidates: [CGPoint] = []
+        if horizontalOverlap > 0, horizontalOverlap >= verticalOverlap {
             candidates.append(CGPoint(x: other.maxX, y: rect.origin.y))
             candidates.append(CGPoint(x: other.minX - rect.width, y: rect.origin.y))
-        }
-        if verticalOverlap {
+        } else if verticalOverlap > 0 {
             candidates.append(CGPoint(x: rect.origin.x, y: other.maxY))
             candidates.append(CGPoint(x: rect.origin.x, y: other.minY - rect.height))
         }
