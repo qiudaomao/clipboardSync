@@ -171,21 +171,7 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
-        var layoutChanged = false;
-        foreach (var staleId in staleIds)
-        {
-            inputDevices.Remove(staleId);
-            layoutWatchers.Remove(staleId);
-            if (screenLayoutStore.Remove(staleId))
-            {
-                layoutChanged = true;
-            }
-            if (config.ControlDeviceId == staleId)
-            {
-                config.ControlDeviceId = null;
-                ConfigStore.Save(config);
-            }
-        }
+        var layoutChanged = staleIds.Aggregate(false, (changed, staleId) => RemoveKnownDevice(staleId) || changed);
 
         UpdateCursorReporting();
         UpdateMenu();
@@ -197,6 +183,44 @@ internal sealed class TrayAppContext : ApplicationContext
             {
                 BroadcastLayout();
             }
+        }
+    }
+
+    /// Forgets everything we knew about one peer device (menu entry, layout-watch state, its
+    /// screens). Returns whether that changed the shared screen layout.
+    private bool RemoveKnownDevice(string staleId)
+    {
+        inputDevices.Remove(staleId);
+        layoutWatchers.Remove(staleId);
+        var layoutChanged = screenLayoutStore.Remove(staleId);
+        if (config.ControlDeviceId == staleId)
+        {
+            config.ControlDeviceId = null;
+            ConfigStore.Save(config);
+        }
+        return layoutChanged;
+    }
+
+    /// Called the moment the last remaining peer disconnects. At that point we know with certainty
+    /// every other device we'd been tracking is gone, so we can clear them immediately instead of
+    /// waiting for the slower staleness sweep (PruneStaleDevices) to notice one-by-one, which is
+    /// what caused a disconnected peer's screen-layout rect to visibly linger for several seconds
+    /// after its menu entry (driven by the transport's near-instant peer count) had already updated.
+    private void ClearAllKnownPeers()
+    {
+        if (inputDevices.Count == 0)
+        {
+            return;
+        }
+        var staleIds = inputDevices.Keys.ToList();
+        var layoutChanged = staleIds.Aggregate(false, (changed, staleId) => RemoveKnownDevice(staleId) || changed);
+
+        UpdateCursorReporting();
+        UpdateMenu();
+        UpdateInputCoordinator();
+        if (layoutChanged)
+        {
+            RefreshScreenLayoutFormIfVisible();
         }
     }
 
@@ -734,6 +758,7 @@ internal sealed class TrayAppContext : ApplicationContext
         transport.MessageReceived += HandleMessage;
         transport.PeerCountChanged += count => OnUi(() =>
         {
+            var previousCount = peerCount;
             peerCount = count;
             UpdateInputCoordinator(sendHello: true);
             if (config.Mode == SyncMode.Server || pendingInputConfigSync)
@@ -744,6 +769,10 @@ internal sealed class TrayAppContext : ApplicationContext
             if (isLocalLayoutWindowOpen)
             {
                 BroadcastLayoutWatch(enabled: true);
+            }
+            if (count == 0 && previousCount > 0)
+            {
+                ClearAllKnownPeers();
             }
         });
         transport.Start();

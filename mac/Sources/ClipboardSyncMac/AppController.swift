@@ -148,18 +148,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        var layoutChanged = false
-        for staleId in staleIds {
-            inputDevices.removeValue(forKey: staleId)
-            layoutWatchers.remove(staleId)
-            if screenLayoutStore.remove(deviceId: staleId) {
-                layoutChanged = true
-            }
-            if config.controlDeviceId == staleId {
-                config.controlDeviceId = nil
-                config.save()
-            }
-        }
+        let layoutChanged = staleIds.reduce(false) { removeKnownDevice($1) || $0 }
 
         updateCursorReporting()
         updateMenu()
@@ -169,6 +158,40 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if config.mode == .server {
                 broadcastLayout()
             }
+        }
+    }
+
+    /// Forgets everything we knew about one peer device (menu entry, layout-watch state, its
+    /// screens). Returns whether that changed the shared screen layout.
+    @discardableResult
+    private func removeKnownDevice(_ staleId: String) -> Bool {
+        inputDevices.removeValue(forKey: staleId)
+        layoutWatchers.remove(staleId)
+        let layoutChanged = screenLayoutStore.remove(deviceId: staleId)
+        if config.controlDeviceId == staleId {
+            config.controlDeviceId = nil
+            config.save()
+        }
+        return layoutChanged
+    }
+
+    /// Called the moment the last remaining peer disconnects. At that point we know with certainty
+    /// every other device we'd been tracking is gone, so we can clear them immediately instead of
+    /// waiting for the slower staleness sweep (`pruneStaleDevices`) to notice one-by-one, which is
+    /// what caused a disconnected peer's screen-layout rect to visibly linger for several seconds
+    /// after its menu entry (driven by the transport's near-instant peer count) had already updated.
+    private func clearAllKnownPeers() {
+        guard !inputDevices.isEmpty else {
+            return
+        }
+        let staleIds = Array(inputDevices.keys)
+        let layoutChanged = staleIds.reduce(false) { removeKnownDevice($1) || $0 }
+
+        updateCursorReporting()
+        updateMenu()
+        updateInputCoordinator()
+        if layoutChanged {
+            refreshScreenLayoutWindowIfVisible()
         }
     }
 
@@ -755,6 +778,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let self else {
                     return
                 }
+                let previousCount = self.peerCount
                 self.peerCount = count
                 self.updateInputCoordinator(sendHello: true)
                 if self.config.mode == .server || self.pendingInputConfigSync {
@@ -763,6 +787,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 if self.isLocalLayoutWindowOpen {
                     self.broadcastLayoutWatch(enabled: true)
+                }
+                if count == 0, previousCount > 0 {
+                    self.clearAllKnownPeers()
                 }
             }
         }
