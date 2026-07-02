@@ -20,6 +20,8 @@
 		A00000000000000000000026 /* CryptoBox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000027 /* CryptoBox.swift */; };
 		A00000000000000000000028 /* InputSharingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000029 /* InputSharingCoordinator.swift */; };
 		A0000000000000000000002B /* ScreenLayoutWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002A /* ScreenLayoutWindowController.swift */; };
+		B00000000000000000000004 /* UpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* UpdateController.swift */; };
+		B00000000000000000000003 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000002 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +40,7 @@
 		A00000000000000000000027 /* CryptoBox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CryptoBox.swift; sourceTree = "<group>"; };
 		A00000000000000000000029 /* InputSharingCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSharingCoordinator.swift; sourceTree = "<group>"; };
 		A0000000000000000000002A /* ScreenLayoutWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenLayoutWindowController.swift; sourceTree = "<group>"; };
+		B00000000000000000000005 /* UpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -45,6 +48,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B00000000000000000000003 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -83,6 +87,7 @@
 				A00000000000000000000021 /* SettingsWindowController.swift */,
 				A0000000000000000000002A /* ScreenLayoutWindowController.swift */,
 				A00000000000000000000025 /* NetworkAddress.swift */,
+				B00000000000000000000005 /* UpdateController.swift */,
 			);
 			path = Sources/ClipboardSyncMac;
 			sourceTree = "<group>";
@@ -112,6 +117,9 @@
 			dependencies = (
 			);
 			name = ClipboardSyncMac;
+			packageProductDependencies = (
+				B00000000000000000000002 /* Sparkle */,
+			);
 			productName = ClipboardSyncMac;
 			productReference = A00000000000000000000006 /* ClipboardSyncMac.app */;
 			productType = "com.apple.product-type.application";
@@ -140,6 +148,9 @@
 				Base,
 			);
 			mainGroup = A00000000000000000000002;
+			packageReferences = (
+				B00000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			productRefGroup = A00000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -177,6 +188,7 @@
 				A00000000000000000000026 /* CryptoBox.swift in Sources */,
 				A00000000000000000000028 /* InputSharingCoordinator.swift in Sources */,
 				A0000000000000000000002B /* ScreenLayoutWindowController.swift in Sources */,
+				B00000000000000000000004 /* UpdateController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -212,8 +224,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "Developer ID Application";
+				CODE_SIGN_STYLE = Manual;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = SGZE33W2XX;
@@ -367,6 +379,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B00000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B00000000000000000000002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B00000000000000000000001 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A00000000000000000000001 /* Project object */;
 }

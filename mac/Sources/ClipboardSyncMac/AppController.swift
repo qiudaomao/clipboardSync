@@ -9,6 +9,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let jsonDecoder = JSONDecoder()
     private let screenLayoutStore = ScreenLayoutStore()
     private lazy var inputCoordinator = InputSharingCoordinator(deviceId: deviceId, layoutStore: screenLayoutStore)
+    private let updateController = UpdateController()
 
     private var config = AppConfig.load()
     private var transport: Transport?
@@ -270,6 +271,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let configureItem = NSMenuItem(title: AppText.text("menu.settings"), action: #selector(showConfiguration), keyEquivalent: ",")
         configureItem.target = self
         menu.addItem(configureItem)
+
+        let checkForUpdatesItem = NSMenuItem(title: AppText.text("menu.checkForUpdates"), action: #selector(checkForUpdates), keyEquivalent: "")
+        checkForUpdatesItem.target = self
+        menu.addItem(checkForUpdatesItem)
 
         let startItem = NSMenuItem(title: AppText.text("menu.start"), action: #selector(startTransport), keyEquivalent: "")
         startItem.target = self
@@ -716,6 +721,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showConfiguration() {
         settingsWindowController.show(config: config)
+    }
+
+    @objc private func checkForUpdates() {
+        updateController.checkForUpdates()
     }
 
     @objc private func toggleInputSharing() {

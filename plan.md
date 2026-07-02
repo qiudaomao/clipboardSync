@@ -25,7 +25,15 @@ stage4:
 - read screen size and maintain layout
 - auto mouse cross over server and client
 
+stage5:
+- auto update support
+- macOS: Sparkle 2 framework, appcast-based
+- Windows: NetSparkle (Sparkle-equivalent for .NET), reusing an appcast-style feed to keep update-server logic similar across platforms
+- macOS implemented first, Windows to follow
+- release artifacts (zipped app builds, appcast.xml) are hosted in a separate repo, clipboardSyncRelease (git@github.com:qiudaomao/clipboardSyncRelease.git), not in this repo
+
 current implementation focus:
 - Shared JSON protocol documented in docs/protocol.md.
 - macOS Xcode app project under mac/.
 - Windows .NET WinForms project under win/ClipboardSyncWin/.
+- Sparkle 2 auto-update integration for macOS (stage5).

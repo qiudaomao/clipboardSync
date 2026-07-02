@@ -44,6 +44,18 @@ Input Sharing is off by default. Enable it from Settings or the menu, choose `Se
 
 The Swift Package in `mac/Package.swift` is kept as a lightweight compiler check, but the Xcode project is the native app bundle build.
 
+### Auto-update (Sparkle 2)
+
+The macOS app checks for updates via [Sparkle 2](https://sparkle-project.org/), added as a Swift Package dependency in the Xcode project (and mirrored in `mac/Package.swift` for the compiler check). It reads `SUFeedURL` from `mac/App/Info.plist`, which points at `appcast.xml` in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo, served via `raw.githubusercontent.com`. Release zips are also uploaded as GitHub release assets on that repo, keeping release artifacts out of the main source repo.
+
+One-time setup, from Xcode after the Sparkle package has resolved (Xcode places its tools under `~/Library/Developer/Xcode/DerivedData/.../SourcePackages/artifacts/sparkle/Sparkle/bin/`, or build `generate_keys`/`sign_update` from the Sparkle repo directly):
+
+1. Run `generate_keys` once to create an EdDSA keypair. It stores the private key in the login Keychain and prints the public key.
+2. Paste the public key into `SUPublicEDKey` in `mac/App/Info.plist` (replacing `REPLACE_WITH_GENERATED_ED25519_PUBLIC_KEY`).
+3. Never commit the private key; only the public key belongs in the repo.
+
+See [release_update.md](release_update.md) for the full per-release procedure.
+
 ## Run Windows
 
 ```powershell

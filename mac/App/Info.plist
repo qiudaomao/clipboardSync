@@ -39,5 +39,13 @@
 	<string>Clipboard Sync connects to devices you configure on your local network.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUFeedURL</key>
+	<string>https://raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/appcast.xml</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
+	<key>SUPublicEDKey</key>
+	<string>GN3ggaPwCRxq7Rq3AkPab1KA8LzTC5W+RLJPogi7CPQ=</string>
 </dict>
 </plist>

@@ -9,7 +9,10 @@ let package = Package(
     products: [
         .executable(name: "ClipboardSyncMac", targets: ["ClipboardSyncMac"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
+    ],
     targets: [
-        .executableTarget(name: "ClipboardSyncMac")
+        .executableTarget(name: "ClipboardSyncMac", dependencies: ["Sparkle"])
     ]
 )
