@@ -53,6 +53,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.onWindowClosed = { [weak self] in
             self?.handleScreenLayoutWindowClosed()
         }
+        controller.onForgetDevice = { [weak self] id in
+            self?.forgetDevice(id)
+        }
         return controller
     }()
 
@@ -129,8 +132,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Periodically re-broadcasts our own hello (so peers keep our `lastSeen` fresh even when we
     /// have nothing else to send) and prunes any peer we haven't heard from in a while — otherwise
-    /// a disconnected device's screens and menu entry would linger forever, since nothing else ever
-    /// removes them.
+    /// a disconnected device's menu entry would linger forever, since nothing else ever removes it.
+    /// Its screen layout entries are deliberately *not* touched here — see `removeKnownDevice`.
     private func startPresenceHeartbeat() {
         presenceTimer?.invalidate()
         let timer = Timer(timeInterval: Self.presenceHeartbeatInterval, repeats: true) { [weak self] _ in
@@ -148,50 +151,63 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        let layoutChanged = staleIds.reduce(false) { removeKnownDevice($1) || $0 }
+        staleIds.forEach { removeKnownDevice($0) }
 
         updateCursorReporting()
         updateMenu()
         updateInputCoordinator()
-        if layoutChanged {
-            refreshScreenLayoutWindowIfVisible()
-            if config.mode == .server {
-                broadcastLayout()
-            }
-        }
+        refreshScreenLayoutWindowIfVisible()
     }
 
-    /// Forgets everything we knew about one peer device (menu entry, layout-watch state, its
-    /// screens). Returns whether that changed the shared screen layout.
-    @discardableResult
-    private func removeKnownDevice(_ staleId: String) -> Bool {
+    /// Forgets everything we knew about one peer device's *live presence*: its menu entry and
+    /// layout-watch state. Deliberately does NOT touch `screenLayoutStore` — a device going offline
+    /// (whether it quit, restarted, or just dropped its connection momentarily) shouldn't erase the
+    /// position the user dragged it to. Screens for offline devices stay in the layout, drawn as
+    /// disconnected, until the user explicitly forgets them (see `forgetDevice`).
+    private func removeKnownDevice(_ staleId: String) {
         inputDevices.removeValue(forKey: staleId)
         layoutWatchers.remove(staleId)
-        let layoutChanged = screenLayoutStore.remove(deviceId: staleId)
         if config.controlDeviceId == staleId {
             config.controlDeviceId = nil
             config.save()
         }
-        return layoutChanged
     }
 
     /// Called the moment the last remaining peer disconnects. At that point we know with certainty
-    /// every other device we'd been tracking is gone, so we can clear them immediately instead of
-    /// waiting for the slower staleness sweep (`pruneStaleDevices`) to notice one-by-one, which is
-    /// what caused a disconnected peer's screen-layout rect to visibly linger for several seconds
-    /// after its menu entry (driven by the transport's near-instant peer count) had already updated.
+    /// every other device we'd been tracking is gone, so we can mark them offline immediately
+    /// instead of waiting for the slower staleness sweep (`pruneStaleDevices`) to notice one-by-one.
     private func clearAllKnownPeers() {
         guard !inputDevices.isEmpty else {
             return
         }
-        let staleIds = Array(inputDevices.keys)
-        let layoutChanged = staleIds.reduce(false) { removeKnownDevice($1) || $0 }
+        Array(inputDevices.keys).forEach { removeKnownDevice($0) }
 
         updateCursorReporting()
         updateMenu()
         updateInputCoordinator()
-        if layoutChanged {
+        refreshScreenLayoutWindowIfVisible()
+    }
+
+    /// Explicitly and permanently drops a device's saved screens from the shared layout — the only
+    /// path that should ever delete layout entries (offline devices are kept, just drawn as
+    /// disconnected). Triggered from the layout window's right-click "Forget This Device" menu.
+    private func forgetDevice(_ id: String) {
+        guard id != deviceId else {
+            return
+        }
+        removeKnownDevice(id)
+        let changed = screenLayoutStore.remove(deviceId: id)
+        updateMenu()
+        if changed {
             refreshScreenLayoutWindowIfVisible()
+        }
+        switch config.mode {
+        case .server:
+            if changed {
+                broadcastLayout()
+            }
+        case .client:
+            sendLayoutForgetRequest(deviceId: id)
         }
     }
 
@@ -355,6 +371,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        // Whether this device was offline a moment ago — its first message back (of any kind, not
+        // necessarily one carrying `screens`) is what should flip its layout rect from "disconnected"
+        // back to normal, even when `merge` below finds nothing to actually change.
+        let wasOffline = inputDevices[message.origin] == nil
         let existing = inputDevices[message.origin]
         inputDevices[message.origin] = InputDeviceMenuDevice(
             id: message.origin,
@@ -365,10 +385,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             lastSeen: Date()
         )
 
-        if let screens = message.screens, screenLayoutStore.merge(deviceId: message.origin, screens: screens) {
-            if config.mode == .server {
-                broadcastLayout()
-            }
+        let layoutChanged = message.screens.map { screenLayoutStore.merge(deviceId: message.origin, screens: $0) } ?? false
+        if layoutChanged, config.mode == .server {
+            broadcastLayout()
+        }
+        if layoutChanged || wasOffline {
             refreshScreenLayoutWindowIfVisible()
         }
 
@@ -393,6 +414,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return names
     }
 
+    /// Devices currently known to be connected — the local machine plus every peer we're actively
+    /// hearing from. Anything in the shared screen layout that isn't in this set is a remembered
+    /// device that's offline right now (quit, restarted, or just dropped), not one we've forgotten.
+    private var onlineDeviceIds: Set<String> {
+        Set(inputDevices.keys).union([deviceId])
+    }
+
     private func registerLocalScreen() {
         if screenLayoutStore.merge(deviceId: deviceId, screens: InputSharingCoordinator.currentScreens()) {
             refreshScreenLayoutWindowIfVisible()
@@ -407,7 +435,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         screenLayoutWindowController.show(
             entries: screenLayoutStore.snapshot(),
             localDeviceId: deviceId,
-            deviceNames: deviceDisplayNames
+            deviceNames: deviceDisplayNames,
+            onlineDeviceIds: onlineDeviceIds
         )
     }
 
@@ -490,7 +519,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         screenLayoutWindowController.show(
             entries: screenLayoutStore.snapshot(),
             localDeviceId: deviceId,
-            deviceNames: deviceDisplayNames
+            deviceNames: deviceDisplayNames,
+            onlineDeviceIds: onlineDeviceIds
         )
     }
 
@@ -553,6 +583,44 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             key: nil,
             sentAt: Date().timeIntervalSince1970
         ))
+    }
+
+    /// Asks the server (the canonical layout owner) to drop a device's screens. Only meaningful
+    /// when we're a client — the server applies it locally and rebroadcasts the resulting layout.
+    private func sendLayoutForgetRequest(deviceId forgottenId: String) {
+        guard transport != nil, !config.password.isEmpty else {
+            return
+        }
+        publishInput(InputMessage(
+            type: "input",
+            origin: deviceId,
+            target: forgottenId,
+            kind: "layoutForget",
+            role: config.mode.rawValue,
+            deviceName: nil,
+            deviceAddress: nil,
+            screens: nil,
+            enabled: nil,
+            controlDeviceId: nil,
+            layout: nil,
+            capture: nil,
+            mouse: nil,
+            key: nil,
+            sentAt: Date().timeIntervalSince1970
+        ))
+    }
+
+    private func handleLayoutForgetMessage(_ message: InputMessage) {
+        guard config.mode == .server, let target = message.target else {
+            return
+        }
+        inputDevices.removeValue(forKey: target)
+        layoutWatchers.remove(target)
+        if screenLayoutStore.remove(deviceId: target) {
+            broadcastLayout()
+        }
+        updateMenu()
+        refreshScreenLayoutWindowIfVisible()
     }
 
     private func broadcastCursorPosition(screenId: String, normalizedX: Double, normalizedY: Double) {
@@ -910,6 +978,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if message.kind == "layout" {
             handleLayoutMessage(message)
+            return
+        }
+
+        if message.kind == "layoutForget" {
+            handleLayoutForgetMessage(message)
             return
         }
 

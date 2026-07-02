@@ -3,6 +3,7 @@ import AppKit
 final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
     var onLayoutChanged: (([ScreenLayoutEntry]) -> Void)?
     var onWindowClosed: (() -> Void)?
+    var onForgetDevice: ((String) -> Void)?
 
     private let canvasView = ScreenLayoutCanvasView()
     private let doneButton = NSButton(title: AppText.text("layout.done"), target: nil, action: nil)
@@ -27,9 +28,10 @@ final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func show(entries: [ScreenLayoutEntry], localDeviceId: String, deviceNames: [String: String]) {
+    func show(entries: [ScreenLayoutEntry], localDeviceId: String, deviceNames: [String: String], onlineDeviceIds: Set<String>) {
         canvasView.localDeviceId = localDeviceId
         canvasView.deviceNames = deviceNames
+        canvasView.onlineDeviceIds = onlineDeviceIds
         canvasView.entries = entries
 
         NSApp.activate(ignoringOtherApps: true)
@@ -89,6 +91,9 @@ final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
         canvasView.onLayoutChanged = { [weak self] entries in
             self?.onLayoutChanged?(entries)
         }
+        canvasView.onForgetDevice = { [weak self] id in
+            self?.onForgetDevice?(id)
+        }
         canvasView.translatesAutoresizingMaskIntoConstraints = false
         canvasView.heightAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
 
@@ -127,8 +132,10 @@ final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
 
 final class ScreenLayoutCanvasView: NSView {
     var onLayoutChanged: (([ScreenLayoutEntry]) -> Void)?
+    var onForgetDevice: ((String) -> Void)?
     var localDeviceId = ""
     var deviceNames: [String: String] = [:]
+    var onlineDeviceIds: Set<String> = []
     var entries: [ScreenLayoutEntry] = [] {
         didSet {
             if draggingDeviceId == nil {
@@ -171,21 +178,31 @@ final class ScreenLayoutCanvasView: NSView {
             for entry in entries.sorted(by: { $0.screenId < $1.screenId }) {
                 let rect = screenRect(for: entry, metrics: metrics)
                 let color = Self.color(for: entry.deviceId)
+                let isOnline = onlineDeviceIds.contains(entry.deviceId)
 
                 let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
-                color.withAlphaComponent(0.35).setFill()
+                if isOnline {
+                    color.withAlphaComponent(0.35).setFill()
+                } else {
+                    color.withAlphaComponent(0.12).setFill()
+                }
                 path.fill()
-                color.setStroke()
+                color.withAlphaComponent(isOnline ? 1.0 : 0.5).setStroke()
                 path.lineWidth = entry.deviceId == localDeviceId ? 3 : 1.5
+                if !isOnline {
+                    path.setLineDash([5, 3], count: 2, phase: 0)
+                }
                 path.stroke()
 
                 guard rect.width > 40, rect.height > 28 else {
                     continue
                 }
 
-                let subtitle = "\(Int(entry.width))\u{00D7}\(Int(entry.height))"
+                let subtitle = isOnline
+                    ? "\(Int(entry.width))\u{00D7}\(Int(entry.height))"
+                    : AppText.text("layout.disconnected")
                 let text = NSAttributedString(string: "\(screenLabel(for: entry))\n\(subtitle)", attributes: [
-                    .foregroundColor: NSColor.labelColor,
+                    .foregroundColor: isOnline ? NSColor.labelColor : NSColor.secondaryLabelColor,
                     .font: NSFont.systemFont(ofSize: 12, weight: .medium),
                     .paragraphStyle: paragraphStyle
                 ])
@@ -284,6 +301,34 @@ final class ScreenLayoutCanvasView: NSView {
             return nil
         }
         return Int(suffix)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        let metrics = dragMetrics ?? computeMetrics()
+
+        guard
+            let entry = entries.sorted(by: { $0.screenId < $1.screenId }).reversed()
+                .first(where: { screenRect(for: $0, metrics: metrics).contains(point) }),
+            entry.deviceId != localDeviceId,
+            !onlineDeviceIds.contains(entry.deviceId)
+        else {
+            return nil
+        }
+
+        let menu = NSMenu()
+        let item = NSMenuItem(title: AppText.text("layout.forgetDevice"), action: #selector(forgetDeviceMenuAction(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = entry.deviceId
+        menu.addItem(item)
+        return menu
+    }
+
+    @objc private func forgetDeviceMenuAction(_ sender: NSMenuItem) {
+        guard let deviceId = sender.representedObject as? String else {
+            return
+        }
+        onForgetDevice?(deviceId)
     }
 
     override func mouseDown(with event: NSEvent) {
