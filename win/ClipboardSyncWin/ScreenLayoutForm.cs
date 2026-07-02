@@ -142,12 +142,16 @@ internal sealed class ScreenLayoutCanvas : Panel
     private bool didDragDuringGesture;
 
     private const float CursorDotRadius = 7f;
+    private const float CursorRedrawMinDelta = 1.5f;
     private readonly System.Windows.Forms.Timer cursorTrackingTimer;
     private PointF? realCursorPosition;
+    private DateTime lastRemoteCursorPruneAt = DateTime.MinValue;
 
     public event Action<string, double, double>? LocalCursorMoved;
     private readonly Dictionary<string, (PointF CanvasPoint, DateTime LastUpdated)> remoteCursorPositions = [];
     private static readonly TimeSpan RemoteCursorTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan RemoteCursorUpdateInterval = TimeSpan.FromMilliseconds(125);
+    private static readonly TimeSpan RemoteCursorPruneInterval = TimeSpan.FromSeconds(1);
 
     public ScreenLayoutCanvas()
     {
@@ -157,7 +161,7 @@ internal sealed class ScreenLayoutCanvas : Panel
 
         // Tracks this machine's actual cursor and shows it at the matching spot on whichever of
         // this machine's own screen rects currently contains it.
-        cursorTrackingTimer = new System.Windows.Forms.Timer { Interval = 16 };
+        cursorTrackingTimer = new System.Windows.Forms.Timer { Interval = 33 };
         cursorTrackingTimer.Tick += (_, _) => UpdateRealCursorPosition();
         cursorTrackingTimer.Start();
     }
@@ -217,13 +221,19 @@ internal sealed class ScreenLayoutCanvas : Panel
     /// registered in `entries` yet.
     private void UpdateRealCursorPosition()
     {
-        realCursorPosition = ComputeRealCursorCanvasPosition();
-        if (realCursorPosition is { } canvasPosition && LocalScreenNormalizedPosition(canvasPosition) is { } local)
+        var nextPosition = ComputeRealCursorCanvasPosition();
+        var positionChanged = PointsDiffer(realCursorPosition, nextPosition, CursorRedrawMinDelta);
+        realCursorPosition = nextPosition;
+
+        if (positionChanged && realCursorPosition is { } canvasPosition && LocalScreenNormalizedPosition(canvasPosition) is { } local)
         {
             LocalCursorMoved?.Invoke(local.ScreenId, local.X, local.Y);
         }
-        PruneStaleRemoteCursors();
-        Invalidate();
+
+        if (PruneStaleRemoteCursors() || positionChanged)
+        {
+            Invalidate();
+        }
     }
 
     /// Finds which of this device's own screen entries contains `canvasPosition` and expresses the
@@ -256,17 +266,49 @@ internal sealed class ScreenLayoutCanvas : Panel
         var canvasPoint = new PointF(
             (float)(entry.X + normalizedX * entry.Width),
             (float)(entry.Y + normalizedY * entry.Height));
-        remoteCursorPositions[deviceId] = (canvasPoint, DateTime.UtcNow);
+
+        var now = DateTime.UtcNow;
+        if (remoteCursorPositions.TryGetValue(deviceId, out var existing))
+        {
+            if (now - existing.LastUpdated < RemoteCursorUpdateInterval ||
+                !PointsDiffer(existing.CanvasPoint, canvasPoint, CursorRedrawMinDelta))
+            {
+                return;
+            }
+        }
+
+        remoteCursorPositions[deviceId] = (canvasPoint, now);
         Invalidate();
     }
 
-    private void PruneStaleRemoteCursors()
+    private bool PruneStaleRemoteCursors()
     {
+        var now = DateTime.UtcNow;
+        if (now - lastRemoteCursorPruneAt < RemoteCursorPruneInterval)
+        {
+            return false;
+        }
+
+        lastRemoteCursorPruneAt = now;
         var cutoff = DateTime.UtcNow - RemoteCursorTimeout;
+        var removed = false;
         foreach (var staleId in remoteCursorPositions.Where(pair => pair.Value.LastUpdated < cutoff).Select(pair => pair.Key).ToList())
         {
             remoteCursorPositions.Remove(staleId);
+            removed = true;
         }
+        return removed;
+    }
+
+    private static bool PointsDiffer(PointF? previous, PointF? next, float minDelta)
+    {
+        if (previous is null || next is null)
+        {
+            return previous != next;
+        }
+
+        return Math.Abs(previous.Value.X - next.Value.X) >= minDelta ||
+            Math.Abs(previous.Value.Y - next.Value.Y) >= minDelta;
     }
 
     private PointF? ComputeRealCursorCanvasPosition()

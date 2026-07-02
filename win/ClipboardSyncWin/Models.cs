@@ -145,6 +145,7 @@ internal sealed class MessageHeader
 {
     public string Type { get; set; } = "";
     public string? Origin { get; set; }
+    public string? Kind { get; set; }
 }
 
 internal sealed class SyncMessage

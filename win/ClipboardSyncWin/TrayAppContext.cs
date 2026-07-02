@@ -20,6 +20,7 @@ internal sealed class TrayAppContext : ApplicationContext
     };
 
     private readonly NotifyIcon notifyIcon;
+    private readonly ContextMenuStrip trayMenu;
     private readonly ToolStripMenuItem statusItem;
     private readonly ToolStripMenuItem historyItem;
     private readonly ToolStripMenuItem inputStatusItem;
@@ -43,7 +44,15 @@ internal sealed class TrayAppContext : ApplicationContext
     private bool pendingInputConfigSync;
     private string status = AppText.Text("status.stopped");
     private readonly System.Windows.Forms.Timer presenceTimer;
+    private DateTimeOffset lastCursorBroadcastAt = DateTimeOffset.MinValue;
+    private string? lastCursorBroadcastScreenId;
+    private double lastCursorBroadcastX;
+    private double lastCursorBroadcastY;
+    private readonly Dictionary<string, DateTimeOffset> lastCursorMessageAt = [];
     private static readonly TimeSpan PresenceStaleTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan CursorBroadcastInterval = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan CursorReceiveInterval = TimeSpan.FromMilliseconds(125);
+    private const double CursorBroadcastMinDelta = 0.0025;
 
     private sealed class InputDeviceMenuDevice
     {
@@ -89,14 +98,16 @@ internal sealed class TrayAppContext : ApplicationContext
         serverModeItem = new ToolStripMenuItem(AppText.Text("menu.serverMode"), null, (_, _) => SetMode(SyncMode.Server));
         trayIcon = LoadTrayIcon();
         inputCoordinator = new InputSharingCoordinator(config.DeviceId, screenLayoutStore);
+        trayMenu = BuildMenu();
 
         notifyIcon = new NotifyIcon
         {
             Icon = trayIcon,
             Text = AppText.Text("app.name"),
             Visible = true,
-            ContextMenuStrip = BuildMenu()
+            ContextMenuStrip = trayMenu
         };
+        notifyIcon.MouseUp += OnNotifyIconMouseUp;
 
         clipboardMonitor = new ClipboardMonitor();
         clipboardMonitor.LocalContentChanged += content => Publish(content);
@@ -137,6 +148,7 @@ internal sealed class TrayAppContext : ApplicationContext
             inputCoordinator.Dispose();
             clipboardMonitor.Dispose();
             notifyIcon.Dispose();
+            trayMenu.Dispose();
             trayIcon.Dispose();
             screenLayoutForm?.Dispose();
         }
@@ -204,6 +216,20 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.exit"), null, (_, _) => ExitThread()));
         return menu;
+    }
+
+    private void OnNotifyIconMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Right)
+        {
+            return;
+        }
+
+        UpdateMenu();
+        if (!trayMenu.Visible)
+        {
+            trayMenu.Show(Cursor.Position);
+        }
     }
 
     private static Icon LoadTrayIcon()
@@ -351,7 +377,7 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             screenLayoutForm = new ScreenLayoutForm();
             screenLayoutForm.LayoutChanged += entries => ApplyLocalLayoutChange(entries);
-            screenLayoutForm.LocalCursorMoved += (screenId, normalizedX, normalizedY) => BroadcastCursorPosition(screenId, normalizedX, normalizedY);
+            screenLayoutForm.LocalCursorMoved += BroadcastCursorPosition;
         }
         return screenLayoutForm;
     }
@@ -418,6 +444,23 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             return;
         }
+
+        var now = DateTimeOffset.UtcNow;
+        var movedEnough =
+            lastCursorBroadcastScreenId != screenId ||
+            Math.Abs(normalizedX - lastCursorBroadcastX) >= CursorBroadcastMinDelta ||
+            Math.Abs(normalizedY - lastCursorBroadcastY) >= CursorBroadcastMinDelta;
+
+        if (!movedEnough || now - lastCursorBroadcastAt < CursorBroadcastInterval)
+        {
+            return;
+        }
+
+        lastCursorBroadcastAt = now;
+        lastCursorBroadcastScreenId = screenId;
+        lastCursorBroadcastX = normalizedX;
+        lastCursorBroadcastY = normalizedY;
+
         PublishInput(new InputMessage
         {
             Type = "input",
@@ -719,6 +762,10 @@ internal sealed class TrayAppContext : ApplicationContext
                     OnUi(() => HandleClipboardMessage(plaintext));
                     break;
                 case "input":
+                    if (header.Kind == "cursor" && screenLayoutForm is not { IsDisposed: false, Visible: true })
+                    {
+                        return;
+                    }
                     HandleInputMessage(plaintext);
                     break;
             }
@@ -794,6 +841,15 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void HandleInputControlMessage(InputMessage message)
     {
+        if (message.Kind == "cursor")
+        {
+            if (ShouldHandleCursorMessage(message))
+            {
+                HandleCursorMessage(message);
+            }
+            return;
+        }
+
         RememberInputDevice(message);
 
         if (message.Kind == "config")
@@ -832,6 +888,24 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             SendInputHello();
         }
+    }
+
+    private bool ShouldHandleCursorMessage(InputMessage message)
+    {
+        if (message.Cursor is null || screenLayoutForm is not { IsDisposed: false, Visible: true })
+        {
+            return false;
+        }
+
+        var key = $"{message.Origin}\0{message.Cursor.ScreenId}";
+        var now = DateTimeOffset.UtcNow;
+        if (lastCursorMessageAt.TryGetValue(key, out var lastSeen) && now - lastSeen < CursorReceiveInterval)
+        {
+            return false;
+        }
+
+        lastCursorMessageAt[key] = now;
+        return true;
     }
 
     private void HandleInputConfig(InputMessage message)
