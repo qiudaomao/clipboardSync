@@ -8,10 +8,14 @@ namespace ClipboardSyncWin;
 
 internal static class NetworkAddress
 {
-    public static string ServerUrl(int port)
+    public static string HostAddress()
     {
-        var host = LocalLanIPv4Address() ?? Dns.GetHostName();
-        return $"ws://{host}:{port}/";
+        return LocalLanIPv4Address() ?? Dns.GetHostName();
+    }
+
+    public static string ServerAddress(int port)
+    {
+        return $"{HostAddress()}:{port}";
     }
 
     public static bool IsLoopbackHost(string? host)

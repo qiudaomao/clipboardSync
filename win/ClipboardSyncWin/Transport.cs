@@ -211,7 +211,7 @@ internal sealed class ServerTransport : ISyncTransport
             listener = new TcpListener(IPAddress.Any, port);
             listener.Start();
             PeerCountChanged?.Invoke(0);
-            StatusChanged?.Invoke(AppText.Format("status.serverPeers", NetworkAddress.ServerUrl(port), 0));
+            StatusChanged?.Invoke(AppText.Format("status.serverPeers", NetworkAddress.ServerAddress(port), 0));
             _ = AcceptLoopAsync(cts.Token);
         }
         catch (Exception ex)
@@ -316,7 +316,7 @@ internal sealed class ServerTransport : ISyncTransport
     {
         var readyPeerCount = peers.Count(item => item.Value.IsReady);
         PeerCountChanged?.Invoke(readyPeerCount);
-        StatusChanged?.Invoke(AppText.Format("status.serverPeers", NetworkAddress.ServerUrl(port), readyPeerCount));
+        StatusChanged?.Invoke(AppText.Format("status.serverPeers", NetworkAddress.ServerAddress(port), readyPeerCount));
     }
 }
 

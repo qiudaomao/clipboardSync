@@ -217,7 +217,7 @@ internal sealed class ConfigForm : Form
         {
             clientHostDraft = hostBox.ReadOnly ? clientHostDraft : hostBox.Text.Trim();
             hostBox.ReadOnly = true;
-            hostBox.Text = NetworkAddress.ServerUrl((int)portBox.Value);
+            hostBox.Text = NetworkAddress.HostAddress();
         }
         hostHint.Text = isClient
             ? AppText.Text("settings.hostClientHint")

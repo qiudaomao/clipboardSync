@@ -64,10 +64,6 @@ enum NetworkAddress {
         localLANIPv4Address() ?? Host.current().name ?? "this-mac.local"
     }
 
-    static func serverURL(port: Int) -> String {
-        "ws://\(hostAddress()):\(port)/"
-    }
-
     static func serverAddress(port: Int) -> String {
         "\(hostAddress()):\(port)"
     }
