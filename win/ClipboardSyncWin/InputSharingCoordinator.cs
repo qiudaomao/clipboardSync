@@ -351,7 +351,7 @@ internal sealed class InputSharingCoordinator : IDisposable
     /// monitor's real screen-coordinate bounds.
     private (string ScreenId, RectangleF RealRect)? CurrentLocalScreen(POINT point)
     {
-        var screens = Screen.AllScreens;
+        var screens = OrderedScreens();
         for (var index = 0; index < screens.Length; index++)
         {
             var bounds = screens[index].Bounds;
@@ -932,7 +932,7 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     internal static List<ScreenMetrics> CurrentScreens()
     {
-        return Screen.AllScreens.Select(screen => new ScreenMetrics
+        return OrderedScreens().Select(screen => new ScreenMetrics
         {
             Width = screen.Bounds.Width,
             Height = screen.Bounds.Height,
@@ -940,6 +940,51 @@ internal sealed class InputSharingCoordinator : IDisposable
             LocalX = screen.Bounds.X,
             LocalY = screen.Bounds.Y
         }).ToList();
+    }
+
+    /// This machine's actual cursor position, described as a normalized point on whichever of its
+    /// own screens currently contains it, plus that screen's id. Used both to show a local "you are
+    /// here" dot in the Screen Layout window and to report live position to peers watching it.
+    /// Returns null if the monitor the cursor is currently on hasn't been registered in
+    /// `entries` yet.
+    internal static (string ScreenId, double NormalizedX, double NormalizedY)? CurrentLocalCursorReport(string deviceId, List<ScreenLayoutEntry> entries)
+    {
+        if (string.IsNullOrEmpty(deviceId))
+        {
+            return null;
+        }
+        var location = Cursor.Position;
+        var screens = OrderedScreens();
+        for (var index = 0; index < screens.Length; index++)
+        {
+            var bounds = screens[index].Bounds;
+            if (!bounds.Contains(location))
+            {
+                continue;
+            }
+            var screenId = $"{deviceId}#{index}";
+            if (!entries.Any(item => item.ScreenId == screenId))
+            {
+                return null;
+            }
+            var normalizedX = Math.Min(Math.Max((double)(location.X - bounds.Left) / Math.Max(bounds.Width, 1), 0), 1);
+            var normalizedY = Math.Min(Math.Max((double)(location.Y - bounds.Top) / Math.Max(bounds.Height, 1), 0), 1);
+            return (screenId, normalizedX, normalizedY);
+        }
+        return null;
+    }
+
+    /// The system's active screens, ordered by physical position (left-to-right, then top-to-
+    /// bottom) rather than raw `Screen.AllScreens` enumeration order. Raw order isn't guaranteed
+    /// stable across relaunches or sleep/wake, which would otherwise make a monitor's index-based
+    /// screenId (and therefore its saved layout position/size) drift or swap with another
+    /// monitor's between sessions.
+    private static Screen[] OrderedScreens()
+    {
+        return Screen.AllScreens
+            .OrderBy(screen => screen.Bounds.X)
+            .ThenBy(screen => screen.Bounds.Y)
+            .ToArray();
     }
 
     private static Rectangle DesktopBounds()
@@ -962,7 +1007,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             return null;
         }
-        var screens = Screen.AllScreens;
+        var screens = OrderedScreens();
         if (index < 0 || index >= screens.Length)
         {
             return null;

@@ -2,11 +2,7 @@ import AppKit
 
 final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
     var onLayoutChanged: (([ScreenLayoutEntry]) -> Void)?
-    var onLocalCursorMoved: ((String, Double, Double) -> Void)? {
-        didSet {
-            canvasView.onLocalCursorMoved = onLocalCursorMoved
-        }
-    }
+    var onWindowClosed: (() -> Void)?
 
     private let canvasView = ScreenLayoutCanvasView()
     private let doneButton = NSButton(title: AppText.text("layout.done"), target: nil, action: nil)
@@ -41,11 +37,22 @@ final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
             window?.center()
         }
         window?.makeKeyAndOrderFront(nil)
-        canvasView.startCursorTracking()
     }
 
     func windowWillClose(_ notification: Notification) {
-        canvasView.stopCursorTracking()
+        onWindowClosed?()
+    }
+
+    /// Called by AppController with this device's own live cursor position, already resolved to a
+    /// specific screenId + normalized point — so this canvas can draw the local "you are here" dot
+    /// without needing to compute it itself. AppController drives this regardless of whether this
+    /// window is visible (it may be polling purely to report to a peer who has ITS window open),
+    /// so this is a no-op when hidden.
+    func setLocalCursor(screenId: String?, normalizedX: Double?, normalizedY: Double?) {
+        guard window?.isVisible == true else {
+            return
+        }
+        canvasView.setLocalCursor(screenId: screenId, normalizedX: normalizedX, normalizedY: normalizedY)
     }
 
     /// Called when a peer reports where its own real cursor currently sits, so this window can
@@ -143,10 +150,7 @@ final class ScreenLayoutCanvasView: NSView {
     private var dragMetrics: Metrics?
     private var didDragDuringGesture = false
 
-    private var realCursorPosition: CGPoint?
-    private var cursorTrackingTimer: Timer?
-
-    var onLocalCursorMoved: ((String, Double, Double) -> Void)?
+    private var localCursorPosition: CGPoint?
     private var remoteCursorPositions: [String: (canvasPoint: CGPoint, lastUpdated: Date)] = [:]
     private static let remoteCursorTimeout: TimeInterval = 3.0
 
@@ -196,56 +200,29 @@ final class ScreenLayoutCanvasView: NSView {
             }
         }
 
-        drawRealCursor(metrics: metrics)
+        drawCursors(metrics: metrics)
     }
 
     // MARK: - Live cursor position
 
     private static let cursorDotRadius: CGFloat = 7
 
-    /// Tracks this machine's actual cursor and shows it at the matching spot on whichever of this
-    /// machine's own screen rects currently contains it — e.g. the dot sits mid-way down screen #1
-    /// when the real pointer is mid-way down that monitor. Only known once this device's own
-    /// screens are registered in `entries`; hidden otherwise.
-    func startCursorTracking() {
-        guard cursorTrackingTimer == nil else {
+    /// Sets this device's own live cursor position, already resolved by AppController to a
+    /// specific screenId + normalized point — e.g. the dot sits mid-way down screen #1 when the
+    /// real pointer is mid-way down that monitor. Pass nil to hide the local dot.
+    func setLocalCursor(screenId: String?, normalizedX: Double?, normalizedY: Double?) {
+        guard
+            let screenId, let normalizedX, let normalizedY,
+            let entry = entries.first(where: { $0.screenId == screenId })
+        else {
+            localCursorPosition = nil
+            pruneStaleRemoteCursors()
+            needsDisplay = true
             return
         }
-        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.updateRealCursorPosition()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        cursorTrackingTimer = timer
-        updateRealCursorPosition()
-    }
-
-    func stopCursorTracking() {
-        cursorTrackingTimer?.invalidate()
-        cursorTrackingTimer = nil
-    }
-
-    private func updateRealCursorPosition() {
-        realCursorPosition = InputSharingCoordinator.currentLocalCanvasCursorPosition(deviceId: localDeviceId, entries: entries)
-        if let realCursorPosition, let local = localScreenNormalizedPosition(canvasPosition: realCursorPosition) {
-            onLocalCursorMoved?(local.screenId, local.x, local.y)
-        }
+        localCursorPosition = CGPoint(x: entry.x + normalizedX * entry.width, y: entry.y + normalizedY * entry.height)
         pruneStaleRemoteCursors()
         needsDisplay = true
-    }
-
-    /// Finds which of this device's own screen entries contains `canvasPosition` and expresses the
-    /// point as normalized (0...1) coordinates within it, so it can be sent to peers independent of
-    /// this machine's own canvas scale.
-    private func localScreenNormalizedPosition(canvasPosition: CGPoint) -> (screenId: String, x: Double, y: Double)? {
-        for entry in entries where entry.deviceId == localDeviceId {
-            guard entry.rect.contains(canvasPosition) else {
-                continue
-            }
-            let x = min(max((Double(canvasPosition.x) - entry.x) / max(entry.width, 1), 0), 1)
-            let y = min(max((Double(canvasPosition.y) - entry.y) / max(entry.height, 1), 0), 1)
-            return (entry.screenId, x, y)
-        }
-        return nil
     }
 
     /// Records a peer's reported cursor position, converting its normalized (screenId, x, y) into a
@@ -264,14 +241,14 @@ final class ScreenLayoutCanvasView: NSView {
         remoteCursorPositions = remoteCursorPositions.filter { $0.value.lastUpdated >= cutoff }
     }
 
-    private func drawRealCursor(metrics: Metrics) {
+    private func drawCursors(metrics: Metrics) {
         for (deviceId, remote) in remoteCursorPositions {
             drawCursorDot(canvasPosition: remote.canvasPoint, metrics: metrics, fillColor: Self.color(for: deviceId))
         }
-        guard let canvasPosition = realCursorPosition else {
+        guard let localCursorPosition else {
             return
         }
-        drawCursorDot(canvasPosition: canvasPosition, metrics: metrics, fillColor: .white)
+        drawCursorDot(canvasPosition: localCursorPosition, metrics: metrics, fillColor: .white)
     }
 
     private func drawCursorDot(canvasPosition: CGPoint, metrics: Metrics, fillColor: NSColor) {

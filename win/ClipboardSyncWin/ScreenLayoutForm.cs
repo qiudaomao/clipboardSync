@@ -87,17 +87,20 @@ internal sealed class ScreenLayoutForm : Form
         AcceptButton = doneButton;
     }
 
-    public event Action<string, double, double>? LocalCursorMoved
-    {
-        add => canvas.LocalCursorMoved += value;
-        remove => canvas.LocalCursorMoved -= value;
-    }
-
     public void UpdateLayout(List<ScreenLayoutEntry> entries, string localDeviceId, Dictionary<string, string> deviceNames)
     {
         canvas.LocalDeviceId = localDeviceId;
         canvas.DeviceNames = deviceNames;
         canvas.Entries = entries;
+    }
+
+    /// Called by TrayAppContext with this device's own live cursor position, already resolved to a
+    /// specific screenId + normalized point - so this window can show the local "you are here" dot
+    /// without needing to compute it itself. TrayAppContext drives this regardless of whether this
+    /// window is visible (it may be polling purely to report to a peer who has ITS window open).
+    public void SetLocalCursor(string? screenId, double? normalizedX, double? normalizedY)
+    {
+        canvas.SetLocalCursor(screenId, normalizedX, normalizedY);
     }
 
     /// Called when a peer reports where its own real cursor currently sits, so this window can show
@@ -144,11 +147,9 @@ internal sealed class ScreenLayoutCanvas : Panel
 
     private const float CursorDotRadius = 7f;
     private const float CursorRedrawMinDelta = 1.5f;
-    private readonly System.Windows.Forms.Timer cursorTrackingTimer;
-    private PointF? realCursorPosition;
+    private PointF? localCursorPosition;
     private DateTime lastRemoteCursorPruneAt = DateTime.MinValue;
 
-    public event Action<string, double, double>? LocalCursorMoved;
     private readonly Dictionary<string, (PointF CanvasPoint, DateTime LastUpdated)> remoteCursorPositions = [];
     private static readonly TimeSpan RemoteCursorTimeout = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan RemoteCursorUpdateInterval = TimeSpan.FromMilliseconds(125);
@@ -159,22 +160,6 @@ internal sealed class ScreenLayoutCanvas : Panel
         DoubleBuffered = true;
         ResizeRedraw = true;
         BackColor = SystemColors.ControlLightLight;
-
-        // Tracks this machine's actual cursor and shows it at the matching spot on whichever of
-        // this machine's own screen rects currently contains it.
-        cursorTrackingTimer = new System.Windows.Forms.Timer { Interval = 33 };
-        cursorTrackingTimer.Tick += (_, _) => UpdateRealCursorPosition();
-        cursorTrackingTimer.Start();
-    }
-
-    protected override void Dispose(bool disposing)
-    {
-        if (disposing)
-        {
-            cursorTrackingTimer.Stop();
-            cursorTrackingTimer.Dispose();
-        }
-        base.Dispose(disposing);
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -214,45 +199,27 @@ internal sealed class ScreenLayoutCanvas : Panel
             }
         }
 
-        DrawRealCursor(g, metrics);
+        DrawCursors(g, metrics);
     }
 
-    /// This machine's actual cursor position, mapped onto the corresponding spot in the shared
-    /// layout canvas. Left null (dot hidden) if the monitor the cursor is currently on hasn't been
-    /// registered in `entries` yet.
-    private void UpdateRealCursorPosition()
+    /// Sets this device's own live cursor position, already resolved by TrayAppContext to a
+    /// specific screenId + normalized point. Pass nulls to hide the local dot.
+    public void SetLocalCursor(string? screenId, double? normalizedX, double? normalizedY)
     {
-        var nextPosition = ComputeRealCursorCanvasPosition();
-        var positionChanged = PointsDiffer(realCursorPosition, nextPosition, CursorRedrawMinDelta);
-        realCursorPosition = nextPosition;
+        var entry = screenId is null ? null : entries.FirstOrDefault(item => item.ScreenId == screenId);
+        var nextPosition = entry is null || normalizedX is null || normalizedY is null
+            ? (PointF?)null
+            : new PointF(
+                (float)(entry.X + normalizedX.Value * entry.Width),
+                (float)(entry.Y + normalizedY.Value * entry.Height));
 
-        if (positionChanged && realCursorPosition is { } canvasPosition && LocalScreenNormalizedPosition(canvasPosition) is { } local)
-        {
-            LocalCursorMoved?.Invoke(local.ScreenId, local.X, local.Y);
-        }
+        var positionChanged = PointsDiffer(localCursorPosition, nextPosition, CursorRedrawMinDelta);
+        localCursorPosition = nextPosition;
 
         if (PruneStaleRemoteCursors() || positionChanged)
         {
             Invalidate();
         }
-    }
-
-    /// Finds which of this device's own screen entries contains `canvasPosition` and expresses the
-    /// point as normalized (0...1) coordinates within it, so it can be sent to peers independent of
-    /// this machine's own canvas scale.
-    private (string ScreenId, double X, double Y)? LocalScreenNormalizedPosition(PointF canvasPosition)
-    {
-        foreach (var entry in entries.Where(item => item.DeviceId == LocalDeviceId))
-        {
-            if (!entry.Rect.Contains(canvasPosition))
-            {
-                continue;
-            }
-            var x = Math.Min(Math.Max((canvasPosition.X - entry.X) / Math.Max(entry.Width, 1), 0), 1);
-            var y = Math.Min(Math.Max((canvasPosition.Y - entry.Y) / Math.Max(entry.Height, 1), 0), 1);
-            return (entry.ScreenId, x, y);
-        }
-        return null;
     }
 
     /// Records a peer's reported cursor position, converting its normalized (screenId, x, y) into a
@@ -312,41 +279,13 @@ internal sealed class ScreenLayoutCanvas : Panel
             Math.Abs(previous.Value.Y - next.Value.Y) >= minDelta;
     }
 
-    private PointF? ComputeRealCursorCanvasPosition()
-    {
-        if (string.IsNullOrEmpty(LocalDeviceId))
-        {
-            return null;
-        }
-        var location = Cursor.Position;
-        var screens = Screen.AllScreens;
-        for (var index = 0; index < screens.Length; index++)
-        {
-            var bounds = screens[index].Bounds;
-            if (!bounds.Contains(location))
-            {
-                continue;
-            }
-            var screenId = $"{LocalDeviceId}#{index}";
-            var entry = entries.FirstOrDefault(item => item.ScreenId == screenId);
-            if (entry is null)
-            {
-                return null;
-            }
-            return new PointF(
-                (float)(entry.X + (location.X - bounds.Left)),
-                (float)(entry.Y + (location.Y - bounds.Top)));
-        }
-        return null;
-    }
-
-    private void DrawRealCursor(Graphics g, Metrics metrics)
+    private void DrawCursors(Graphics g, Metrics metrics)
     {
         foreach (var (deviceId, remote) in remoteCursorPositions)
         {
             DrawCursorDot(g, remote.CanvasPoint, metrics, ColorFor(deviceId));
         }
-        if (realCursorPosition is { } canvasPosition)
+        if (localCursorPosition is { } canvasPosition)
         {
             DrawCursorDot(g, canvasPosition, metrics, Color.White);
         }

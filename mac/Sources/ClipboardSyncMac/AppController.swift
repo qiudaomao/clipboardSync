@@ -16,6 +16,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var presenceTimer: Timer?
     private static let presenceHeartbeatInterval: TimeInterval = 5
     private static let presenceStaleTimeout: TimeInterval = 15
+    private var isLocalLayoutWindowOpen = false
+    private var layoutWatchers: Set<String> = []
+    private var cursorReportTimer: Timer?
+    private static let cursorReportInterval: TimeInterval = 1.0 / 30.0
     private var pendingInputConfigSync = false
     private var statusText = AppText.text("status.stopped") {
         didSet {
@@ -46,8 +50,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.onLayoutChanged = { [weak self] entries in
             self?.applyLocalLayoutChange(entries)
         }
-        controller.onLocalCursorMoved = { [weak self] screenId, normalizedX, normalizedY in
-            self?.broadcastCursorPosition(screenId: screenId, normalizedX: normalizedX, normalizedY: normalizedY)
+        controller.onWindowClosed = { [weak self] in
+            self?.handleScreenLayoutWindowClosed()
         }
         return controller
     }()
@@ -120,6 +124,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         inputCoordinator.stop()
         transport?.stop()
         presenceTimer?.invalidate()
+        cursorReportTimer?.invalidate()
     }
 
     /// Periodically re-broadcasts our own hello (so peers keep our `lastSeen` fresh even when we
@@ -146,6 +151,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var layoutChanged = false
         for staleId in staleIds {
             inputDevices.removeValue(forKey: staleId)
+            layoutWatchers.remove(staleId)
             if screenLayoutStore.remove(deviceId: staleId) {
                 layoutChanged = true
             }
@@ -155,6 +161,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        updateCursorReporting()
         updateMenu()
         updateInputCoordinator()
         if layoutChanged {
@@ -371,11 +378,86 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showScreenLayout() {
         registerLocalScreen()
+        isLocalLayoutWindowOpen = true
+        broadcastLayoutWatch(enabled: true)
+        updateCursorReporting()
         screenLayoutWindowController.show(
             entries: screenLayoutStore.snapshot(),
             localDeviceId: deviceId,
             deviceNames: deviceDisplayNames
         )
+    }
+
+    private func handleScreenLayoutWindowClosed() {
+        isLocalLayoutWindowOpen = false
+        broadcastLayoutWatch(enabled: false)
+        updateCursorReporting()
+    }
+
+    /// Lets every peer know whether this device is (or isn't) watching the shared layout, so peers
+    /// with their own window closed still start reporting their live cursor position — otherwise
+    /// only whichever device already has its window open would ever show up moving.
+    private func broadcastLayoutWatch(enabled: Bool) {
+        guard transport != nil, !config.password.isEmpty, peerCount > 0 else {
+            return
+        }
+        publishInput(InputMessage(
+            type: "input",
+            origin: deviceId,
+            target: nil,
+            kind: "layoutWatch",
+            role: nil,
+            deviceName: nil,
+            deviceAddress: nil,
+            screens: nil,
+            enabled: enabled,
+            controlDeviceId: nil,
+            layout: nil,
+            capture: nil,
+            mouse: nil,
+            key: nil,
+            sentAt: Date().timeIntervalSince1970
+        ))
+    }
+
+    private func handleLayoutWatchMessage(_ message: InputMessage) {
+        if message.enabled == true {
+            layoutWatchers.insert(message.origin)
+        } else {
+            layoutWatchers.remove(message.origin)
+        }
+        updateCursorReporting()
+    }
+
+    /// Starts or stops the periodic local-cursor report: active whenever this device's own layout
+    /// window is open, or at least one peer has told us (via `layoutWatch`) that theirs is.
+    private func updateCursorReporting() {
+        let shouldReport = isLocalLayoutWindowOpen || !layoutWatchers.isEmpty
+        guard shouldReport else {
+            cursorReportTimer?.invalidate()
+            cursorReportTimer = nil
+            return
+        }
+        guard cursorReportTimer == nil else {
+            return
+        }
+        let timer = Timer(timeInterval: Self.cursorReportInterval, repeats: true) { [weak self] _ in
+            self?.reportLocalCursor()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cursorReportTimer = timer
+        reportLocalCursor()
+    }
+
+    private func reportLocalCursor() {
+        let report = InputSharingCoordinator.currentLocalCursorReport(deviceId: deviceId, entries: screenLayoutStore.snapshot())
+        if isLocalLayoutWindowOpen {
+            screenLayoutWindowController.setLocalCursor(screenId: report?.screenId, normalizedX: report?.normalizedX, normalizedY: report?.normalizedY)
+        }
+        guard let report else {
+            return
+        }
+        broadcastCursorPosition(screenId: report.screenId, normalizedX: report.normalizedX, normalizedY: report.normalizedY)
     }
 
     private func refreshScreenLayoutWindowIfVisible() {
@@ -527,6 +609,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         transport?.stop()
         transport = nil
         peerCount = 0
+        layoutWatchers.removeAll()
+        updateCursorReporting()
         updateInputCoordinator()
         statusText = AppText.text("status.stopped")
     }
@@ -626,6 +710,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func restartTransport() {
         transport?.stop()
         peerCount = 0
+        layoutWatchers.removeAll()
+        updateCursorReporting()
         updateInputCoordinator()
 
         guard !config.password.isEmpty else {
@@ -670,6 +756,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if self.config.mode == .server || self.pendingInputConfigSync {
                     self.sendInputConfig()
                     self.pendingInputConfigSync = false
+                }
+                if self.isLocalLayoutWindowOpen {
+                    self.broadcastLayoutWatch(enabled: true)
                 }
             }
         }
@@ -795,6 +884,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if message.kind == "cursor" {
             handleCursorMessage(message)
+            return
+        }
+
+        if message.kind == "layoutWatch" {
+            handleLayoutWatchMessage(message)
             return
         }
 

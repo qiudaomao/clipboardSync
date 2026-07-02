@@ -53,6 +53,10 @@ internal sealed class TrayAppContext : ApplicationContext
     private static readonly TimeSpan CursorBroadcastInterval = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan CursorReceiveInterval = TimeSpan.FromMilliseconds(125);
     private const double CursorBroadcastMinDelta = 0.0025;
+    private bool isLocalLayoutWindowOpen;
+    private readonly HashSet<string> layoutWatchers = [];
+    private System.Windows.Forms.Timer? cursorReportTimer;
+    private const int CursorReportIntervalMs = 33;
 
     private sealed class InputDeviceMenuDevice
     {
@@ -144,6 +148,8 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             presenceTimer.Stop();
             presenceTimer.Dispose();
+            cursorReportTimer?.Stop();
+            cursorReportTimer?.Dispose();
             transport?.Dispose();
             inputCoordinator.Dispose();
             clipboardMonitor.Dispose();
@@ -169,6 +175,7 @@ internal sealed class TrayAppContext : ApplicationContext
         foreach (var staleId in staleIds)
         {
             inputDevices.Remove(staleId);
+            layoutWatchers.Remove(staleId);
             if (screenLayoutStore.Remove(staleId))
             {
                 layoutChanged = true;
@@ -180,6 +187,7 @@ internal sealed class TrayAppContext : ApplicationContext
             }
         }
 
+        UpdateCursorReporting();
         UpdateMenu();
         UpdateInputCoordinator();
         if (layoutChanged)
@@ -369,6 +377,10 @@ internal sealed class TrayAppContext : ApplicationContext
             form.Show();
         }
         form.Activate();
+
+        isLocalLayoutWindowOpen = true;
+        BroadcastLayoutWatch(enabled: true);
+        UpdateCursorReporting();
     }
 
     private ScreenLayoutForm EnsureScreenLayoutForm()
@@ -377,9 +389,16 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             screenLayoutForm = new ScreenLayoutForm();
             screenLayoutForm.LayoutChanged += entries => ApplyLocalLayoutChange(entries);
-            screenLayoutForm.LocalCursorMoved += BroadcastCursorPosition;
+            screenLayoutForm.FormClosed += (_, _) => HandleScreenLayoutFormClosed();
         }
         return screenLayoutForm;
+    }
+
+    private void HandleScreenLayoutFormClosed()
+    {
+        isLocalLayoutWindowOpen = false;
+        BroadcastLayoutWatch(enabled: false);
+        UpdateCursorReporting();
     }
 
     private void RefreshScreenLayoutFormIfVisible()
@@ -436,6 +455,74 @@ internal sealed class TrayAppContext : ApplicationContext
             Layout = entries,
             SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
         });
+    }
+
+    /// Lets every peer know whether this device is (or isn't) watching the shared layout, so peers
+    /// with their own window closed still start reporting their live cursor position - otherwise
+    /// only whichever device already has its window open would ever show up moving.
+    private void BroadcastLayoutWatch(bool enabled)
+    {
+        if (transport is null || string.IsNullOrEmpty(config.Password) || peerCount == 0)
+        {
+            return;
+        }
+        PublishInput(new InputMessage
+        {
+            Type = "input",
+            Origin = config.DeviceId,
+            Kind = "layoutWatch",
+            Enabled = enabled,
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        });
+    }
+
+    private void HandleLayoutWatchMessage(InputMessage message)
+    {
+        if (message.Enabled == true)
+        {
+            layoutWatchers.Add(message.Origin);
+        }
+        else
+        {
+            layoutWatchers.Remove(message.Origin);
+        }
+        UpdateCursorReporting();
+    }
+
+    /// Starts or stops the periodic local-cursor report: active whenever this device's own layout
+    /// window is open, or at least one peer has told us (via `layoutWatch`) that theirs is.
+    private void UpdateCursorReporting()
+    {
+        var shouldReport = isLocalLayoutWindowOpen || layoutWatchers.Count > 0;
+        if (!shouldReport)
+        {
+            cursorReportTimer?.Stop();
+            cursorReportTimer?.Dispose();
+            cursorReportTimer = null;
+            return;
+        }
+
+        if (cursorReportTimer is not null)
+        {
+            return;
+        }
+        cursorReportTimer = new System.Windows.Forms.Timer { Interval = CursorReportIntervalMs };
+        cursorReportTimer.Tick += (_, _) => ReportLocalCursor();
+        cursorReportTimer.Start();
+        ReportLocalCursor();
+    }
+
+    private void ReportLocalCursor()
+    {
+        var report = InputSharingCoordinator.CurrentLocalCursorReport(config.DeviceId, screenLayoutStore.Snapshot());
+        if (isLocalLayoutWindowOpen && screenLayoutForm is { IsDisposed: false } form)
+        {
+            form.SetLocalCursor(report?.ScreenId, report?.NormalizedX, report?.NormalizedY);
+        }
+        if (report is { } value)
+        {
+            BroadcastCursorPosition(value.ScreenId, value.NormalizedX, value.NormalizedY);
+        }
     }
 
     private void BroadcastCursorPosition(string screenId, double normalizedX, double normalizedY)
@@ -603,6 +690,8 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         transport?.Dispose();
         peerCount = 0;
+        layoutWatchers.Clear();
+        UpdateCursorReporting();
         UpdateInputCoordinator();
 
         if (string.IsNullOrEmpty(config.Password))
@@ -648,6 +737,10 @@ internal sealed class TrayAppContext : ApplicationContext
                 SendInputConfig();
                 pendingInputConfigSync = false;
             }
+            if (isLocalLayoutWindowOpen)
+            {
+                BroadcastLayoutWatch(enabled: true);
+            }
         });
         transport.Start();
         UpdateMenu();
@@ -658,6 +751,8 @@ internal sealed class TrayAppContext : ApplicationContext
         transport?.Dispose();
         transport = null;
         peerCount = 0;
+        layoutWatchers.Clear();
+        UpdateCursorReporting();
         UpdateInputCoordinator();
         status = AppText.Text("status.stopped");
         UpdateMenu();
@@ -864,9 +959,9 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
-        if (message.Kind == "cursor")
+        if (message.Kind == "layoutWatch")
         {
-            HandleCursorMessage(message);
+            HandleLayoutWatchMessage(message);
             return;
         }
 

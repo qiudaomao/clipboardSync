@@ -969,10 +969,11 @@ final class InputSharingCoordinator {
         return CGDisplayBounds(displays[index])
     }
 
-    /// This machine's actual cursor position, mapped onto the corresponding spot in the shared
-    /// layout canvas — used to show a live "you are here" dot in the Screen Layout window. Returns
-    /// nil if the monitor the cursor is currently on hasn't been registered in `entries` yet.
-    static func currentLocalCanvasCursorPosition(deviceId: String, entries: [ScreenLayoutEntry]) -> CGPoint? {
+    /// This machine's actual cursor position, described as a normalized point on whichever of its
+    /// own screens currently contains it, plus that screen's id. Used both to show a local "you are
+    /// here" dot in the Screen Layout window and to report live position to peers watching it.
+    /// Returns nil if the monitor the cursor is currently on hasn't been registered in `entries` yet.
+    static func currentLocalCursorReport(deviceId: String, entries: [ScreenLayoutEntry]) -> (screenId: String, normalizedX: Double, normalizedY: Double)? {
         guard !deviceId.isEmpty else {
             return nil
         }
@@ -983,14 +984,21 @@ final class InputSharingCoordinator {
                 continue
             }
             let screenId = "\(deviceId)#\(index)"
-            guard let entry = entries.first(where: { $0.screenId == screenId }) else {
+            guard entries.contains(where: { $0.screenId == screenId }) else {
                 return nil
             }
-            return CGPoint(x: entry.x + (location.x - bounds.minX), y: entry.y + (location.y - bounds.minY))
+            let normalizedX = min(max(Double(location.x - bounds.minX) / max(Double(bounds.width), 1), 0), 1)
+            let normalizedY = min(max(Double(location.y - bounds.minY) / max(Double(bounds.height), 1), 0), 1)
+            return (screenId, normalizedX, normalizedY)
         }
         return nil
     }
 
+    /// The system's active displays, ordered by physical position (left-to-right, then top-to-
+    /// bottom) rather than raw `CGGetActiveDisplayList` enumeration order. Raw order isn't
+    /// guaranteed stable across relaunches or sleep/wake, which would otherwise make a monitor's
+    /// index-based screenId (and therefore its saved layout position/size) drift or swap with
+    /// another monitor's between sessions.
     static func activeDisplayIds() -> [CGDirectDisplayID] {
         var displayCount: UInt32 = 0
         guard CGGetActiveDisplayList(0, nil, &displayCount) == .success, displayCount > 0 else {
@@ -1004,7 +1012,14 @@ final class InputSharingCoordinator {
         guard error == .success else {
             return [CGMainDisplayID()]
         }
-        return Array(displays.prefix(Int(displayCount)))
+        return Array(displays.prefix(Int(displayCount))).sorted { lhs, rhs in
+            let lhsBounds = CGDisplayBounds(lhs)
+            let rhsBounds = CGDisplayBounds(rhs)
+            if lhsBounds.origin.x != rhsBounds.origin.x {
+                return lhsBounds.origin.x < rhsBounds.origin.x
+            }
+            return lhsBounds.origin.y < rhsBounds.origin.y
+        }
     }
 
     private static func desktopBounds() -> CGRect {
