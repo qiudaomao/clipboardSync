@@ -13,6 +13,7 @@ internal sealed class ScreenLayoutForm : Form
     private readonly Button doneButton;
 
     public event Action<List<ScreenLayoutEntry>>? LayoutChanged;
+    public event Action<string>? ForgetDevice;
 
     public ScreenLayoutForm()
     {
@@ -51,6 +52,7 @@ internal sealed class ScreenLayoutForm : Form
         canvas.Dock = DockStyle.Fill;
         canvas.BorderStyle = BorderStyle.FixedSingle;
         canvas.LayoutChanged += entries => LayoutChanged?.Invoke(entries);
+        canvas.ForgetDevice += id => ForgetDevice?.Invoke(id);
 
         doneButton = new Button
         {
@@ -87,10 +89,11 @@ internal sealed class ScreenLayoutForm : Form
         AcceptButton = doneButton;
     }
 
-    public void UpdateLayout(List<ScreenLayoutEntry> entries, string localDeviceId, Dictionary<string, string> deviceNames)
+    public void UpdateLayout(List<ScreenLayoutEntry> entries, string localDeviceId, Dictionary<string, string> deviceNames, HashSet<string> onlineDeviceIds)
     {
         canvas.LocalDeviceId = localDeviceId;
         canvas.DeviceNames = deviceNames;
+        canvas.OnlineDeviceIds = onlineDeviceIds;
         canvas.Entries = entries;
     }
 
@@ -114,9 +117,11 @@ internal sealed class ScreenLayoutForm : Form
 internal sealed class ScreenLayoutCanvas : Panel
 {
     public event Action<List<ScreenLayoutEntry>>? LayoutChanged;
+    public event Action<string>? ForgetDevice;
 
     public string LocalDeviceId = "";
     public Dictionary<string, string> DeviceNames = [];
+    public HashSet<string> OnlineDeviceIds = [];
 
     private List<ScreenLayoutEntry> entries = [];
     public List<ScreenLayoutEntry> Entries
@@ -179,13 +184,18 @@ internal sealed class ScreenLayoutCanvas : Panel
             {
                 var rect = ScreenRect(entry, metrics);
                 var color = ColorFor(entry.DeviceId);
+                var isOnline = OnlineDeviceIds.Contains(entry.DeviceId);
 
-                using (var fillBrush = new SolidBrush(Color.FromArgb(90, color)))
+                using (var fillBrush = new SolidBrush(Color.FromArgb(isOnline ? 90 : 30, color)))
                 {
                     g.FillRectangle(fillBrush, rect);
                 }
-                using (var pen = new Pen(color, entry.DeviceId == LocalDeviceId ? 3f : 1.5f))
+                using (var pen = new Pen(Color.FromArgb(isOnline ? 255 : 128, color), entry.DeviceId == LocalDeviceId ? 3f : 1.5f))
                 {
+                    if (!isOnline)
+                    {
+                        pen.DashStyle = DashStyle.Dash;
+                    }
                     g.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
                 }
 
@@ -194,8 +204,9 @@ internal sealed class ScreenLayoutCanvas : Panel
                     continue;
                 }
 
-                var text = $"{ScreenLabel(entry)}\n{(int)entry.Width}×{(int)entry.Height}";
-                g.DrawString(text, font, Brushes.Black, rect, format);
+                var subtitle = isOnline ? $"{(int)entry.Width}×{(int)entry.Height}" : AppText.Text("layout.disconnected");
+                var text = $"{ScreenLabel(entry)}\n{subtitle}";
+                g.DrawString(text, font, isOnline ? Brushes.Black : Brushes.Gray, rect, format);
             }
         }
 
@@ -338,6 +349,18 @@ internal sealed class ScreenLayoutCanvas : Panel
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+
+        if (e.Button == MouseButtons.Right)
+        {
+            ShowForgetMenu(e.Location);
+            return;
+        }
+
+        if (e.Button != MouseButtons.Left)
+        {
+            return;
+        }
+
         var metrics = ComputeMetrics();
         dragMetrics = metrics;
         didDragDuringGesture = false;
@@ -361,6 +384,27 @@ internal sealed class ScreenLayoutCanvas : Panel
             return;
         }
         draggingDeviceId = null;
+    }
+
+    /// Right-click "Forget This Device" - only offered for a screen belonging to a device that's
+    /// currently offline, since forgetting an online device's remembered position makes no sense
+    /// and it would just get re-merged back in on its next hello anyway.
+    private void ShowForgetMenu(Point location)
+    {
+        var metrics = dragMetrics ?? ComputeMetrics();
+        var entry = entries.OrderBy(item => item.ScreenId, StringComparer.Ordinal).Reverse()
+            .FirstOrDefault(item => ScreenRect(item, metrics).Contains(location.X, location.Y));
+
+        if (entry is null || entry.DeviceId == LocalDeviceId || OnlineDeviceIds.Contains(entry.DeviceId))
+        {
+            return;
+        }
+
+        var deviceId = entry.DeviceId;
+        var menu = new ContextMenuStrip();
+        menu.Items.Add(AppText.Text("layout.forgetDevice"), null, (_, _) => ForgetDevice?.Invoke(deviceId));
+        menu.Closed += (_, _) => menu.Dispose();
+        menu.Show(this, location);
     }
 
     protected override void OnMouseMove(MouseEventArgs e)

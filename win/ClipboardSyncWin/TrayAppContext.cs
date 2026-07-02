@@ -131,8 +131,9 @@ internal sealed class TrayAppContext : ApplicationContext
 
         // Periodically re-broadcasts our own hello (so peers keep our LastSeen fresh even when we
         // have nothing else to send) and prunes any peer we haven't heard from in a while -
-        // otherwise a disconnected device's screens and menu entry would linger forever, since
-        // nothing else ever removes them.
+        // otherwise a disconnected device's menu entry would linger forever, since nothing else
+        // ever removes it. Its screen layout entries are deliberately NOT touched here - see
+        // RemoveKnownDevice.
         presenceTimer = new System.Windows.Forms.Timer { Interval = 5000 };
         presenceTimer.Tick += (_, _) =>
         {
@@ -171,56 +172,80 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
-        var layoutChanged = staleIds.Aggregate(false, (changed, staleId) => RemoveKnownDevice(staleId) || changed);
+        foreach (var staleId in staleIds)
+        {
+            RemoveKnownDevice(staleId);
+        }
 
         UpdateCursorReporting();
         UpdateMenu();
         UpdateInputCoordinator();
-        if (layoutChanged)
-        {
-            RefreshScreenLayoutFormIfVisible();
-            if (config.Mode == SyncMode.Server)
-            {
-                BroadcastLayout();
-            }
-        }
+        RefreshScreenLayoutFormIfVisible();
     }
 
-    /// Forgets everything we knew about one peer device (menu entry, layout-watch state, its
-    /// screens). Returns whether that changed the shared screen layout.
-    private bool RemoveKnownDevice(string staleId)
+    /// Forgets everything we knew about one peer device's *live presence*: its menu entry and
+    /// layout-watch state. Deliberately does NOT touch screenLayoutStore - a device going offline
+    /// (whether it quit, restarted, or just dropped its connection momentarily) shouldn't erase the
+    /// position the user dragged it to. Screens for offline devices stay in the layout, drawn as
+    /// disconnected, until the user explicitly forgets them (see ForgetDevice).
+    private void RemoveKnownDevice(string staleId)
     {
         inputDevices.Remove(staleId);
         layoutWatchers.Remove(staleId);
-        var layoutChanged = screenLayoutStore.Remove(staleId);
         if (config.ControlDeviceId == staleId)
         {
             config.ControlDeviceId = null;
             ConfigStore.Save(config);
         }
-        return layoutChanged;
     }
 
     /// Called the moment the last remaining peer disconnects. At that point we know with certainty
-    /// every other device we'd been tracking is gone, so we can clear them immediately instead of
-    /// waiting for the slower staleness sweep (PruneStaleDevices) to notice one-by-one, which is
-    /// what caused a disconnected peer's screen-layout rect to visibly linger for several seconds
-    /// after its menu entry (driven by the transport's near-instant peer count) had already updated.
+    /// every other device we'd been tracking is gone, so we can mark them offline immediately
+    /// instead of waiting for the slower staleness sweep (PruneStaleDevices) to notice one-by-one.
     private void ClearAllKnownPeers()
     {
         if (inputDevices.Count == 0)
         {
             return;
         }
-        var staleIds = inputDevices.Keys.ToList();
-        var layoutChanged = staleIds.Aggregate(false, (changed, staleId) => RemoveKnownDevice(staleId) || changed);
+        foreach (var staleId in inputDevices.Keys.ToList())
+        {
+            RemoveKnownDevice(staleId);
+        }
 
         UpdateCursorReporting();
         UpdateMenu();
         UpdateInputCoordinator();
-        if (layoutChanged)
+        RefreshScreenLayoutFormIfVisible();
+    }
+
+    /// Explicitly and permanently drops a device's saved screens from the shared layout - the only
+    /// path that should ever delete layout entries (offline devices are kept, just drawn as
+    /// disconnected). Triggered from the layout window's right-click "Forget This Device" menu, and
+    /// only offered there for devices that are currently offline.
+    private void ForgetDevice(string id)
+    {
+        if (id == config.DeviceId)
+        {
+            return;
+        }
+        RemoveKnownDevice(id);
+        var changed = screenLayoutStore.Remove(id);
+        UpdateMenu();
+        if (changed)
         {
             RefreshScreenLayoutFormIfVisible();
+        }
+        if (config.Mode == SyncMode.Server)
+        {
+            if (changed)
+            {
+                BroadcastLayout();
+            }
+        }
+        else
+        {
+            SendLayoutForgetRequest(id);
         }
     }
 
@@ -337,7 +362,10 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
-        inputDevices.TryGetValue(message.Origin, out var existing);
+        // Whether this device was offline a moment ago - its first message back (of any kind, not
+        // necessarily one carrying Screens) is what should flip its layout rect from "disconnected"
+        // back to normal, even when Merge below finds nothing to actually change.
+        var wasOffline = !inputDevices.TryGetValue(message.Origin, out var existing);
         inputDevices[message.Origin] = new InputDeviceMenuDevice
         {
             Id = message.Origin,
@@ -348,16 +376,26 @@ internal sealed class TrayAppContext : ApplicationContext
             LastSeen = DateTimeOffset.UtcNow
         };
 
-        if (message.Screens is { } screens && screenLayoutStore.Merge(message.Origin, screens))
+        var layoutChanged = message.Screens is { } screens && screenLayoutStore.Merge(message.Origin, screens);
+        if (layoutChanged && config.Mode == SyncMode.Server)
         {
-            if (config.Mode == SyncMode.Server)
-            {
-                BroadcastLayout();
-            }
+            BroadcastLayout();
+        }
+        if (layoutChanged || wasOffline)
+        {
             RefreshScreenLayoutFormIfVisible();
         }
 
         UpdateMenu();
+    }
+
+    /// Devices currently known to be connected - the local machine plus every peer we're actively
+    /// hearing from. Anything in the shared screen layout that isn't in this set is a remembered
+    /// device that's offline right now (quit, restarted, or just dropped), not one we've forgotten.
+    private HashSet<string> OnlineDeviceIds()
+    {
+        var ids = new HashSet<string>(inputDevices.Keys) { config.DeviceId };
+        return ids;
     }
 
     private Dictionary<string, bool> DeviceEnabledMap()
@@ -395,7 +433,7 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         RegisterLocalScreen();
         var form = EnsureScreenLayoutForm();
-        form.UpdateLayout(screenLayoutStore.Snapshot(), config.DeviceId, DeviceDisplayNames());
+        form.UpdateLayout(screenLayoutStore.Snapshot(), config.DeviceId, DeviceDisplayNames(), OnlineDeviceIds());
         if (!form.Visible)
         {
             form.Show();
@@ -414,6 +452,7 @@ internal sealed class TrayAppContext : ApplicationContext
             screenLayoutForm = new ScreenLayoutForm();
             screenLayoutForm.LayoutChanged += entries => ApplyLocalLayoutChange(entries);
             screenLayoutForm.FormClosed += (_, _) => HandleScreenLayoutFormClosed();
+            screenLayoutForm.ForgetDevice += id => ForgetDevice(id);
         }
         return screenLayoutForm;
     }
@@ -429,7 +468,7 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         if (screenLayoutForm is { IsDisposed: false, Visible: true })
         {
-            screenLayoutForm.UpdateLayout(screenLayoutStore.Snapshot(), config.DeviceId, DeviceDisplayNames());
+            screenLayoutForm.UpdateLayout(screenLayoutStore.Snapshot(), config.DeviceId, DeviceDisplayNames(), OnlineDeviceIds());
         }
     }
 
@@ -483,6 +522,41 @@ internal sealed class TrayAppContext : ApplicationContext
             Layout = entries,
             SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
         });
+    }
+
+    /// Asks the server (the canonical layout owner) to drop a device's screens. Only meaningful
+    /// when we're a client - the server applies it locally and rebroadcasts the resulting layout.
+    private void SendLayoutForgetRequest(string forgottenId)
+    {
+        if (transport is null || string.IsNullOrEmpty(config.Password))
+        {
+            return;
+        }
+        PublishInput(new InputMessage
+        {
+            Type = "input",
+            Origin = config.DeviceId,
+            Target = forgottenId,
+            Kind = "layoutForget",
+            Role = config.Mode == SyncMode.Server ? "server" : "client",
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        });
+    }
+
+    private void HandleLayoutForgetMessage(InputMessage message)
+    {
+        if (config.Mode != SyncMode.Server || message.Target is not { } target)
+        {
+            return;
+        }
+        inputDevices.Remove(target);
+        layoutWatchers.Remove(target);
+        if (screenLayoutStore.Remove(target))
+        {
+            BroadcastLayout();
+        }
+        UpdateMenu();
+        RefreshScreenLayoutFormIfVisible();
     }
 
     /// Lets every peer know whether this device is (or isn't) watching the shared layout, so peers
@@ -989,6 +1063,12 @@ internal sealed class TrayAppContext : ApplicationContext
         if (message.Kind == "layout")
         {
             HandleLayoutMessage(message);
+            return;
+        }
+
+        if (message.Kind == "layoutForget")
+        {
+            HandleLayoutForgetMessage(message);
             return;
         }
 
