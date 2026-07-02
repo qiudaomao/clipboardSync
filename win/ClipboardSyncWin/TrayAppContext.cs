@@ -411,9 +411,13 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void ApplyLocalLayoutChange(List<ScreenLayoutEntry> entries)
     {
+        // Apply to our own persisted copy immediately, regardless of role - a client shouldn't
+        // depend on the server's round-trip broadcast landing before the app might quit to have
+        // its own drag survive a restart. The server request below still propagates the change to
+        // the server's canonical table and other peers.
+        screenLayoutStore.ApplyPositionUpdates(entries);
         if (config.Mode == SyncMode.Server)
         {
-            screenLayoutStore.ApplyPositionUpdates(entries);
             BroadcastLayout();
         }
         else

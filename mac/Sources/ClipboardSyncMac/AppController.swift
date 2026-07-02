@@ -472,9 +472,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func applyLocalLayoutChange(_ entries: [ScreenLayoutEntry]) {
+        // Apply to our own persisted copy immediately, regardless of role — a client shouldn't
+        // depend on the server's round-trip broadcast landing before the app might quit to have
+        // its own drag survive a restart. The server request below still propagates the change to
+        // the server's canonical table and other peers.
+        screenLayoutStore.applyPositionUpdates(entries)
         switch config.mode {
         case .server:
-            screenLayoutStore.applyPositionUpdates(entries)
             broadcastLayout()
         case .client:
             sendLayoutRequest(entries)
