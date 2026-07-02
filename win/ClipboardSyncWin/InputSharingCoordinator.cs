@@ -366,25 +366,28 @@ internal sealed class InputSharingCoordinator : IDisposable
     /// Local cursor is in real screen coordinates, relative to the current monitor's bounds. The
     /// shared layout canvas uses the same top-left-origin, y-down convention, so translating is
     /// just an offset by that monitor's own layout entry origin. The four-edge check is against
-    /// the full local desktop bounds (union of all of this machine's monitors) so an internal seam
-    /// between two of this machine's own screens never triggers a hop - only leaving the whole
-    /// local footprint does.
+    /// the CURRENT monitor's own real bounds, not the union of all this machine's monitors - for
+    /// an irregular layout (e.g. one monitor taller than the other) the union's top edge only
+    /// coincides with the taller monitor, so a cursor over the shorter one could never reach it.
+    /// Checking the current monitor's own edges instead still can't wrongly trigger at an internal
+    /// seam between two of this machine's own screens: the neighbor search below always excludes
+    /// this device's own screens on this first hop, so it naturally finds nothing there and lets
+    /// the OS carry the cursor across the seam on its own.
     private (ScreenEdge Edge, ScreenLayoutEntry Neighbor, PointF CanvasPoint)? CrossingNeighbor(
         POINT location,
         ScreenLayoutEntry currentEntry,
         RectangleF currentRealRect)
     {
-        var unionBounds = DesktopBounds();
         const int threshold = 2;
         var canvasPoint = new PointF(
             (float)(currentEntry.X + (location.X - currentRealRect.Left)),
             (float)(currentEntry.Y + (location.Y - currentRealRect.Top)));
 
         var candidateEdges = new List<ScreenEdge>();
-        if (location.X >= unionBounds.Right - threshold) candidateEdges.Add(ScreenEdge.Right);
-        if (location.X <= unionBounds.Left + threshold) candidateEdges.Add(ScreenEdge.Left);
-        if (location.Y <= unionBounds.Top + threshold) candidateEdges.Add(ScreenEdge.Top);
-        if (location.Y >= unionBounds.Bottom - threshold) candidateEdges.Add(ScreenEdge.Bottom);
+        if (location.X >= currentRealRect.Right - threshold) candidateEdges.Add(ScreenEdge.Right);
+        if (location.X <= currentRealRect.Left + threshold) candidateEdges.Add(ScreenEdge.Left);
+        if (location.Y <= currentRealRect.Top + threshold) candidateEdges.Add(ScreenEdge.Top);
+        if (location.Y >= currentRealRect.Bottom - threshold) candidateEdges.Add(ScreenEdge.Bottom);
 
         var ownScreenIds = layoutStore.Entries.Values.Where(e => e.DeviceId == deviceId).Select(e => e.ScreenId).ToHashSet();
 

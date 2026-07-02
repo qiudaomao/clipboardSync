@@ -326,15 +326,18 @@ final class InputSharingCoordinator {
     /// Local cursor is in Quartz global coordinates, relative to the current monitor's real rect.
     /// The shared layout canvas uses the same top-left-origin, y-down convention, so translating
     /// is just an offset by that monitor's own layout entry origin. The four-edge check is against
-    /// the full local desktop bounds (union of all of this machine's monitors) so an internal seam
-    /// between two of this machine's own screens never triggers a hop — only leaving the whole
-    /// local footprint does.
+    /// the CURRENT monitor's own real bounds, not the union of all this machine's monitors — for
+    /// an irregular layout (e.g. one monitor taller than the other) the union's top edge only
+    /// coincides with the taller monitor, so a cursor over the shorter one could never reach it.
+    /// Checking the current monitor's own edges instead still can't wrongly trigger at an internal
+    /// seam between two of this machine's own screens: the neighbor search below always excludes
+    /// this device's own screens on this first hop, so it naturally finds nothing there and lets
+    /// the OS carry the cursor across the seam on its own.
     private func crossingNeighbor(
         at location: CGPoint,
         currentEntry: ScreenLayoutEntry,
         currentRealRect: CGRect
     ) -> (edge: ScreenEdge, neighbor: ScreenLayoutEntry, canvasPoint: CGPoint)? {
-        let unionBounds = Self.desktopBounds()
         let threshold = 2.0
         let canvasPoint = CGPoint(
             x: currentEntry.x + (location.x - currentRealRect.minX),
@@ -342,10 +345,10 @@ final class InputSharingCoordinator {
         )
 
         var candidateEdges: [ScreenEdge] = []
-        if Double(location.x) >= Double(unionBounds.maxX) - threshold { candidateEdges.append(.right) }
-        if Double(location.x) <= Double(unionBounds.minX) + threshold { candidateEdges.append(.left) }
-        if Double(location.y) <= Double(unionBounds.minY) + threshold { candidateEdges.append(.top) }
-        if Double(location.y) >= Double(unionBounds.maxY) - threshold { candidateEdges.append(.bottom) }
+        if Double(location.x) >= Double(currentRealRect.maxX) - threshold { candidateEdges.append(.right) }
+        if Double(location.x) <= Double(currentRealRect.minX) + threshold { candidateEdges.append(.left) }
+        if Double(location.y) <= Double(currentRealRect.minY) + threshold { candidateEdges.append(.top) }
+        if Double(location.y) >= Double(currentRealRect.maxY) - threshold { candidateEdges.append(.bottom) }
 
         let ownScreenIds = Set(layoutStore.entries.values.filter { $0.deviceId == deviceId }.map(\.screenId))
 
