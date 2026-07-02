@@ -69,6 +69,12 @@ The `History` submenu keeps the latest 10 clipboard items and can restore/resend
 Set the same sync password on every device before starting. Clipboard payloads are encrypted with AES-GCM over the existing WebSocket connection.
 Input Sharing is off by default. Enable it from Configure or the tray menu, choose `Server -> Client` or `Client -> Server`, and arrange each machine's screen in the `Screen Layout...` tray menu window (drag rects to match how they physically sit relative to each other).
 
+### Auto-update (NetSparkle)
+
+The Windows app checks for updates via [NetSparkleUpdater](https://github.com/NetSparkleUpdater/NetSparkle). It points at `win-appcast.xml` in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo and expects installer-only releases named like `ClipboardSyncWinSetup-v0.1.0.exe`.
+
+Use `build-windows-installer.ps1` to publish a small framework-dependent build and package it with Inno Setup 6. Users must have the .NET 8 Desktop Runtime (x64); if it is missing, the .NET app host shows Microsoft's runtime install guidance when the app launches. See [release_windows.md](release_windows.md) for the full per-release procedure.
+
 ## Notes
 
 The WebSocket endpoint is still plain `ws://`, but clipboard and input-sharing message bodies are encrypted and authenticated with the configured shared password.

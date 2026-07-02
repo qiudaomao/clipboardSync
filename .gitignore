@@ -29,6 +29,7 @@ TestResults/
 .nuget/
 
 # Build artifacts
+artifacts/
 *.nupkg
 *.snupkg
 *.log

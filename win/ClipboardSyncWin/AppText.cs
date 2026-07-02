@@ -61,6 +61,7 @@ internal static class AppText
                 ["menu.clientMode"] = "Client mode",
                 ["menu.serverMode"] = "Server mode",
                 ["menu.configure"] = "Configure...",
+                ["menu.checkForUpdates"] = "Check for Updates...",
                 ["menu.start"] = "Start",
                 ["menu.restart"] = "Restart",
                 ["menu.stop"] = "Stop",
@@ -111,7 +112,8 @@ internal static class AppText
                 ["modifier.shift"] = "Shift",
                 ["modifier.control"] = "Control",
                 ["modifier.alt"] = "Alt/Option",
-                ["modifier.meta"] = "Win/Command"
+                ["modifier.meta"] = "Win/Command",
+                ["updates.notConfigured"] = "Auto-update is not configured yet. Generate a NetSparkle Ed25519 keypair and replace the Windows updater public key before release."
             },
             [Language.Chinese] = new Dictionary<string, string>
             {
@@ -155,6 +157,7 @@ internal static class AppText
                 ["menu.clientMode"] = "客户端模式",
                 ["menu.serverMode"] = "服务器模式",
                 ["menu.configure"] = "设置...",
+                ["menu.checkForUpdates"] = "检查更新...",
                 ["menu.start"] = "启动",
                 ["menu.restart"] = "重启",
                 ["menu.stop"] = "停止",
@@ -205,7 +208,8 @@ internal static class AppText
                 ["modifier.shift"] = "Shift",
                 ["modifier.control"] = "Control",
                 ["modifier.alt"] = "Alt/Option",
-                ["modifier.meta"] = "Win/Command"
+                ["modifier.meta"] = "Win/Command",
+                ["updates.notConfigured"] = "尚未配置自动更新。发布前请生成 NetSparkle Ed25519 密钥对，并替换 Windows 更新器公钥。"
             },
             [Language.Korean] = new Dictionary<string, string>
             {
@@ -249,6 +253,7 @@ internal static class AppText
                 ["menu.clientMode"] = "클라이언트 모드",
                 ["menu.serverMode"] = "서버 모드",
                 ["menu.configure"] = "설정...",
+                ["menu.checkForUpdates"] = "업데이트 확인...",
                 ["menu.start"] = "시작",
                 ["menu.restart"] = "다시 시작",
                 ["menu.stop"] = "중지",
@@ -299,7 +304,8 @@ internal static class AppText
                 ["modifier.shift"] = "Shift",
                 ["modifier.control"] = "Control",
                 ["modifier.alt"] = "Alt/Option",
-                ["modifier.meta"] = "Win/Command"
+                ["modifier.meta"] = "Win/Command",
+                ["updates.notConfigured"] = "자동 업데이트가 아직 구성되지 않았습니다. 릴리스 전에 NetSparkle Ed25519 키 쌍을 생성하고 Windows 업데이트 공개 키를 교체하세요."
             },
             [Language.Japanese] = new Dictionary<string, string>
             {
@@ -343,6 +349,7 @@ internal static class AppText
                 ["menu.clientMode"] = "クライアントモード",
                 ["menu.serverMode"] = "サーバーモード",
                 ["menu.configure"] = "設定...",
+                ["menu.checkForUpdates"] = "アップデートを確認...",
                 ["menu.start"] = "開始",
                 ["menu.restart"] = "再起動",
                 ["menu.stop"] = "停止",
@@ -393,7 +400,8 @@ internal static class AppText
                 ["modifier.shift"] = "Shift",
                 ["modifier.control"] = "Control",
                 ["modifier.alt"] = "Alt/Option",
-                ["modifier.meta"] = "Win/Command"
+                ["modifier.meta"] = "Win/Command",
+                ["updates.notConfigured"] = "自動更新はまだ設定されていません。リリース前に NetSparkle Ed25519 キーペアを生成し、Windows アップデーターの公開鍵を置き換えてください。"
             }
         };
 

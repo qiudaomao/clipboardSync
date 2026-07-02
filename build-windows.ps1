@@ -35,6 +35,16 @@ if ($StopRunning) {
 }
 
 $selfContainedValue = if ($SelfContained) { "true" } else { "false" }
+$PublishDir = Join-Path $Root "win\ClipboardSyncWin\bin\$Configuration\net8.0-windows\$Runtime\publish"
+
+if (Test-Path $PublishDir) {
+    $resolvedPublishDir = (Resolve-Path $PublishDir).Path
+    $expectedRoot = (Resolve-Path (Join-Path $Root "win\ClipboardSyncWin\bin\$Configuration\net8.0-windows\$Runtime")).Path
+    if (-not $resolvedPublishDir.StartsWith($expectedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean unexpected publish directory: $resolvedPublishDir"
+    }
+    Remove-Item -LiteralPath $resolvedPublishDir -Recurse -Force
+}
 
 & $Dotnet publish $Project `
     -c $Configuration `
@@ -45,7 +55,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-$ExePath = Join-Path $Root "win\ClipboardSyncWin\bin\$Configuration\net8.0-windows\$Runtime\publish\ClipboardSyncWin.exe"
+$ExePath = Join-Path $PublishDir "ClipboardSyncWin.exe"
 
 if (Test-Path $ExePath) {
     $Exe = Get-Item $ExePath

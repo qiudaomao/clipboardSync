@@ -26,12 +26,14 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem inputStatusItem;
     private readonly ToolStripMenuItem inputSharingItem;
     private readonly ToolStripMenuItem controlDeviceItem;
+    private readonly ToolStripMenuItem checkForUpdatesItem;
     private readonly Dictionary<string, InputDeviceMenuDevice> inputDevices = [];
     private readonly ToolStripMenuItem clientModeItem;
     private readonly ToolStripMenuItem serverModeItem;
     private readonly ClipboardMonitor clipboardMonitor;
     private readonly ScreenLayoutStore screenLayoutStore = new();
     private readonly InputSharingCoordinator inputCoordinator;
+    private readonly WinUpdateController updateController;
     private readonly object inputCoordinatorLock = new();
     private readonly SynchronizationContext uiContext;
     private readonly Icon trayIcon;
@@ -102,6 +104,8 @@ internal sealed class TrayAppContext : ApplicationContext
         serverModeItem = new ToolStripMenuItem(AppText.Text("menu.serverMode"), null, (_, _) => SetMode(SyncMode.Server));
         trayIcon = LoadTrayIcon();
         inputCoordinator = new InputSharingCoordinator(config.DeviceId, screenLayoutStore);
+        updateController = new WinUpdateController(trayIcon);
+        checkForUpdatesItem = new ToolStripMenuItem(AppText.Text("menu.checkForUpdates"), null, (_, _) => updateController.CheckForUpdates());
         trayMenu = BuildMenu();
 
         notifyIcon = new NotifyIcon
@@ -152,6 +156,7 @@ internal sealed class TrayAppContext : ApplicationContext
             cursorReportTimer?.Stop();
             cursorReportTimer?.Dispose();
             transport?.Dispose();
+            updateController.Dispose();
             inputCoordinator.Dispose();
             clipboardMonitor.Dispose();
             notifyIcon.Dispose();
@@ -267,6 +272,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(serverModeItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.configure"), null, (_, _) => ShowConfiguration()));
+        menu.Items.Add(checkForUpdatesItem);
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.start"), null, (_, _) => RestartTransport()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.restart"), null, (_, _) => RestartTransport()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.stop"), null, (_, _) => StopTransport()));
