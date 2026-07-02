@@ -498,10 +498,17 @@ final class ScreenLayoutCanvasView: NSView {
         .systemPink, .systemYellow, .systemRed, .systemIndigo, .systemBrown
     ]
 
+    /// A simple, deterministic hash over UTF-16 code units — deliberately not Swift's `Hasher`,
+    /// which is seeded randomly per process launch and would give the same device a different
+    /// color every relaunch (and a different color on the Mac side than on a Windows peer looking
+    /// at the same layout). Mirrors the Windows client's `ColorFor` exactly (same algorithm, same
+    /// wraparound arithmetic, same palette order) so every viewer agrees on every device's color.
     private static func color(for deviceId: String) -> NSColor {
-        var hasher = Hasher()
-        hasher.combine(deviceId)
-        let hash = UInt(bitPattern: hasher.finalize())
-        return palette[Int(hash % UInt(palette.count))]
+        var hash: Int32 = 17
+        for unit in deviceId.utf16 {
+            hash = hash &* 31 &+ Int32(unit)
+        }
+        let unsignedHash = UInt32(bitPattern: hash)
+        return palette[Int(unsignedHash % UInt32(palette.count))]
     }
 }
