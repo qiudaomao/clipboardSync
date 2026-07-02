@@ -43,7 +43,7 @@ final class WebSocketServerTransport: Transport {
 
                 self.listener = listener
                 listener.start(queue: queue)
-                onStatus?(AppText.format("status.startingServer", NetworkAddress.serverURL(port: port)))
+                onStatus?(AppText.format("status.startingServer", NetworkAddress.serverAddress(port: port)))
             } catch {
                 onStatus?(AppText.format("status.serverError", error.localizedDescription))
             }
@@ -102,7 +102,7 @@ final class WebSocketServerTransport: Transport {
     private func pushStatus() {
         let readyPeerCount = peers.values.filter(\.isReady).count
         onPeerCount?(readyPeerCount)
-        onStatus?(AppText.format("status.serverPeers", NetworkAddress.serverURL(port: port), readyPeerCount))
+        onStatus?(AppText.format("status.serverPeers", NetworkAddress.serverAddress(port: port), readyPeerCount))
     }
 }
 

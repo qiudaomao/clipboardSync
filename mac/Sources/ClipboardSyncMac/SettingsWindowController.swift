@@ -183,6 +183,22 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             reverseScrollButton.widthAnchor.constraint(equalTo: hostField.widthAnchor),
             modifierMapStack.widthAnchor.constraint(equalTo: hostField.widthAnchor)
         ])
+
+        sizeWindowToFitContent(rootStack: rootStack, contentView: contentView)
+    }
+
+    private func sizeWindowToFitContent(rootStack: NSStackView, contentView: NSView) {
+        guard let window else {
+            return
+        }
+        contentView.layoutSubtreeIfNeeded()
+        let neededHeight = ceil(rootStack.fittingSize.height) + 22 + 20
+        window.minSize = NSSize(width: 480, height: neededHeight)
+
+        var frame = window.frame
+        frame.origin.y += frame.size.height - neededHeight
+        frame.size.height = neededHeight
+        window.setFrame(frame, display: false)
     }
 
     private func formRow(label: String, control: NSView) -> NSStackView {
@@ -222,7 +238,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             hostField.isEnabled = true
             hostField.isEditable = false
             hostField.isSelectable = true
-            hostField.stringValue = NetworkAddress.serverURL(port: currentPortValue())
+            hostField.stringValue = NetworkAddress.hostAddress()
             hostHintLabel.stringValue = AppText.text("settings.hostServerHint")
         }
         updateInputSharingState()
@@ -299,7 +315,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     func controlTextDidChange(_ notification: Notification) {
         if notification.object as? NSTextField === portField, modeControl.selectedSegment == 1 {
-            hostField.stringValue = NetworkAddress.serverURL(port: currentPortValue())
+            hostField.stringValue = NetworkAddress.hostAddress()
         }
     }
 

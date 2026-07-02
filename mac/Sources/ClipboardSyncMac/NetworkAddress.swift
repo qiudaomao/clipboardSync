@@ -60,9 +60,16 @@ enum NetworkAddress {
         return fallbackAddress
     }
 
+    static func hostAddress() -> String {
+        localLANIPv4Address() ?? Host.current().name ?? "this-mac.local"
+    }
+
     static func serverURL(port: Int) -> String {
-        let host = localLANIPv4Address() ?? Host.current().name ?? "this-mac.local"
-        return "ws://\(host):\(port)/"
+        "ws://\(hostAddress()):\(port)/"
+    }
+
+    static func serverAddress(port: Int) -> String {
+        "\(hostAddress()):\(port)"
     }
 
     static func isLoopbackHost(_ host: String) -> Bool {
