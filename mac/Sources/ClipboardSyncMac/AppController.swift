@@ -975,7 +975,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if clipboard.applyContent(content) {
             addHistory(content)
+            if content.kind == "files" {
+                statusText = AppText.text("status.filesReceived")
+                postFilesReceivedNotification()
+            }
         }
+    }
+
+    private func postFilesReceivedNotification() {
+        let notification = NSUserNotification()
+        notification.title = AppText.text("app.name")
+        notification.informativeText = AppText.text("status.filesReceived")
+        NSUserNotificationCenter.default.deliver(notification)
     }
 
     private func handleInputMessage(_ data: Data) {

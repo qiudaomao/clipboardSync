@@ -1005,6 +1005,12 @@ internal sealed class TrayAppContext : ApplicationContext
         if (content is not null && clipboardMonitor.ApplyContent(content))
         {
             AddHistory(content);
+            if (content.Kind == "files")
+            {
+                status = AppText.Text("status.filesReceived");
+                UpdateMenu();
+                notifyIcon.ShowBalloonTip(3000, AppText.Text("app.name"), AppText.Text("status.filesReceived"), ToolTipIcon.Info);
+            }
         }
     }
 
