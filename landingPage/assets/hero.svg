@@ -1,0 +1,136 @@
+<svg viewBox="0 0 1000 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Clipboard, mouse and keyboard syncing between a MacBook and a Windows PC">
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6ea8fe"/>
+      <stop offset="55%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#34e0b0"/>
+    </linearGradient>
+    <linearGradient id="accentV" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6ea8fe"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#181b26"/>
+      <stop offset="100%" stop-color="#0d0f16"/>
+    </linearGradient>
+    <linearGradient id="screenFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#12141c"/>
+      <stop offset="100%" stop-color="#0a0b10"/>
+    </linearGradient>
+    <radialGradient id="glowBlue" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#6ea8fe" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#6ea8fe" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowGreen" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#34e0b0" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#34e0b0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="badgeGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#a78bfa" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ambient glows -->
+  <ellipse cx="230" cy="230" rx="270" ry="230" fill="url(#glowBlue)"/>
+  <ellipse cx="770" cy="230" rx="270" ry="230" fill="url(#glowGreen)"/>
+
+  <!-- sync path -->
+  <path id="syncPath" d="M 372 214 C 452 150, 548 150, 628 214" fill="none" stroke="url(#accent)" stroke-width="2.5" stroke-dasharray="1 11" stroke-linecap="round" opacity="0.85">
+    <animate attributeName="stroke-dashoffset" from="0" to="-24" dur="1.1s" repeatCount="indefinite"/>
+  </path>
+
+  <!-- traveling sync pulses -->
+  <circle r="4.5" fill="#eaf1ff">
+    <animateMotion dur="2.6s" repeatCount="indefinite" begin="0s">
+      <mpath href="#syncPath"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" dur="2.6s" repeatCount="indefinite"/>
+  </circle>
+  <circle r="4.5" fill="#eaf1ff">
+    <animateMotion dur="2.6s" repeatCount="indefinite" begin="1.3s" keyPoints="1;0" keyTimes="0;1">
+      <mpath href="#syncPath"/>
+    </animateMotion>
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.85;1" dur="2.6s" repeatCount="indefinite" begin="1.3s"/>
+  </circle>
+
+  <!-- ===================== MacBook (left) ===================== -->
+  <g transform="translate(56,86)">
+    <!-- screen -->
+    <rect x="0" y="0" width="316" height="196" rx="16" fill="url(#panel)" stroke="rgba(255,255,255,0.10)"/>
+    <rect x="10" y="10" width="296" height="176" rx="8" fill="url(#screenFill)"/>
+    <!-- camera notch -->
+    <circle cx="158" cy="5" r="2" fill="#2a2e3a"/>
+    <!-- traffic lights -->
+    <circle cx="26" cy="26" r="4" fill="#ff5f57"/>
+    <circle cx="40" cy="26" r="4" fill="#febc2e"/>
+    <circle cx="54" cy="26" r="4" fill="#28c840"/>
+    <!-- app content: clipboard card -->
+    <circle cx="158" cy="100" r="58" fill="url(#badgeGlow)"/>
+    <rect x="122" y="58" width="72" height="86" rx="10" fill="#1b1e29" stroke="rgba(255,255,255,0.14)"/>
+    <rect x="140" y="52" width="36" height="14" rx="4" fill="#2a2e3d" stroke="rgba(255,255,255,0.14)"/>
+    <rect x="134" y="86" width="44" height="6" rx="3" fill="url(#accent)"/>
+    <rect x="134" y="100" width="44" height="6" rx="3" fill="rgba(255,255,255,0.25)"/>
+    <rect x="134" y="114" width="28" height="6" rx="3" fill="rgba(255,255,255,0.25)"/>
+    <!-- base / keyboard deck -->
+    <path d="M -14 196 L 330 196 L 312 214 Q 306 218 298 218 L 18 218 Q 10 218 4 214 Z" fill="url(#panel)" stroke="rgba(255,255,255,0.08)"/>
+    <rect x="140" y="200" width="36" height="4" rx="2" fill="rgba(255,255,255,0.18)"/>
+  </g>
+  <text x="214" y="330" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="15" font-weight="600" fill="#c7cbd6" letter-spacing="0.2">macOS</text>
+
+  <!-- ===================== Windows PC (right) ===================== -->
+  <g transform="translate(628,86)">
+    <!-- screen -->
+    <rect x="0" y="0" width="316" height="196" rx="16" fill="url(#panel)" stroke="rgba(255,255,255,0.10)"/>
+    <rect x="10" y="10" width="296" height="176" rx="8" fill="url(#screenFill)"/>
+    <!-- app content -->
+    <circle cx="158" cy="98" r="58" fill="url(#badgeGlow)"/>
+    <!-- windows logo mark -->
+    <g transform="translate(126,72)">
+      <rect x="0" y="0" width="27" height="27" rx="3" fill="#6ea8fe"/>
+      <rect x="32" y="0" width="27" height="27" rx="3" fill="#a78bfa"/>
+      <rect x="0" y="32" width="27" height="27" rx="3" fill="#34e0b0"/>
+      <rect x="32" y="32" width="27" height="27" rx="3" fill="#eaf1ff"/>
+    </g>
+    <!-- taskbar -->
+    <rect x="10" y="154" width="296" height="32" rx="0" fill="rgba(255,255,255,0.05)"/>
+    <circle cx="30" cy="170" r="9" fill="url(#accent)"/>
+    <rect x="50" y="164" width="14" height="12" rx="3" fill="rgba(255,255,255,0.22)"/>
+    <rect x="70" y="164" width="14" height="12" rx="3" fill="rgba(255,255,255,0.22)"/>
+    <rect x="90" y="164" width="14" height="12" rx="3" fill="rgba(255,255,255,0.22)"/>
+    <!-- monitor stand -->
+    <path d="M 140 196 L 176 196 L 182 224 L 134 224 Z" fill="url(#panel)" stroke="rgba(255,255,255,0.08)"/>
+    <rect x="104" y="224" width="108" height="10" rx="5" fill="url(#panel)" stroke="rgba(255,255,255,0.08)"/>
+  </g>
+  <text x="786" y="330" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="15" font-weight="600" fill="#c7cbd6" letter-spacing="0.2">Windows</text>
+
+  <!-- ===================== floating sync badges ===================== -->
+  <!-- clipboard badge -->
+  <g transform="translate(430,140)">
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-8; 0,0" dur="3.4s" repeatCount="indefinite" additive="sum"/>
+    <circle r="30" fill="url(#panel)" stroke="url(#accent)" stroke-width="1.6"/>
+    <rect x="-11" y="-14" width="22" height="26" rx="4" fill="none" stroke="#eaf1ff" stroke-width="2"/>
+    <rect x="-6" y="-17" width="12" height="6" rx="2" fill="#12141c" stroke="#eaf1ff" stroke-width="2"/>
+    <line x1="-6" y1="-2" x2="6" y2="-2" stroke="#eaf1ff" stroke-width="2" stroke-linecap="round"/>
+    <line x1="-6" y1="4" x2="6" y2="4" stroke="#eaf1ff" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <!-- mouse badge -->
+  <g transform="translate(500,250)">
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,8; 0,0" dur="3.4s" repeatCount="indefinite" begin="0.5s" additive="sum"/>
+    <circle r="30" fill="url(#panel)" stroke="url(#accent)" stroke-width="1.6"/>
+    <rect x="-9" y="-15" width="18" height="28" rx="9" fill="none" stroke="#eaf1ff" stroke-width="2"/>
+    <line x1="0" y1="-15" x2="0" y2="-2" stroke="#eaf1ff" stroke-width="2"/>
+  </g>
+
+  <!-- keyboard badge -->
+  <g transform="translate(570,140)">
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-8; 0,0" dur="3.4s" repeatCount="indefinite" begin="1s" additive="sum"/>
+    <circle r="30" fill="url(#panel)" stroke="url(#accent)" stroke-width="1.6"/>
+    <rect x="-15" y="-10" width="30" height="20" rx="3" fill="none" stroke="#eaf1ff" stroke-width="2"/>
+    <rect x="-10" y="-6" width="4" height="4" fill="#eaf1ff"/>
+    <rect x="-2" y="-6" width="4" height="4" fill="#eaf1ff"/>
+    <rect x="6" y="-6" width="4" height="4" fill="#eaf1ff"/>
+    <rect x="-8" y="2" width="16" height="4" rx="1" fill="#eaf1ff"/>
+  </g>
+</svg>

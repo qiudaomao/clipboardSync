@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Clipboard Sync — Native clipboard sync over LAN</title>
+<style>
+  :root {
+    --bg: #06070a;
+    --bg-soft: #0c0e14;
+    --panel: #12141c;
+    --border: rgba(255,255,255,0.08);
+    --text: #f4f5f7;
+    --muted: #9aa0ac;
+    --accent: #6ea8fe;
+    --accent-2: #a78bfa;
+    --accent-3: #34e0b0;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* Background glow */
+  .glow {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(600px circle at 15% -10%, rgba(110,168,254,0.25), transparent 60%),
+      radial-gradient(700px circle at 90% 10%, rgba(167,139,250,0.18), transparent 60%),
+      radial-gradient(500px circle at 50% 100%, rgba(52,224,176,0.12), transparent 60%);
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    backdrop-filter: blur(14px);
+    background: rgba(6,7,10,0.6);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    max-width: 1120px;
+    margin: 0 auto;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: -0.02em;
+  }
+  .brand-mark {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+  nav.links { display: flex; gap: 28px; }
+  nav.links a {
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 14px;
+    transition: color .2s ease;
+  }
+  nav.links a:hover { color: var(--text); }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1px solid var(--border);
+    transition: all .2s ease;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #05060a;
+    border: none;
+  }
+  .btn-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .btn-ghost { color: var(--text); background: rgba(255,255,255,0.03); }
+  .btn-ghost:hover { background: rgba(255,255,255,0.07); }
+
+  /* Hero */
+  .hero {
+    padding: 110px 0 20px;
+    text-align: center;
+    position: relative;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.03);
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 28px;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-3); box-shadow: 0 0 8px var(--accent-3); }
+
+  h1 {
+    font-size: clamp(38px, 6vw, 64px);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    margin: 0 0 20px;
+    font-weight: 800;
+  }
+  h1 .gradient {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2) 60%, var(--accent-3));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 19px;
+    max-width: 620px;
+    margin: 0 auto 36px;
+    line-height: 1.6;
+  }
+  .cta-row {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .platform-note {
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .hero-img {
+    margin: 48px auto 0;
+    max-width: 880px;
+  }
+  .hero-img img {
+    width: 100%;
+    display: block;
+    filter: drop-shadow(0 30px 60px rgba(0,0,0,0.55));
+  }
+
+  /* Screenshot showcase */
+  .showcase {
+    padding: 20px 0 100px;
+  }
+  .shots {
+    display: grid;
+    grid-template-columns: 1.55fr 1fr;
+    gap: 24px;
+    align-items: end;
+  }
+  .shot-card {
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+    padding: 14px;
+    box-shadow: 0 30px 80px -30px rgba(0,0,0,0.7);
+  }
+  .shot-card img {
+    width: 100%;
+    display: block;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+  .shot-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px 14px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .shot-label span.badge {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--text);
+  }
+
+  /* Features */
+  section.features { padding: 40px 0 100px; }
+  .section-head { text-align: center; margin-bottom: 56px; }
+  .section-head h2 {
+    font-size: clamp(28px, 4vw, 38px);
+    letter-spacing: -0.02em;
+    margin: 0 0 12px;
+    font-weight: 800;
+  }
+  .section-head p { color: var(--muted); font-size: 16px; margin: 0; }
+
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+  .feature-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 26px;
+    transition: transform .2s ease, border-color .2s ease;
+  }
+  .feature-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(255,255,255,0.18);
+  }
+  .feature-icon {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 19px;
+    margin-bottom: 16px;
+    background: rgba(110,168,254,0.12);
+    border: 1px solid rgba(110,168,254,0.25);
+  }
+  .feature-card h3 { font-size: 16px; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .feature-card p { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 0; }
+
+  /* CTA band */
+  .cta-band {
+    margin: 40px 0 100px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: linear-gradient(135deg, rgba(110,168,254,0.12), rgba(167,139,250,0.10));
+    padding: 56px 40px;
+    text-align: center;
+  }
+  .cta-band h2 { font-size: 28px; margin: 0 0 12px; letter-spacing: -0.02em; }
+  .cta-band p { color: var(--muted); margin: 0 0 28px; }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 32px 0;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+  footer a { color: var(--muted); }
+
+  @media (max-width: 860px) {
+    .shots { grid-template-columns: 1fr; }
+    .feature-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 560px) {
+    .feature-grid { grid-template-columns: 1fr; }
+    nav.links { display: none; }
+    .hero { padding-top: 90px; }
+  }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+
+<header class="nav">
+  <div class="nav-inner">
+    <div class="brand">
+      <span class="brand-mark">📋</span>
+      Clipboard Sync
+    </div>
+    <nav class="links">
+      <a href="#showcase">Preview</a>
+      <a href="#features">Features</a>
+    </nav>
+    <a class="btn btn-ghost" href="https://github.com/qiudaomao/clipboardSyncRelease/releases">Download</a>
+  </div>
+</header>
+
+<section class="hero wrap">
+  <div class="eyebrow"><span class="dot"></span> macOS &amp; Windows</div>
+  <h1>Your clipboard,<br /><span class="gradient">everywhere on your LAN.</span></h1>
+  <p class="subtitle">
+    A lightweight menubar app that syncs text, images, and files across your Mac and PC
+    over WebSocket — instantly, encrypted, and without the cloud.
+  </p>
+  <div class="cta-row">
+    <a class="btn btn-primary" href="https://github.com/qiudaomao/clipboardSyncRelease/releases">Download now</a>
+  </div>
+  <div class="platform-note">No account required · Your data stays on your network</div>
+
+  <div class="hero-img">
+    <img src="assets/hero.svg" alt="Clipboard, mouse and keyboard syncing between a MacBook and a Windows PC" />
+  </div>
+</section>
+
+<section class="showcase wrap" id="showcase">
+  <div class="shots">
+    <div class="shot-card">
+      <img src="assets/macOS.png" alt="Clipboard Sync on macOS" />
+      <div class="shot-label">Menubar app on macOS <span class="badge">macOS</span></div>
+    </div>
+    <div class="shot-card">
+      <img src="assets/win.png" alt="Clipboard Sync on Windows" />
+      <div class="shot-label">Native tray app on Windows <span class="badge">Windows</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="features wrap" id="features">
+  <div class="section-head">
+    <h2>Everything you need, nothing you don't</h2>
+    <p>A native app built for speed, privacy, and getting out of your way.</p>
+  </div>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="feature-icon">🔄</div>
+      <h3>LAN clipboard sync</h3>
+      <p>Copy on one machine, paste on another — synced instantly over your local network.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🖼️</div>
+      <h3>Text &amp; image support</h3>
+      <p>Text and images sync automatically, no manual steps or format conversion needed.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📁</div>
+      <h3>Click-to-sync files</h3>
+      <p>Send files across devices with a single click, straight from your clipboard.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🕓</div>
+      <h3>Clipboard history</h3>
+      <p>Never lose a copy — browse and reuse recent clipboard items anytime.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔐</div>
+      <h3>Password-based encryption</h3>
+      <p>Every payload is encrypted with your password, so only your devices can read it.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🖱️</div>
+      <h3>Mouse &amp; keyboard sharing</h3>
+      <p>Control multiple machines with a single mouse and keyboard, seamlessly.</p>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="cta-band">
+    <h2>Sync your clipboard in minutes</h2>
+    <p>Install on macOS and Windows, pair your devices, and start copying across your network.</p>
+    <a class="btn btn-primary" href="https://github.com/qiudaomao/clipboardSyncRelease/releases">Download Clipboard Sync</a>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    Clipboard Sync — native clipboard sync over WebSocket.
+  </div>
+</footer>
+
+</body>
+</html>
