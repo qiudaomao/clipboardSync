@@ -20,8 +20,8 @@ internal sealed class ScreenLayoutForm : Form
         FormBorderStyle = FormBorderStyle.Sizable;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(640, 460);
-        MinimumSize = new Size(480, 360);
+        ClientSize = new Size(700, 540);
+        MinimumSize = new Size(620, 480);
 
         var titleLabel = new Label
         {
@@ -55,7 +55,8 @@ internal sealed class ScreenLayoutForm : Form
         doneButton = new Button
         {
             Text = AppText.Text("layout.done"),
-            AutoSize = true
+            AutoSize = false,
+            Size = new Size(88, 28)
         };
         doneButton.Click += (_, _) => Close();
 
@@ -63,8 +64,8 @@ internal sealed class ScreenLayoutForm : Form
         {
             Dock = DockStyle.Bottom,
             FlowDirection = FlowDirection.RightToLeft,
-            Height = 40,
-            Padding = new Padding(0, 6, 0, 0)
+            Height = 52,
+            Padding = new Padding(0, 8, 0, 0)
         };
         buttonPanel.Controls.Add(doneButton);
 
@@ -77,7 +78,7 @@ internal sealed class ScreenLayoutForm : Form
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
         root.Controls.Add(headerPanel, 0, 0);
         root.Controls.Add(canvas, 0, 1);
         root.Controls.Add(buttonPanel, 0, 2);

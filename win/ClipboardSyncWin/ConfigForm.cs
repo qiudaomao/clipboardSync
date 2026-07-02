@@ -41,7 +41,8 @@ internal sealed class ConfigForm : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(430, 500);
+        ClientSize = new Size(450, 500);
+        MinimumSize = new Size(450, 500);
 
         inputSharingBox.Text = AppText.Text("settings.enableInputSharing");
         reverseScrollBox.Text = AppText.Text("settings.reverseVerticalScroll");
@@ -71,10 +72,12 @@ internal sealed class ConfigForm : Form
 
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
             Padding = new Padding(12),
             ColumnCount = 2,
-            RowCount = 9
+            RowCount = 7
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -84,9 +87,7 @@ internal sealed class ConfigForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 116));
-        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 150));
 
         AddRow(layout, 0, AppText.Text("settings.mode"), modeBox);
         AddRow(layout, 1, AppText.Text("settings.host"), BuildHostControl());
@@ -98,8 +99,10 @@ internal sealed class ConfigForm : Form
 
         var buttons = new FlowLayoutPanel
         {
-            Dock = DockStyle.Fill,
-            FlowDirection = FlowDirection.RightToLeft
+            Dock = DockStyle.Bottom,
+            FlowDirection = FlowDirection.RightToLeft,
+            Height = 44,
+            Padding = new Padding(0, 6, 0, 0)
         };
 
         var okButton = new Button { Text = AppText.Text("settings.save") };
@@ -107,12 +110,21 @@ internal sealed class ConfigForm : Form
         okButton.Click += (_, _) => Save();
         buttons.Controls.Add(okButton);
         buttons.Controls.Add(cancelButton);
-        layout.Controls.Add(buttons, 0, 8);
-        layout.SetColumnSpan(buttons, 2);
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = 3
+        };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        root.Controls.Add(layout, 0, 0);
+        root.Controls.Add(buttons, 0, 2);
 
         AcceptButton = okButton;
         CancelButton = cancelButton;
-        Controls.Add(layout);
+        Controls.Add(root);
         UpdateModeState();
         UpdateInputSharingState();
     }
@@ -125,7 +137,14 @@ internal sealed class ConfigForm : Form
             AutoSize = true,
             Anchor = AnchorStyles.Left
         };
-        control.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        if (control is TableLayoutPanel)
+        {
+            control.Dock = DockStyle.Fill;
+        }
+        else
+        {
+            control.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        }
         layout.Controls.Add(labelControl, 0, row);
         layout.Controls.Add(control, 1, row);
     }
@@ -137,13 +156,14 @@ internal sealed class ConfigForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 2,
             RowCount = 4,
-            Margin = Padding.Empty
+            Margin = Padding.Empty,
+            MinimumSize = new Size(0, 144)
         };
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         for (var index = 0; index < 4; index++)
         {
-            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         }
 
         AddModifierRow(panel, 0, AppText.Text("settings.mapShift"), shiftModifierBox);
@@ -162,6 +182,7 @@ internal sealed class ConfigForm : Form
             Anchor = AnchorStyles.Left
         };
         box.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        box.Margin = new Padding(0, 2, 0, 2);
         panel.Controls.Add(labelControl, 0, row);
         panel.Controls.Add(box, 1, row);
     }
