@@ -385,12 +385,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // back to normal, even when `merge` below finds nothing to actually change.
         let wasOffline = inputDevices[message.origin] == nil
         let existing = inputDevices[message.origin]
+        let newInputEnabled = message.enabled ?? existing?.inputEnabled
+        let inputEnabledChanged = newInputEnabled != existing?.inputEnabled
         inputDevices[message.origin] = InputDeviceMenuDevice(
             id: message.origin,
             name: message.deviceName ?? existing?.name,
             address: message.deviceAddress ?? existing?.address,
             role: message.role ?? existing?.role,
-            inputEnabled: message.enabled ?? existing?.inputEnabled,
+            inputEnabled: newInputEnabled,
             lastSeen: Date()
         )
 
@@ -398,7 +400,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if layoutChanged, config.mode == .server {
             broadcastLayout()
         }
-        if layoutChanged || wasOffline {
+        if layoutChanged || wasOffline || inputEnabledChanged {
             refreshScreenLayoutWindowIfVisible()
         }
 
@@ -445,7 +447,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             entries: screenLayoutStore.snapshot(),
             localDeviceId: deviceId,
             deviceNames: deviceDisplayNames,
-            onlineDeviceIds: onlineDeviceIds
+            onlineDeviceIds: onlineDeviceIds,
+            deviceEnabledMap: deviceEnabledMap
         )
     }
 
@@ -529,7 +532,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             entries: screenLayoutStore.snapshot(),
             localDeviceId: deviceId,
             deviceNames: deviceDisplayNames,
-            onlineDeviceIds: onlineDeviceIds
+            onlineDeviceIds: onlineDeviceIds,
+            deviceEnabledMap: deviceEnabledMap
         )
     }
 
@@ -740,6 +744,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         config.inputSharingEnabled.toggle()
         config.save()
         updateInputCoordinator(sendHello: true)
+        refreshScreenLayoutWindowIfVisible()
     }
 
     @objc private func setControlDevice(_ sender: NSMenuItem) {
@@ -787,6 +792,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateInputCoordinator(sendHello: shouldSendHello)
         if shouldSyncInputConfig {
             syncInputConfig()
+        }
+        if shouldSendHello {
+            refreshScreenLayoutWindowIfVisible()
         }
     }
 

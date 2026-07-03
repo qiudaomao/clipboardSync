@@ -372,13 +372,15 @@ internal sealed class TrayAppContext : ApplicationContext
         // necessarily one carrying Screens) is what should flip its layout rect from "disconnected"
         // back to normal, even when Merge below finds nothing to actually change.
         var wasOffline = !inputDevices.TryGetValue(message.Origin, out var existing);
+        var newInputEnabled = message.Enabled ?? existing?.InputEnabled;
+        var inputEnabledChanged = newInputEnabled != existing?.InputEnabled;
         inputDevices[message.Origin] = new InputDeviceMenuDevice
         {
             Id = message.Origin,
             Name = message.DeviceName ?? existing?.Name,
             Address = message.DeviceAddress ?? existing?.Address,
             Role = message.Role ?? existing?.Role,
-            InputEnabled = message.Enabled ?? existing?.InputEnabled,
+            InputEnabled = newInputEnabled,
             LastSeen = DateTimeOffset.UtcNow
         };
 
@@ -387,7 +389,7 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             BroadcastLayout();
         }
-        if (layoutChanged || wasOffline)
+        if (layoutChanged || wasOffline || inputEnabledChanged)
         {
             RefreshScreenLayoutFormIfVisible();
         }
@@ -439,7 +441,7 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         RegisterLocalScreen();
         var form = EnsureScreenLayoutForm();
-        form.UpdateLayout(screenLayoutStore.Snapshot(), config.DeviceId, DeviceDisplayNames(), OnlineDeviceIds());
+        form.UpdateLayout(screenLayoutStore.Snapshot(), config.DeviceId, DeviceDisplayNames(), OnlineDeviceIds(), DeviceEnabledMap());
         if (!form.Visible)
         {
             form.Show();
@@ -474,7 +476,7 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         if (screenLayoutForm is { IsDisposed: false, Visible: true })
         {
-            screenLayoutForm.UpdateLayout(screenLayoutStore.Snapshot(), config.DeviceId, DeviceDisplayNames(), OnlineDeviceIds());
+            screenLayoutForm.UpdateLayout(screenLayoutStore.Snapshot(), config.DeviceId, DeviceDisplayNames(), OnlineDeviceIds(), DeviceEnabledMap());
         }
     }
 
@@ -716,6 +718,7 @@ internal sealed class TrayAppContext : ApplicationContext
         config.InputSharingEnabled = !config.InputSharingEnabled;
         ConfigStore.Save(config);
         UpdateInputCoordinator(sendHello: true);
+        RefreshScreenLayoutFormIfVisible();
     }
 
     private void SetControlDevice(string controlDeviceId)
@@ -756,6 +759,10 @@ internal sealed class TrayAppContext : ApplicationContext
         if (shouldSyncInputConfig)
         {
             SyncInputConfig();
+        }
+        if (shouldSendHello)
+        {
+            RefreshScreenLayoutFormIfVisible();
         }
     }
 

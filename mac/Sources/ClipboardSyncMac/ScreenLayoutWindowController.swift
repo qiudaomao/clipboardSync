@@ -28,10 +28,11 @@ final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func show(entries: [ScreenLayoutEntry], localDeviceId: String, deviceNames: [String: String], onlineDeviceIds: Set<String>) {
+    func show(entries: [ScreenLayoutEntry], localDeviceId: String, deviceNames: [String: String], onlineDeviceIds: Set<String>, deviceEnabledMap: [String: Bool]) {
         canvasView.localDeviceId = localDeviceId
         canvasView.deviceNames = deviceNames
         canvasView.onlineDeviceIds = onlineDeviceIds
+        canvasView.deviceEnabledMap = deviceEnabledMap
         canvasView.entries = entries
 
         NSApp.activate(ignoringOtherApps: true)
@@ -136,6 +137,10 @@ final class ScreenLayoutCanvasView: NSView {
     var localDeviceId = ""
     var deviceNames: [String: String] = [:]
     var onlineDeviceIds: Set<String> = []
+    /// Whether each device currently has input sharing enabled, keyed by deviceId. A device absent
+    /// from this map (e.g. an older peer that never reported its state) is treated as enabled, so
+    /// its layout rect renders the same as before this distinction existed.
+    var deviceEnabledMap: [String: Bool] = [:]
     var entries: [ScreenLayoutEntry] = [] {
         didSet {
             if draggingDeviceId == nil {
@@ -179,17 +184,19 @@ final class ScreenLayoutCanvasView: NSView {
                 let rect = screenRect(for: entry, metrics: metrics)
                 let color = Self.color(for: entry.deviceId)
                 let isOnline = onlineDeviceIds.contains(entry.deviceId)
+                let isInputEnabled = deviceEnabledMap[entry.deviceId] ?? true
+                let isInputDisabled = isOnline && !isInputEnabled
 
                 let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
                 if isOnline {
-                    color.withAlphaComponent(0.35).setFill()
+                    color.withAlphaComponent(isInputDisabled ? 0.18 : 0.35).setFill()
                 } else {
                     color.withAlphaComponent(0.12).setFill()
                 }
                 path.fill()
-                color.withAlphaComponent(isOnline ? 1.0 : 0.5).setStroke()
+                color.withAlphaComponent(isOnline ? (isInputDisabled ? 0.7 : 1.0) : 0.5).setStroke()
                 path.lineWidth = entry.deviceId == localDeviceId ? 3 : 1.5
-                if !isOnline {
+                if !isOnline || isInputDisabled {
                     path.setLineDash([5, 3], count: 2, phase: 0)
                 }
                 path.stroke()
@@ -198,11 +205,16 @@ final class ScreenLayoutCanvasView: NSView {
                     continue
                 }
 
-                let subtitle = isOnline
-                    ? "\(Int(entry.width))\u{00D7}\(Int(entry.height))"
-                    : AppText.text("layout.disconnected")
+                let subtitle: String
+                if !isOnline {
+                    subtitle = AppText.text("layout.disconnected")
+                } else if isInputDisabled {
+                    subtitle = AppText.text("layout.inputDisabled")
+                } else {
+                    subtitle = "\(Int(entry.width))\u{00D7}\(Int(entry.height))"
+                }
                 let text = NSAttributedString(string: "\(screenLabel(for: entry))\n\(subtitle)", attributes: [
-                    .foregroundColor: isOnline ? NSColor.labelColor : NSColor.secondaryLabelColor,
+                    .foregroundColor: (isOnline && !isInputDisabled) ? NSColor.labelColor : NSColor.secondaryLabelColor,
                     .font: NSFont.systemFont(ofSize: 12, weight: .medium),
                     .paragraphStyle: paragraphStyle
                 ])

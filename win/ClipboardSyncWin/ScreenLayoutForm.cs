@@ -89,11 +89,12 @@ internal sealed class ScreenLayoutForm : Form
         AcceptButton = doneButton;
     }
 
-    public void UpdateLayout(List<ScreenLayoutEntry> entries, string localDeviceId, Dictionary<string, string> deviceNames, HashSet<string> onlineDeviceIds)
+    public void UpdateLayout(List<ScreenLayoutEntry> entries, string localDeviceId, Dictionary<string, string> deviceNames, HashSet<string> onlineDeviceIds, Dictionary<string, bool> deviceEnabledMap)
     {
         canvas.LocalDeviceId = localDeviceId;
         canvas.DeviceNames = deviceNames;
         canvas.OnlineDeviceIds = onlineDeviceIds;
+        canvas.DeviceEnabledMap = deviceEnabledMap;
         canvas.Entries = entries;
     }
 
@@ -122,6 +123,10 @@ internal sealed class ScreenLayoutCanvas : Panel
     public string LocalDeviceId = "";
     public Dictionary<string, string> DeviceNames = [];
     public HashSet<string> OnlineDeviceIds = [];
+    /// Whether each device currently has input sharing enabled, keyed by deviceId. A device absent
+    /// from this map (e.g. an older peer that never reported its state) is treated as enabled, so
+    /// its layout rect renders the same as before this distinction existed.
+    public Dictionary<string, bool> DeviceEnabledMap = [];
 
     private List<ScreenLayoutEntry> entries = [];
     public List<ScreenLayoutEntry> Entries
@@ -185,14 +190,16 @@ internal sealed class ScreenLayoutCanvas : Panel
                 var rect = ScreenRect(entry, metrics);
                 var color = ColorFor(entry.DeviceId);
                 var isOnline = OnlineDeviceIds.Contains(entry.DeviceId);
+                var isInputEnabled = !DeviceEnabledMap.TryGetValue(entry.DeviceId, out var enabled) || enabled;
+                var isInputDisabled = isOnline && !isInputEnabled;
 
-                using (var fillBrush = new SolidBrush(Color.FromArgb(isOnline ? 90 : 30, color)))
+                using (var fillBrush = new SolidBrush(Color.FromArgb(isOnline ? (isInputDisabled ? 46 : 90) : 30, color)))
                 {
                     g.FillRectangle(fillBrush, rect);
                 }
-                using (var pen = new Pen(Color.FromArgb(isOnline ? 255 : 128, color), entry.DeviceId == LocalDeviceId ? 3f : 1.5f))
+                using (var pen = new Pen(Color.FromArgb(isOnline ? (isInputDisabled ? 178 : 255) : 128, color), entry.DeviceId == LocalDeviceId ? 3f : 1.5f))
                 {
-                    if (!isOnline)
+                    if (!isOnline || isInputDisabled)
                     {
                         pen.DashStyle = DashStyle.Dash;
                     }
@@ -204,9 +211,21 @@ internal sealed class ScreenLayoutCanvas : Panel
                     continue;
                 }
 
-                var subtitle = isOnline ? $"{(int)entry.Width}×{(int)entry.Height}" : AppText.Text("layout.disconnected");
+                string subtitle;
+                if (!isOnline)
+                {
+                    subtitle = AppText.Text("layout.disconnected");
+                }
+                else if (isInputDisabled)
+                {
+                    subtitle = AppText.Text("layout.inputDisabled");
+                }
+                else
+                {
+                    subtitle = $"{(int)entry.Width}×{(int)entry.Height}";
+                }
                 var text = $"{ScreenLabel(entry)}\n{subtitle}";
-                g.DrawString(text, font, isOnline ? Brushes.Black : Brushes.Gray, rect, format);
+                g.DrawString(text, font, (isOnline && !isInputDisabled) ? Brushes.Black : Brushes.Gray, rect, format);
             }
         }
 
