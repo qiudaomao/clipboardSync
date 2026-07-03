@@ -12,38 +12,40 @@ SITE_REMOTE="hk:/usr/share/nginx/html/static/clipboardSync"
 DOWNLOADS_REMOTE="$SITE_REMOTE/downloads"
 PUBLIC_BASE="https://clipboardsync.fuzhuo.me/downloads"
 
+command -v gh >/dev/null 2>&1 || { echo "!! gh CLI is required (brew install gh && gh auth login)" >&2; exit 1; }
+
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
 echo "==> Fetching latest release info for $REPO"
-RELEASE_JSON="$(curl -sfL -H "Accept: application/vnd.github+json" \
-  "https://api.github.com/repos/$REPO/releases/latest")"
+RELEASE_JSON="$(gh release view --repo "$REPO" --json tagName,assets)"
 
-TAG="$(jq -r '.tag_name' <<<"$RELEASE_JSON")"
+TAG="$(jq -r '.tagName' <<<"$RELEASE_JSON")"
 if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-  echo "!! Could not resolve latest release tag (GitHub API rate limited?)" >&2
+  echo "!! Could not resolve latest release tag" >&2
   exit 1
 fi
 echo "==> Latest tag: $TAG"
 
-MAC_URL="$(jq -r '.assets[] | select(.name | test("Mac.*\\.zip$")) | .browser_download_url' <<<"$RELEASE_JSON" | head -1)"
-WIN_URL="$(jq -r '.assets[] | select(.name | test("Win.*\\.exe$")) | .browser_download_url' <<<"$RELEASE_JSON" | head -1)"
+MAC_NAME="$(jq -r '.assets[] | select(.name | test("Mac.*\\.zip$")) | .name' <<<"$RELEASE_JSON" | head -1)"
+WIN_NAME="$(jq -r '.assets[] | select(.name | test("Win.*\\.exe$")) | .name' <<<"$RELEASE_JSON" | head -1)"
 
-if [ -z "$MAC_URL" ]; then
+if [ -z "$MAC_NAME" ]; then
   echo "!! No macOS .zip asset found in release $TAG" >&2
   exit 1
 fi
-if [ -z "$WIN_URL" ]; then
+if [ -z "$WIN_NAME" ]; then
   echo "!! No Windows .exe asset found in release $TAG" >&2
   exit 1
 fi
 
-echo "==> macOS asset:   $MAC_URL"
-echo "==> Windows asset: $WIN_URL"
+echo "==> macOS asset:   $MAC_NAME"
+echo "==> Windows asset: $WIN_NAME"
 
-echo "==> Downloading..."
-curl -fL --progress-bar "$MAC_URL" -o "$WORKDIR/clipboardSyncMac.zip"
-curl -fL --progress-bar "$WIN_URL" -o "$WORKDIR/clipboardSyncWin-Setup.exe"
+echo "==> Downloading via gh..."
+gh release download "$TAG" --repo "$REPO" -p "$MAC_NAME" -p "$WIN_NAME" -D "$WORKDIR" --clobber
+mv "$WORKDIR/$MAC_NAME" "$WORKDIR/clipboardSyncMac.zip"
+mv "$WORKDIR/$WIN_NAME" "$WORKDIR/clipboardSyncWin-Setup.exe"
 
 echo "==> Uploading builds to $DOWNLOADS_REMOTE"
 scp "$WORKDIR/clipboardSyncMac.zip" "$WORKDIR/clipboardSyncWin-Setup.exe" "$DOWNLOADS_REMOTE/"
