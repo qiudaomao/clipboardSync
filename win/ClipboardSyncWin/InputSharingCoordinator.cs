@@ -28,6 +28,23 @@ internal sealed class InputSharingCoordinator : IDisposable
     private const int WM_SYSKEYUP = 0x0105;
     private const uint LLMHF_INJECTED = 0x00000001;
     private const uint LLKHF_INJECTED = 0x00000010;
+    private const uint SPI_SETCURSORS = 0x0057;
+    private static readonly int[] SystemCursorIds =
+    [
+        32512, // OCR_NORMAL
+        32513, // OCR_IBEAM
+        32514, // OCR_WAIT
+        32515, // OCR_CROSS
+        32516, // OCR_UP
+        32642, // OCR_SIZENWSE
+        32643, // OCR_SIZENESW
+        32644, // OCR_SIZEWE
+        32645, // OCR_SIZENS
+        32646, // OCR_SIZEALL
+        32648, // OCR_NO
+        32649, // OCR_HAND
+        32650  // OCR_APPSTARTING
+    ];
     private static readonly string[] ModifierKeyOrder = ["Shift", "Control", "Alt", "Meta"];
     private static readonly TimeSpan RemoteMouseMoveInterval = TimeSpan.FromMilliseconds(8);
 
@@ -56,6 +73,7 @@ internal sealed class InputSharingCoordinator : IDisposable
     private IntPtr mouseHook;
     private IntPtr keyboardHook;
     private Point localAnchor;
+    private bool localCursorHidden;
 
     public event Action<InputMessage>? MessageReady;
     public event Action<string>? StatusChanged;
@@ -142,6 +160,7 @@ internal sealed class InputSharingCoordinator : IDisposable
     {
         ReleaseRemoteModifiers();
         SendPressedModifierKeyUps();
+        ShowLocalCursor();
         activeScreenId = null;
         activeTargetDeviceId = null;
         receivingRemote = false;
@@ -486,6 +505,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         activeScreenId = target.ScreenId;
         activeTargetDeviceId = target.DeviceId;
         lastCrossedEdge = edge;
+        HideLocalCursor();
         SendCapture("start", target.DeviceId, target.ScreenId, edge, target);
         SendMouseMove();
         UpdateStatus();
@@ -545,6 +565,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             return;
         }
+        ShowLocalCursor();
         var endingScreenId = activeScreenId;
         var endingTargetDeviceId = activeTargetDeviceId;
         SendPressedModifierKeyUps();
@@ -1024,6 +1045,52 @@ internal sealed class InputSharingCoordinator : IDisposable
         return new Point(bounds.Left + bounds.Width / 2, bounds.Top + bounds.Height / 2);
     }
 
+    /// Hides this machine's own cursor while the mouse is being relayed onto a peer's screen, so the
+    /// controller doesn't show a stray arrow parked in the middle of the screen. Windows has no
+    /// per-process cursor hide that covers other apps' windows, so we swap every system cursor for a
+    /// transparent one and reload the defaults on `ShowLocalCursor`. Guarded by `localCursorHidden`
+    /// so the swap/restore stays balanced.
+    private void HideLocalCursor()
+    {
+        if (localCursorHidden)
+        {
+            return;
+        }
+        localCursorHidden = true;
+        foreach (var id in SystemCursorIds)
+        {
+            var blank = CreateBlankCursor();
+            if (blank != IntPtr.Zero)
+            {
+                // SetSystemCursor takes ownership of and destroys the handle, so each id needs its own.
+                SetSystemCursor(blank, id);
+            }
+        }
+    }
+
+    private void ShowLocalCursor()
+    {
+        if (!localCursorHidden)
+        {
+            return;
+        }
+        localCursorHidden = false;
+        SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
+    }
+
+    private static IntPtr CreateBlankCursor()
+    {
+        // 32x32, 1bpp masks: AND=0xFF, XOR=0x00 leaves the screen untouched → fully transparent.
+        var andMask = new byte[32 * 4];
+        var xorMask = new byte[32 * 4];
+        for (var i = 0; i < andMask.Length; i++)
+        {
+            andMask[i] = 0xFF;
+            xorMask[i] = 0x00;
+        }
+        return CreateCursor(IntPtr.Zero, 0, 0, 32, 32, andMask, xorMask);
+    }
+
     private static double Now()
     {
         return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
@@ -1232,6 +1299,15 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr CreateCursor(IntPtr hInst, int xHotSpot, int yHotSpot, int nWidth, int nHeight, byte[] pvANDPlane, byte[] pvXORPlane);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetSystemCursor(IntPtr hcur, int id);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);

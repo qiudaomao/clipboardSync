@@ -3,6 +3,16 @@ import AppKit
 import CoreGraphics
 import Foundation
 
+/// Private CoreGraphics SPI. `CGDisplayHideCursor` is a no-op for a background
+/// (`.accessory`) app that never owns the foreground — which is exactly our case while
+/// relaying input to a peer. Setting the `SetsCursorInBackground` connection property
+/// once lets our hide/show calls take effect regardless of which app is frontmost.
+@_silgen_name("CGSSetConnectionProperty")
+private func CGSSetConnectionProperty(_ cid: Int32, _ targetCID: Int32, _ key: CFString, _ value: CFTypeRef) -> CGError
+
+@_silgen_name("_CGSDefaultConnection")
+private func CGSDefaultConnection() -> Int32
+
 final class InputSharingCoordinator {
     var onMessage: ((InputMessage) -> Void)?
     var onStatus: ((String) -> Void)?
@@ -32,6 +42,8 @@ final class InputSharingCoordinator {
     private var suppressUntil = Date.distantPast
     private var didRequestAccessibility = false
     private var didRequestInputMonitoring = false
+    private var localCursorHidden = false
+    private var didAllowBackgroundCursorHide = false
 
     init(deviceId: String, layoutStore: ScreenLayoutStore) {
         self.deviceId = deviceId
@@ -45,6 +57,7 @@ final class InputSharingCoordinator {
     func stop() {
         sendPressedModifierKeyUps()
         removeEventTap()
+        showLocalCursor()
         activeScreenId = nil
         activeTargetDeviceId = nil
         receivingRemote = false
@@ -421,6 +434,7 @@ final class InputSharingCoordinator {
         activeScreenId = target.screenId
         activeTargetDeviceId = target.deviceId
         lastCrossedEdge = edge
+        hideLocalCursor()
         sendCapture(action: "start", targetDeviceId: target.deviceId, screenId: target.screenId, edge: edge, entry: target)
         sendMouseMoveNow()
         updateStatus()
@@ -472,6 +486,7 @@ final class InputSharingCoordinator {
         guard let currentScreenId = activeScreenId, let currentTargetDeviceId = activeTargetDeviceId else {
             return
         }
+        showLocalCursor()
         cancelPendingMouseMove()
         sendPressedModifierKeyUps()
         sendCapture(action: "end", targetDeviceId: currentTargetDeviceId, screenId: currentScreenId, edge: lastCrossedEdge, entry: layoutStore.entries[currentScreenId])
@@ -941,6 +956,35 @@ final class InputSharingCoordinator {
 
     private func currentCursorLocation() -> CGPoint {
         CGEvent(source: nil)?.location ?? .zero
+    }
+
+    /// Hides this machine's own cursor while the mouse is being relayed onto a peer's screen, so the
+    /// controller doesn't show a stray arrow parked at the screen edge. Balanced with
+    /// `showLocalCursor()` via `localCursorHidden` because the window server ref-counts hide/show.
+    private func hideLocalCursor() {
+        guard !localCursorHidden else {
+            return
+        }
+        allowBackgroundCursorHideIfNeeded()
+        localCursorHidden = true
+        CGDisplayHideCursor(CGMainDisplayID())
+    }
+
+    private func showLocalCursor() {
+        guard localCursorHidden else {
+            return
+        }
+        localCursorHidden = false
+        CGDisplayShowCursor(CGMainDisplayID())
+    }
+
+    private func allowBackgroundCursorHideIfNeeded() {
+        guard !didAllowBackgroundCursorHide else {
+            return
+        }
+        didAllowBackgroundCursorHide = true
+        let connection = CGSDefaultConnection()
+        _ = CGSSetConnectionProperty(connection, connection, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
     }
 
     static func currentScreens() -> [ScreenMetrics] {
