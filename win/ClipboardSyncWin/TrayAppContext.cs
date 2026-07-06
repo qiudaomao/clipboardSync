@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -302,6 +303,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.configure"), null, (_, _) => ShowConfiguration()));
         menu.Items.Add(checkForUpdatesItem);
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.about"), null, (_, _) => ShowAbout()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.start"), null, (_, _) => RestartTransport()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.restart"), null, (_, _) => RestartTransport()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.stop"), null, (_, _) => StopTransport()));
@@ -328,6 +330,24 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "clipboard-sync-icon.ico");
         return File.Exists(iconPath) ? new Icon(iconPath) : SystemIcons.Application;
+    }
+
+    private static void ShowAbout()
+    {
+        var version = Assembly.GetExecutingAssembly()
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            version = Application.ProductVersion;
+        }
+
+        MessageBox.Show(
+            AppText.Format("about.message", AppText.Text("app.name"), version),
+            AppText.Format("about.title", AppText.Text("app.name")),
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
     }
 
     private void UpdateMenu()
