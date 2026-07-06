@@ -51,8 +51,8 @@ echo "==> Uploading builds to $DOWNLOADS_REMOTE"
 scp "$WORKDIR/clipboardSyncMac.zip" "$WORKDIR/clipboardSyncWin-Setup.exe" "$DOWNLOADS_REMOTE/"
 
 echo "==> Uploading landing page to $SITE_REMOTE"
-scp "$SCRIPT_DIR/index.html" "$SITE_REMOTE/"
-scp -r "$SCRIPT_DIR/assets" "$SITE_REMOTE/"
+scp "$SCRIPT_DIR/landingPage/index.html" "$SITE_REMOTE/"
+scp -r "$SCRIPT_DIR/landingPage/assets" "$SITE_REMOTE/"
 
 echo "==> Done. Published $TAG:"
 echo "    https://clipboardsync.fuzhuo.me/"

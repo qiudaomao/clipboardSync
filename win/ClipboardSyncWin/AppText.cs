@@ -115,7 +115,11 @@ internal static class AppText
                 ["modifier.control"] = "Control",
                 ["modifier.alt"] = "Alt/Option",
                 ["modifier.meta"] = "Win/Command",
-                ["updates.notConfigured"] = "Auto-update is not configured yet. Generate a NetSparkle Ed25519 keypair and replace the Windows updater public key before release."
+                ["updates.notConfigured"] = "Auto-update is not configured yet. Generate a NetSparkle Ed25519 keypair and replace the Windows updater public key before release.",
+                ["status.betaExpired"] = "beta ended, update required",
+                ["beta.expiredTitle"] = "Beta Period Ended",
+                ["beta.expiredMessage"] = "This beta build's 30-day trial has ended. Please check for updates to keep using Clipboard Sync.",
+                ["beta.checkNowQuestion"] = "Check for updates now?"
             },
             [Language.Chinese] = new Dictionary<string, string>
             {
@@ -213,7 +217,11 @@ internal static class AppText
                 ["modifier.control"] = "Control",
                 ["modifier.alt"] = "Alt/Option",
                 ["modifier.meta"] = "Win/Command",
-                ["updates.notConfigured"] = "尚未配置自动更新。发布前请生成 NetSparkle Ed25519 密钥对，并替换 Windows 更新器公钥。"
+                ["updates.notConfigured"] = "尚未配置自动更新。发布前请生成 NetSparkle Ed25519 密钥对，并替换 Windows 更新器公钥。",
+                ["status.betaExpired"] = "测试已结束，需要更新",
+                ["beta.expiredTitle"] = "测试期已结束",
+                ["beta.expiredMessage"] = "此测试版本的 30 天试用期已结束，请检查更新以继续使用剪贴板同步。",
+                ["beta.checkNowQuestion"] = "现在检查更新吗？"
             },
             [Language.Korean] = new Dictionary<string, string>
             {
@@ -311,7 +319,11 @@ internal static class AppText
                 ["modifier.control"] = "Control",
                 ["modifier.alt"] = "Alt/Option",
                 ["modifier.meta"] = "Win/Command",
-                ["updates.notConfigured"] = "자동 업데이트가 아직 구성되지 않았습니다. 릴리스 전에 NetSparkle Ed25519 키 쌍을 생성하고 Windows 업데이트 공개 키를 교체하세요."
+                ["updates.notConfigured"] = "자동 업데이트가 아직 구성되지 않았습니다. 릴리스 전에 NetSparkle Ed25519 키 쌍을 생성하고 Windows 업데이트 공개 키를 교체하세요.",
+                ["status.betaExpired"] = "베타 종료, 업데이트 필요",
+                ["beta.expiredTitle"] = "베타 기간 종료",
+                ["beta.expiredMessage"] = "이 베타 빌드의 30일 체험 기간이 종료되었습니다. 계속 사용하려면 업데이트를 확인하세요.",
+                ["beta.checkNowQuestion"] = "지금 업데이트를 확인하시겠습니까?"
             },
             [Language.Japanese] = new Dictionary<string, string>
             {
@@ -409,7 +421,11 @@ internal static class AppText
                 ["modifier.control"] = "Control",
                 ["modifier.alt"] = "Alt/Option",
                 ["modifier.meta"] = "Win/Command",
-                ["updates.notConfigured"] = "自動更新はまだ設定されていません。リリース前に NetSparkle Ed25519 キーペアを生成し、Windows アップデーターの公開鍵を置き換えてください。"
+                ["updates.notConfigured"] = "自動更新はまだ設定されていません。リリース前に NetSparkle Ed25519 キーペアを生成し、Windows アップデーターの公開鍵を置き換えてください。",
+                ["status.betaExpired"] = "ベータ終了、更新が必要です",
+                ["beta.expiredTitle"] = "ベータ期間終了",
+                ["beta.expiredMessage"] = "このベータビルドの30日間の試用期間が終了しました。引き続きご利用いただくにはアップデートを確認してください。",
+                ["beta.checkNowQuestion"] = "今すぐアップデートを確認しますか？"
             }
         };
 

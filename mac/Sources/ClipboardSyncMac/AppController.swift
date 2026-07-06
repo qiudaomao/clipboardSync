@@ -114,12 +114,33 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.inputStatusMenuItem.title = status
             }
         }
+
+        guard !BetaLicense.isExpired else {
+            statusText = AppText.text("status.betaExpired")
+            presentBetaExpiredAlert()
+            return
+        }
+
         clipboard.start()
         registerLocalScreen()
         inputCoordinator.start()
         updateInputCoordinator()
         restartTransport()
         startPresenceHeartbeat()
+    }
+
+    private func presentBetaExpiredAlert() {
+        let alert = NSAlert()
+        alert.messageText = AppText.text("beta.expiredTitle")
+        alert.informativeText = AppText.text("beta.expiredMessage")
+        alert.addButton(withTitle: AppText.text("menu.checkForUpdates"))
+        alert.addButton(withTitle: AppText.text("menu.quit"))
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            updateController.checkForUpdates()
+        } else {
+            NSApp.terminate(nil)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

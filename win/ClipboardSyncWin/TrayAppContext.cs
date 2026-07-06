@@ -126,12 +126,6 @@ internal sealed class TrayAppContext : ApplicationContext
         });
         inputCoordinator.MessageReady += message => OnUi(() => PublishInput(message));
         inputCoordinator.StatusChanged += text => OnUi(() => inputStatusItem.Text = text);
-        clipboardMonitor.Start();
-        RegisterLocalScreen();
-        inputCoordinator.Start();
-        UpdateInputCoordinator();
-
-        RestartTransport();
 
         // Periodically re-broadcasts our own hello (so peers keep our LastSeen fresh even when we
         // have nothing else to send) and prunes any peer we haven't heard from in a while -
@@ -144,7 +138,22 @@ internal sealed class TrayAppContext : ApplicationContext
             SendInputHello();
             PruneStaleDevices();
         };
-        presenceTimer.Start();
+
+        if (BetaLicense.IsExpired)
+        {
+            status = AppText.Text("status.betaExpired");
+            UpdateMenu();
+            ShowBetaExpiredPrompt();
+        }
+        else
+        {
+            clipboardMonitor.Start();
+            RegisterLocalScreen();
+            inputCoordinator.Start();
+            UpdateInputCoordinator();
+            RestartTransport();
+            presenceTimer.Start();
+        }
     }
 
     protected override void Dispose(bool disposing)
@@ -166,6 +175,26 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         base.Dispose(disposing);
+    }
+
+    private void ShowBetaExpiredPrompt()
+    {
+        var message = $"{AppText.Text("beta.expiredMessage")}{Environment.NewLine}{Environment.NewLine}{AppText.Text("beta.checkNowQuestion")}";
+        var result = MessageBox.Show(
+            message,
+            AppText.Text("beta.expiredTitle"),
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Information);
+        if (result == DialogResult.Yes)
+        {
+            updateController.CheckForUpdates();
+        }
+        else
+        {
+            // Called from the constructor, before Application.Run's message loop has started -
+            // Application.Exit() would have nothing to signal yet, so terminate the process directly.
+            Environment.Exit(0);
+        }
     }
 
     private void PruneStaleDevices()

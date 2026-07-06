@@ -159,7 +159,10 @@ enum AppText {
             "modifier.shift": "Shift",
             "modifier.control": "Control",
             "modifier.alt": "Alt/Option",
-            "modifier.meta": "Win/Command"
+            "modifier.meta": "Win/Command",
+            "status.betaExpired": "beta ended, update required",
+            "beta.expiredTitle": "Beta Period Ended",
+            "beta.expiredMessage": "This beta build's 30-day trial has ended. Please check for updates to keep using Clipboard Sync."
         ],
         .chinese: [
             "app.name": "剪贴板同步",
@@ -267,7 +270,10 @@ enum AppText {
             "modifier.shift": "Shift",
             "modifier.control": "Control",
             "modifier.alt": "Alt/Option",
-            "modifier.meta": "Win/Command"
+            "modifier.meta": "Win/Command",
+            "status.betaExpired": "测试已结束，需要更新",
+            "beta.expiredTitle": "测试期已结束",
+            "beta.expiredMessage": "此测试版本的 30 天试用期已结束，请检查更新以继续使用剪贴板同步。"
         ],
         .korean: [
             "app.name": "클립보드 동기화",
@@ -375,7 +381,10 @@ enum AppText {
             "modifier.shift": "Shift",
             "modifier.control": "Control",
             "modifier.alt": "Alt/Option",
-            "modifier.meta": "Win/Command"
+            "modifier.meta": "Win/Command",
+            "status.betaExpired": "베타 종료, 업데이트 필요",
+            "beta.expiredTitle": "베타 기간 종료",
+            "beta.expiredMessage": "이 베타 빌드의 30일 체험 기간이 종료되었습니다. 계속 사용하려면 업데이트를 확인하세요."
         ],
         .japanese: [
             "app.name": "クリップボード同期",
@@ -483,7 +492,10 @@ enum AppText {
             "modifier.shift": "Shift",
             "modifier.control": "Control",
             "modifier.alt": "Alt/Option",
-            "modifier.meta": "Win/Command"
+            "modifier.meta": "Win/Command",
+            "status.betaExpired": "ベータ終了、更新が必要です",
+            "beta.expiredTitle": "ベータ期間終了",
+            "beta.expiredMessage": "このベータビルドの30日間の試用期間が終了しました。引き続きご利用いただくにはアップデートを確認してください。"
         ]
     ]
 
