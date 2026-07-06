@@ -29,6 +29,8 @@ internal sealed class InputSharingCoordinator : IDisposable
     private const uint LLMHF_INJECTED = 0x00000001;
     private const uint LLKHF_INJECTED = 0x00000010;
     private const uint SPI_SETCURSORS = 0x0057;
+    private const uint WM_QUIT = 0x0012;
+    private const uint PM_NOREMOVE = 0x0000;
     private static readonly int[] SystemCursorIds =
     [
         32512, // OCR_NORMAL
@@ -47,6 +49,7 @@ internal sealed class InputSharingCoordinator : IDisposable
     ];
     private static readonly string[] ModifierKeyOrder = ["Shift", "Control", "Alt", "Meta"];
     private static readonly TimeSpan RemoteMouseMoveInterval = TimeSpan.FromMilliseconds(8);
+    private static readonly TimeSpan MouseMoveSendInterval = TimeSpan.FromMilliseconds(1000.0 / 60);
 
     private readonly string deviceId;
     private readonly ScreenLayoutStore layoutStore;
@@ -70,8 +73,13 @@ internal sealed class InputSharingCoordinator : IDisposable
     private (double X, double Y)? pendingRemoteMouseMove;
     private System.Threading.Timer? pendingRemoteMouseMoveTimer;
     private DateTimeOffset lastRemoteMouseMoveAt = DateTimeOffset.MinValue;
+    private readonly object mouseMoveSendLock = new();
+    private System.Threading.Timer? pendingMouseMoveSendTimer;
+    private DateTimeOffset lastMouseMoveSentAt = DateTimeOffset.MinValue;
     private IntPtr mouseHook;
     private IntPtr keyboardHook;
+    private Thread? hookThread;
+    private uint hookThreadId;
     private Point localAnchor;
     private bool localCursorHidden;
 
@@ -165,6 +173,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         activeTargetDeviceId = null;
         receivingRemote = false;
         receivingScreenId = null;
+        CancelPendingMouseMoveSend();
         ClearPendingRemoteMouseMove();
         RemoveHooks();
     }
@@ -237,20 +246,58 @@ internal sealed class InputSharingCoordinator : IDisposable
         StatusChanged?.Invoke(status);
     }
 
+    /// The low-level hooks live on their own dedicated message-loop thread rather than the UI
+    /// thread. LL hook callbacks are dispatched through the message queue of the thread that
+    /// installed them, so every mouse event in the SYSTEM waits on that thread's responsiveness.
+    /// The UI thread periodically blocks for long stretches (OLE clipboard polling, network
+    /// interface enumeration for hello broadcasts, tray menu rebuilds) which showed up as
+    /// system-wide cursor stalls whenever this machine was the controller.
     private void EnsureHooks()
     {
-        if (mouseHook == IntPtr.Zero)
+        if (hookThread is not null)
         {
-            mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, IntPtr.Zero, 0);
+            return;
         }
-        if (keyboardHook == IntPtr.Zero)
+        using var ready = new ManualResetEventSlim(false);
+        var thread = new Thread(() => HookThreadProc(ready))
         {
-            keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, IntPtr.Zero, 0);
-        }
+            IsBackground = true,
+            Name = "InputSharingHooks",
+            Priority = ThreadPriority.Highest
+        };
+        hookThread = thread;
+        thread.Start();
+        ready.Wait();
     }
 
     private void RemoveHooks()
     {
+        if (hookThread is null)
+        {
+            return;
+        }
+        PostThreadMessage(hookThreadId, WM_QUIT, UIntPtr.Zero, IntPtr.Zero);
+        hookThread.Join(TimeSpan.FromSeconds(2));
+        hookThread = null;
+        hookThreadId = 0;
+    }
+
+    private void HookThreadProc(ManualResetEventSlim ready)
+    {
+        hookThreadId = GetCurrentThreadId();
+        // Force the thread's message queue into existence so PostThreadMessage(WM_QUIT) from
+        // RemoveHooks can never race its creation and get lost.
+        PeekMessage(out _, IntPtr.Zero, 0, 0, PM_NOREMOVE);
+        mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, IntPtr.Zero, 0);
+        keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, IntPtr.Zero, 0);
+        ready.Set();
+
+        while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
+        {
+            TranslateMessage(ref msg);
+            DispatchMessage(ref msg);
+        }
+
         if (mouseHook != IntPtr.Zero)
         {
             UnhookWindowsHookEx(mouseHook);
@@ -361,7 +408,13 @@ internal sealed class InputSharingCoordinator : IDisposable
             virtualCursor.X += dx;
             virtualCursor.Y += dy;
             AdvanceRemoteCursor();
-            SetCursorPos(localAnchor.X, localAnchor.Y);
+            // AdvanceRemoteCursor may have ended capture and warped the cursor to its return
+            // point on one of our own screens; re-anchoring then would yank it back to the
+            // screen-center anchor and leave it stranded there.
+            if (activeScreenId is not null)
+            {
+                SetCursorPos(localAnchor.X, localAnchor.Y);
+            }
         }
         return true;
     }
@@ -507,7 +560,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         lastCrossedEdge = edge;
         HideLocalCursor();
         SendCapture("start", target.DeviceId, target.ScreenId, edge, target);
-        SendMouseMove();
+        SendMouseMoveNow();
         UpdateStatus();
     }
 
@@ -527,7 +580,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         var edge = ExitedEdge(virtualCursor, rect);
         if (edge is null)
         {
-            SendMouseMove();
+            QueueMouseMove();
             return;
         }
 
@@ -536,7 +589,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         if (match is null)
         {
             virtualCursor = Clamp(virtualCursor, rect);
-            SendMouseMove();
+            QueueMouseMove();
             return;
         }
 
@@ -549,13 +602,14 @@ internal sealed class InputSharingCoordinator : IDisposable
             return;
         }
 
+        CancelPendingMouseMoveSend();
         SendPressedModifierKeyUps();
         SendCapture("end", activeTargetDeviceId, activeScreenId, edge.Value, activeEntry);
         virtualCursor = Clamp(virtualCursor, match.Rect);
         activeScreenId = match.ScreenId;
         activeTargetDeviceId = match.DeviceId;
         SendCapture("start", match.DeviceId, match.ScreenId, edge.Value, match);
-        SendMouseMove();
+        SendMouseMoveNow();
         UpdateStatus();
     }
 
@@ -566,6 +620,7 @@ internal sealed class InputSharingCoordinator : IDisposable
             return;
         }
         ShowLocalCursor();
+        CancelPendingMouseMoveSend();
         var endingScreenId = activeScreenId;
         var endingTargetDeviceId = activeTargetDeviceId;
         SendPressedModifierKeyUps();
@@ -644,6 +699,83 @@ internal sealed class InputSharingCoordinator : IDisposable
             },
             SentAt = Now()
         });
+    }
+
+    /// Throttles controller-side mouseMove sends to 60Hz. The low-level mouse hook fires at the
+    /// mouse's polling rate (125-1000Hz) on the UI thread, and each send serializes + encrypts +
+    /// ships a websocket frame inline; doing that per event starves the hook past the system's
+    /// LowLevelHooksTimeout and the cursor visibly stalls. Only the newest position matters, so
+    /// coalesce: send immediately when the interval has elapsed, otherwise arm a one-shot timer
+    /// that flushes the latest `virtualCursor` when it does.
+    private void QueueMouseMove()
+    {
+        var sendNow = false;
+        lock (mouseMoveSendLock)
+        {
+            var elapsed = DateTimeOffset.UtcNow - lastMouseMoveSentAt;
+            if (elapsed >= MouseMoveSendInterval)
+            {
+                if (pendingMouseMoveSendTimer is null)
+                {
+                    lastMouseMoveSentAt = DateTimeOffset.UtcNow;
+                    sendNow = true;
+                }
+            }
+            else if (pendingMouseMoveSendTimer is null)
+            {
+                var delay = MouseMoveSendInterval - elapsed;
+                if (delay < TimeSpan.Zero)
+                {
+                    delay = TimeSpan.Zero;
+                }
+                pendingMouseMoveSendTimer = new System.Threading.Timer(
+                    _ => FlushPendingMouseMoveSend(),
+                    null,
+                    delay,
+                    Timeout.InfiniteTimeSpan);
+            }
+        }
+        if (sendNow)
+        {
+            SendMouseMove();
+        }
+    }
+
+    private void FlushPendingMouseMoveSend()
+    {
+        lock (mouseMoveSendLock)
+        {
+            pendingMouseMoveSendTimer?.Dispose();
+            pendingMouseMoveSendTimer = null;
+            if (activeScreenId is null)
+            {
+                return;
+            }
+            lastMouseMoveSentAt = DateTimeOffset.UtcNow;
+        }
+        SendMouseMove();
+    }
+
+    /// Immediate send for capture starts and screen hand-offs, where the receiver needs the
+    /// position before any subsequent event.
+    private void SendMouseMoveNow()
+    {
+        lock (mouseMoveSendLock)
+        {
+            pendingMouseMoveSendTimer?.Dispose();
+            pendingMouseMoveSendTimer = null;
+            lastMouseMoveSentAt = DateTimeOffset.UtcNow;
+        }
+        SendMouseMove();
+    }
+
+    private void CancelPendingMouseMoveSend()
+    {
+        lock (mouseMoveSendLock)
+        {
+            pendingMouseMoveSendTimer?.Dispose();
+            pendingMouseMoveSendTimer = null;
+        }
     }
 
     private void SendMouseButton(int message)
@@ -1308,6 +1440,35 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostThreadMessage(uint idThread, uint msg, UIntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+    [DllImport("user32.dll")]
+    private static extern bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
+
+    [DllImport("user32.dll")]
+    private static extern bool TranslateMessage(ref MSG lpMsg);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr DispatchMessage(ref MSG lpMsg);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG
+    {
+        public IntPtr hwnd;
+        public uint message;
+        public UIntPtr wParam;
+        public IntPtr lParam;
+        public uint time;
+        public POINT pt;
+    }
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);

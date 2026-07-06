@@ -125,7 +125,10 @@ internal sealed class TrayAppContext : ApplicationContext
             status = reason;
             UpdateMenu();
         });
-        inputCoordinator.MessageReady += message => OnUi(() => PublishInput(message));
+        // Deliberately NOT marshaled to the UI thread: input messages originate on the hook
+        // thread and its flush timers, and encrypt+send is thread-safe. Hopping through the UI
+        // thread would queue realtime mouse moves behind clipboard polls and menu rebuilds.
+        inputCoordinator.MessageReady += message => PublishInput(message);
         inputCoordinator.StatusChanged += text => OnUi(() => inputStatusItem.Text = text);
 
         // Periodically re-broadcasts our own hello (so peers keep our LastSeen fresh even when we
@@ -989,15 +992,21 @@ internal sealed class TrayAppContext : ApplicationContext
         }
         catch
         {
-            status = AppText.Text("status.encryptionFailed");
-            UpdateMenu();
+            OnUi(() =>
+            {
+                status = AppText.Text("status.encryptionFailed");
+                UpdateMenu();
+            });
             return false;
         }
 
         if (envelopeBytes.Length > ClipboardLimits.MaxWebSocketMessageBytes)
         {
-            status = AppText.Text(realtime ? "status.inputPayloadTooLarge" : "status.clipboardPayloadTooLarge");
-            UpdateMenu();
+            OnUi(() =>
+            {
+                status = AppText.Text(realtime ? "status.inputPayloadTooLarge" : "status.clipboardPayloadTooLarge");
+                UpdateMenu();
+            });
             return false;
         }
 
