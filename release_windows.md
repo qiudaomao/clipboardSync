@@ -4,7 +4,7 @@ Steps to cut a Windows release and publish it through NetSparkle auto-update.
 
 Release artifacts and `win-appcast.xml` live in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo (`git@github.com:qiudaomao/clipboardSyncRelease.git`), not in this repo.
 
-The first Windows release is `v0.1.0`, matching the macOS marketing version `0.1.0`.
+The current Windows release target is `v0.1.4`, matching the app version `0.1.4`.
 
 ## 1. One-time NetSparkle setup
 
@@ -29,14 +29,14 @@ Edit `win/ClipboardSyncWin/ClipboardSyncWin.csproj`:
 - `FileVersion`
 - `InformationalVersion`
 
-Use numeric .NET versions in the project file, for example `0.1.0`. Use the `v` prefix only for Git tags, GitHub release names, and installer filenames, for example `v0.1.0`.
+Use numeric .NET versions in the project file, for example `0.1.4`. Use the `v` prefix only for Git tags, GitHub release names, and installer filenames, for example `v0.1.4`.
 
 ## 3. Build the installer
 
 Install Inno Setup 6, then run:
 
 ```powershell
-.\build-windows-installer.ps1 -Version 0.1.0 -ReleaseVersion v0.1.0 -StopRunning
+.\build-windows-installer.ps1 -Version 0.1.4 -ReleaseVersion v0.1.4 -StopRunning
 ```
 
 If `-ReleaseVersion` is omitted, the script uses `v<Version>`.
@@ -48,7 +48,7 @@ To build the older larger self-contained package instead, pass `-SelfContained`.
 The installer is written to:
 
 ```text
-artifacts/windows/ClipboardSyncWinSetup-v0.1.0.exe
+artifacts/windows/ClipboardSyncWinSetup-v0.1.4.exe
 ```
 
 ## 4. Upload the installer
@@ -56,16 +56,16 @@ artifacts/windows/ClipboardSyncWinSetup-v0.1.0.exe
 Create a GitHub Release in `clipboardSyncRelease` and attach the installer:
 
 ```powershell
-gh release create v0.1.0 artifacts/windows/ClipboardSyncWinSetup-v0.1.0.exe `
+gh release create v0.1.4 artifacts/windows/ClipboardSyncWinSetup-v0.1.4.exe `
   --repo qiudaomao/clipboardSyncRelease `
-  --title "v0.1.0" `
+  --title "v0.1.4" `
   --notes "release notes here"
 ```
 
 This gives the public download URL:
 
 ```text
-https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.0/ClipboardSyncWinSetup-v0.1.0.exe
+https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.4/ClipboardSyncWinSetup-v0.1.4.exe
 ```
 
 ## 5. Generate and publish the appcast
@@ -79,7 +79,7 @@ netsparkle-generate-appcast `
   -e exe `
   -o windows-x64 `
   -n "Clipboard Sync" `
-  -u "https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.0" `
+  -u "https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.4" `
   --reparse-existing `
   --overwrite-old-items
 ```
