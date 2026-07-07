@@ -34,7 +34,7 @@ internal sealed class WinUpdateController : IDisposable
             CustomInstallerArguments = "/CLOSEAPPLICATIONS",
             CheckServerFileName = false,
             LogWriter = new FileLogWriter(),
-            UseNotificationToast = true
+            UseNotificationToast = false
         };
 
         updater.DownloadHadError += (_, path, exception) =>
