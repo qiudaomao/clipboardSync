@@ -105,7 +105,7 @@ internal sealed class TrayAppContext : ApplicationContext
         serverModeItem = new ToolStripMenuItem(AppText.Text("menu.serverMode"), null, (_, _) => SetMode(SyncMode.Server));
         trayIcon = LoadTrayIcon();
         inputCoordinator = new InputSharingCoordinator(config.DeviceId, screenLayoutStore);
-        updateController = new WinUpdateController(trayIcon);
+        updateController = new WinUpdateController(trayIcon, CloseForUpdate);
         checkForUpdatesItem = new ToolStripMenuItem(AppText.Text("menu.checkForUpdates"), null, (_, _) => updateController.CheckForUpdates());
         trayMenu = BuildMenu();
 
@@ -525,6 +525,17 @@ internal sealed class TrayAppContext : ApplicationContext
             screenLayoutForm.ForgetDevice += id => ForgetDevice(id);
         }
         return screenLayoutForm;
+    }
+
+    private void CloseForUpdate()
+    {
+        if (SynchronizationContext.Current == uiContext)
+        {
+            ExitThread();
+            return;
+        }
+
+        uiContext.Send(_ => ExitThread(), null);
     }
 
     private void HandleScreenLayoutFormClosed()
