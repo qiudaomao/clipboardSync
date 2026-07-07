@@ -185,14 +185,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// layout-watch state. Deliberately does NOT touch `screenLayoutStore` — a device going offline
     /// (whether it quit, restarted, or just dropped its connection momentarily) shouldn't erase the
     /// position the user dragged it to. Screens for offline devices stay in the layout, drawn as
-    /// disconnected, until the user explicitly forgets them (see `forgetDevice`).
+    /// disconnected, until the user explicitly forgets them (see `forgetDevice`). The user's chosen
+    /// `controlDeviceId` is likewise kept: a restarting control device must get control back when
+    /// it returns, and (on a server) clearing it here would make hellos broadcast this device as
+    /// the controller, permanently reassigning control on every peer. Only `forgetDevice` drops it.
     private func removeKnownDevice(_ staleId: String) {
         inputDevices.removeValue(forKey: staleId)
         layoutWatchers.remove(staleId)
-        if config.controlDeviceId == staleId {
-            config.controlDeviceId = nil
-            config.save()
-        }
     }
 
     /// Called the moment the last remaining peer disconnects. At that point we know with certainty
@@ -218,6 +217,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         removeKnownDevice(id)
+        if config.controlDeviceId == id {
+            config.controlDeviceId = nil
+            config.save()
+            updateInputCoordinator()
+            syncInputConfig()
+        }
         let changed = screenLayoutStore.remove(deviceId: id)
         updateMenu()
         if changed {
@@ -427,6 +432,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if layoutChanged || wasOffline || inputEnabledChanged {
             refreshScreenLayoutWindowIfVisible()
+            // The coordinator only sees peers through the enabled/name snapshots passed via
+            // update(). Without this, a peer that restarts (dropped from inputDevices, then
+            // hellos back in) never re-enters those snapshots and the controller sits in
+            // "waiting for peer screen" until some unrelated event refreshes the coordinator.
+            updateInputCoordinator()
         }
 
         updateMenu()

@@ -225,16 +225,14 @@ internal sealed class TrayAppContext : ApplicationContext
     /// layout-watch state. Deliberately does NOT touch screenLayoutStore - a device going offline
     /// (whether it quit, restarted, or just dropped its connection momentarily) shouldn't erase the
     /// position the user dragged it to. Screens for offline devices stay in the layout, drawn as
-    /// disconnected, until the user explicitly forgets them (see ForgetDevice).
+    /// disconnected, until the user explicitly forgets them (see ForgetDevice). The user's chosen
+    /// ControlDeviceId is likewise kept: a restarting control device must get control back when it
+    /// returns, and (on a server) clearing it here would make hellos broadcast this device as the
+    /// controller, permanently reassigning control on every peer. Only ForgetDevice drops it.
     private void RemoveKnownDevice(string staleId)
     {
         inputDevices.Remove(staleId);
         layoutWatchers.Remove(staleId);
-        if (config.ControlDeviceId == staleId)
-        {
-            config.ControlDeviceId = null;
-            ConfigStore.Save(config);
-        }
     }
 
     /// Called the moment the last remaining peer disconnects. At that point we know with certainty
@@ -268,6 +266,13 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
         RemoveKnownDevice(id);
+        if (config.ControlDeviceId == id)
+        {
+            config.ControlDeviceId = null;
+            ConfigStore.Save(config);
+            UpdateInputCoordinator();
+            SyncInputConfig();
+        }
         var changed = screenLayoutStore.Remove(id);
         UpdateMenu();
         if (changed)
@@ -454,6 +459,11 @@ internal sealed class TrayAppContext : ApplicationContext
         if (layoutChanged || wasOffline || inputEnabledChanged)
         {
             RefreshScreenLayoutFormIfVisible();
+            // The coordinator only sees peers through the enabled/name snapshots passed via
+            // Update(). Without this, a peer that restarts (dropped from inputDevices, then
+            // hellos back in) never re-enters those snapshots and the controller sits in
+            // "waiting for peer screen" until some unrelated event refreshes the coordinator.
+            UpdateInputCoordinator();
         }
 
         UpdateMenu();
