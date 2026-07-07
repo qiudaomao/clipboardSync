@@ -384,7 +384,21 @@ internal sealed class InputSharingCoordinator : IDisposable
         if (activeScreenId is null)
         {
             var current = CurrentLocalScreen(point);
-            if (current is null || !layoutStore.Entries.TryGetValue(current.Value.ScreenId, out var currentEntry))
+            if (current is null)
+            {
+                // The LL hook fires before the system applies (and clamps) the move, so a fast
+                // flick toward a peer reports a proposed position already past the physical edge,
+                // outside every local screen. Detect the crossing from the nearest screen's edge
+                // instead of dropping the event, which would pin the cursor at the edge until a
+                // slow move happens to land inside CrossingNeighbor's threshold band.
+                current = NearestLocalScreen(point);
+                if (current is null)
+                {
+                    return false;
+                }
+                point = ClampToScreen(point, current.Value.RealRect);
+            }
+            if (!layoutStore.Entries.TryGetValue(current.Value.ScreenId, out var currentEntry))
             {
                 return false;
             }
@@ -433,6 +447,32 @@ internal sealed class InputSharingCoordinator : IDisposable
             }
         }
         return null;
+    }
+
+    /// The local monitor closest to an out-of-bounds proposed cursor position (Screen.FromPoint
+    /// resolves to the nearest screen when the point lies outside all of them), identified the
+    /// same way as CurrentLocalScreen so its screenId matches the layout entries.
+    private (string ScreenId, RectangleF RealRect)? NearestLocalScreen(POINT point)
+    {
+        var nearest = Screen.FromPoint(new Point(point.X, point.Y)).Bounds;
+        var screens = OrderedScreens();
+        for (var index = 0; index < screens.Length; index++)
+        {
+            if (screens[index].Bounds == nearest)
+            {
+                return ($"{deviceId}#{index}", nearest);
+            }
+        }
+        return null;
+    }
+
+    private static POINT ClampToScreen(POINT point, RectangleF rect)
+    {
+        return new POINT
+        {
+            X = (int)Math.Min(Math.Max(point.X, rect.Left), rect.Right - 1),
+            Y = (int)Math.Min(Math.Max(point.Y, rect.Top), rect.Bottom - 1)
+        };
     }
 
     /// Local cursor is in real screen coordinates, relative to the current monitor's bounds. The

@@ -82,6 +82,9 @@
     padding: 2px 8px;
     text-transform: uppercase;
   }
+  .nav-actions { display: flex; align-items: center; gap: 10px; }
+  .lang-btn { cursor: pointer; font-family: inherit; }
+
   nav.links { display: flex; gap: 28px; }
   nav.links a {
     color: var(--muted);
@@ -214,20 +217,30 @@
     font-size: 11px;
     color: var(--text);
   }
+  .shots-menus {
+    grid-template-columns: 1fr 1fr;
+    margin-top: 24px;
+  }
+  .shots-menus .shot-card img {
+    width: auto;
+    max-width: 100%;
+    max-height: 460px;
+    margin: 0 auto;
+  }
 
   /* Highlights */
   section.highlights { padding: 20px 0 80px; }
   .highlight-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
   }
   .highlight-card {
     position: relative;
     background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015));
     border: 1px solid var(--border);
     border-radius: 16px;
-    padding: 28px 24px;
+    padding: 26px 20px;
     overflow: hidden;
     transition: transform .2s ease, border-color .2s ease;
   }
@@ -314,10 +327,13 @@
   }
   footer a { color: var(--muted); }
 
+  @media (max-width: 1000px) {
+    .highlight-grid { grid-template-columns: 1fr 1fr; }
+    .highlight-card:nth-child(5) { grid-column: 1 / -1; }
+  }
   @media (max-width: 860px) {
     .shots { grid-template-columns: 1fr; }
     .feature-grid { grid-template-columns: 1fr 1fr; }
-    .highlight-grid { grid-template-columns: 1fr 1fr; }
   }
   @media (max-width: 560px) {
     .highlight-grid { grid-template-columns: 1fr; }
@@ -359,30 +375,33 @@
       <span class="beta-tag">Beta</span>
     </div>
     <nav class="links">
-      <a href="#showcase">Preview</a>
-      <a href="#features">Features</a>
+      <a href="#showcase" data-i18n="nav.preview">Preview</a>
+      <a href="#features" data-i18n="nav.features">Features</a>
     </nav>
-    <a class="btn btn-ghost" href="#download">Download</a>
+    <div class="nav-actions">
+      <button class="btn btn-ghost lang-btn" id="langToggle" type="button" aria-label="Switch language">中文</button>
+      <a class="btn btn-ghost" href="#download" data-i18n="nav.download">Download</a>
+    </div>
   </div>
 </header>
 
 <section class="hero wrap">
-  <div class="eyebrow"><span class="dot"></span> macOS &amp; Windows · Free in beta</div>
-  <h1>Your clipboard,<br /><span class="gradient">everywhere on your LAN.</span></h1>
-  <p class="subtitle">
+  <div class="eyebrow"><span class="dot"></span> <span data-i18n="hero.eyebrow">macOS &amp; Windows · Free in beta</span></div>
+  <h1 data-i18n-html="hero.title">Your clipboard,<br /><span class="gradient">everywhere on your LAN.</span></h1>
+  <p class="subtitle" data-i18n="hero.subtitle">
     A lightweight menubar app that syncs text, images, and files across your Mac and PC,
     and lets you share one mouse and keyboard between them — over WebSocket, instantly,
     encrypted, and without the cloud.
   </p>
   <div class="cta-row" id="download">
     <a class="btn btn-primary dl-mac" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncMac.zip">
-      <span class="btn-icon"></span> Download for macOS
+      <span class="btn-icon"></span> <span data-i18n="dl.mac">Download for macOS</span>
     </a>
     <a class="btn btn-primary dl-win" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncWin-Setup.exe">
-      <span class="btn-icon">⊞</span> Download for Windows
+      <span class="btn-icon">⊞</span> <span data-i18n="dl.win">Download for Windows</span>
     </a>
   </div>
-  <div class="platform-note">Free during beta · No account required · Your data stays on your network</div>
+  <div class="platform-note" data-i18n="hero.note">Free during beta · No account required · Your data stays on your network</div>
 
   <div class="hero-img">
     <img src="assets/hero.svg" alt="Clipboard, mouse and keyboard syncing between a MacBook and a Windows PC" />
@@ -393,11 +412,21 @@
   <div class="shots">
     <div class="shot-card">
       <img src="assets/macOS.png" alt="Clipboard Sync on macOS" />
-      <div class="shot-label">Menubar app on macOS <span class="badge">macOS</span></div>
+      <div class="shot-label"><span data-i18n="shot.macApp">Menubar app on macOS</span> <span class="badge">macOS</span></div>
     </div>
     <div class="shot-card">
       <img src="assets/win.png" alt="Clipboard Sync on Windows" />
-      <div class="shot-label">Native tray app on Windows <span class="badge">Windows</span></div>
+      <div class="shot-label"><span data-i18n="shot.winApp">Native tray app on Windows</span> <span class="badge">Windows</span></div>
+    </div>
+  </div>
+  <div class="shots shots-menus">
+    <div class="shot-card">
+      <img src="assets/mac-menu.png" alt="Clipboard Sync menubar menu on macOS" />
+      <div class="shot-label"><span data-i18n="shot.macMenu">Menubar menu on macOS</span> <span class="badge">macOS</span></div>
+    </div>
+    <div class="shot-card">
+      <img src="assets/win-menu.png" alt="Clipboard Sync tray menu on Windows" />
+      <div class="shot-label"><span data-i18n="shot.winMenu">Tray menu on Windows</span> <span class="badge">Windows</span></div>
     </div>
   </div>
 </section>
@@ -406,83 +435,88 @@
   <div class="highlight-grid">
     <div class="highlight-card">
       <div class="highlight-icon">🔀</div>
-      <h3>Free &amp; instant device switching</h3>
-      <p>Swap which machine is in control at any moment — no re-pairing, no delay, just a quick switch between control and target device.</p>
+      <h3 data-i18n="hl1.t">Free &amp; instant device switching</h3>
+      <p data-i18n="hl1.p">Swap which machine is in control at any moment — no re-pairing, no delay, just a quick switch between control and target device.</p>
     </div>
     <div class="highlight-card">
       <div class="highlight-icon">🖐️</div>
-      <h3>Drag-based screen layout</h3>
-      <p>Arrange your devices exactly how they sit on your desk — just drag screens into place and the cursor flows naturally between them.</p>
+      <h3 data-i18n="hl2.t">Drag-based screen layout</h3>
+      <p data-i18n="hl2.p">Arrange your devices exactly how they sit on your desk — just drag screens into place and the cursor flows naturally between them.</p>
     </div>
     <div class="highlight-card">
       <div class="highlight-icon">🌐</div>
-      <h3>No subnet requirement</h3>
-      <p>Works even when devices aren't on the same subnet — sync happily over a proxy, no special network setup required.</p>
+      <h3 data-i18n="hl3.t">No subnet requirement</h3>
+      <p data-i18n="hl3.p">Works even when devices aren't on the same subnet — sync happily over a proxy, no special network setup required.</p>
     </div>
     <div class="highlight-card">
       <div class="highlight-icon">⟳</div>
-      <h3>Automatic updates</h3>
-      <p>Built-in auto-update on both macOS and Windows keeps every device on the latest version — no manual downloads, ever.</p>
+      <h3 data-i18n="hl4.t">Automatic updates</h3>
+      <p data-i18n="hl4.p">Built-in auto-update on both macOS and Windows keeps every device on the latest version — no manual downloads, ever.</p>
+    </div>
+    <div class="highlight-card">
+      <div class="highlight-icon">⚡</div>
+      <h3 data-i18n="hl5.t">Fully native</h3>
+      <p data-i18n="hl5.p">Swift on macOS, C# on Windows — no Electron, no web wrapper. Fast, lightweight, and easy on your battery.</p>
     </div>
   </div>
 </section>
 
 <section class="features wrap" id="features">
   <div class="section-head">
-    <h2>Everything you need, nothing you don't</h2>
-    <p>A native app built for speed, privacy, and getting out of your way.</p>
+    <h2 data-i18n="feat.head">Everything you need, nothing you don't</h2>
+    <p data-i18n="feat.sub">A native app built for speed, privacy, and getting out of your way.</p>
   </div>
   <div class="feature-grid">
     <div class="feature-card">
       <div class="feature-icon">🔄</div>
-      <h3>LAN clipboard sync</h3>
-      <p>Copy on one machine, paste on another — synced instantly over your local network.</p>
+      <h3 data-i18n="f1.t">LAN clipboard sync</h3>
+      <p data-i18n="f1.p">Copy on one machine, paste on another — synced instantly over your local network.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🖼️</div>
-      <h3>Text &amp; image support</h3>
-      <p>Text and images sync automatically, no manual steps or format conversion needed.</p>
+      <h3 data-i18n="f2.t">Text &amp; image support</h3>
+      <p data-i18n="f2.p">Text and images sync automatically, no manual steps or format conversion needed.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">📁</div>
-      <h3>Click-to-sync files</h3>
-      <p>Send files across devices with a single click, straight from your clipboard.</p>
+      <h3 data-i18n="f3.t">Click-to-sync files</h3>
+      <p data-i18n="f3.p">Send files across devices with a single click, straight from your clipboard.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🕓</div>
-      <h3>Clipboard history</h3>
-      <p>Never lose a copy — browse and reuse recent clipboard items anytime.</p>
+      <h3 data-i18n="f4.t">Clipboard history</h3>
+      <p data-i18n="f4.p">Never lose a copy — browse and reuse recent clipboard items anytime.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🔐</div>
-      <h3>Password-based encryption</h3>
-      <p>Every payload is encrypted with your password, so only your devices can read it.</p>
+      <h3 data-i18n="f5.t">Password-based encryption</h3>
+      <p data-i18n="f5.p">Every payload is encrypted with your password, so only your devices can read it.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🖱️</div>
-      <h3>Mouse &amp; keyboard sharing</h3>
-      <p>Control multiple machines with a single mouse and keyboard, seamlessly.</p>
+      <h3 data-i18n="f6.t">Mouse &amp; keyboard sharing</h3>
+      <p data-i18n="f6.p">Control multiple machines with a single mouse and keyboard, seamlessly.</p>
     </div>
   </div>
 </section>
 
 <section class="wrap">
   <div class="cta-band">
-    <h2>Sync your clipboard in minutes</h2>
-    <p>Install on macOS and Windows, pair your devices, and start copying across your network.</p>
+    <h2 data-i18n="cta.t">Sync your clipboard in minutes</h2>
+    <p data-i18n="cta.p">Install on macOS and Windows, pair your devices, and start copying across your network.</p>
     <div class="cta-row">
       <a class="btn btn-primary dl-mac" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncMac.zip">
-        <span class="btn-icon"></span> Download for macOS
+        <span class="btn-icon"></span> <span data-i18n="dl.mac">Download for macOS</span>
       </a>
       <a class="btn btn-primary dl-win" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncWin-Setup.exe">
-        <span class="btn-icon">⊞</span> Download for Windows
+        <span class="btn-icon">⊞</span> <span data-i18n="dl.win">Download for Windows</span>
       </a>
     </div>
   </div>
 </section>
 
 <footer>
-  <div class="wrap">
+  <div class="wrap" data-i18n="footer.text">
     Clipboard Sync — native clipboard sync over WebSocket.
   </div>
 </footer>
@@ -494,6 +528,128 @@
     document.querySelectorAll(otherSelector).forEach(function (link) {
       link.classList.remove("btn-primary");
       link.classList.add("btn-ghost");
+    });
+  })();
+
+  (function () {
+    var I18N = {
+      en: {
+        "page.title": "Clipboard Sync — Native clipboard sync over LAN",
+        "nav.preview": "Preview",
+        "nav.features": "Features",
+        "nav.download": "Download",
+        "hero.eyebrow": "macOS & Windows · Free in beta",
+        "hero.title": 'Your clipboard,<br /><span class="gradient">everywhere on your LAN.</span>',
+        "hero.subtitle": "A lightweight menubar app that syncs text, images, and files across your Mac and PC, and lets you share one mouse and keyboard between them — over WebSocket, instantly, encrypted, and without the cloud.",
+        "dl.mac": "Download for macOS",
+        "dl.win": "Download for Windows",
+        "hero.note": "Free during beta · No account required · Your data stays on your network",
+        "shot.macApp": "Menubar app on macOS",
+        "shot.winApp": "Native tray app on Windows",
+        "shot.macMenu": "Menubar menu on macOS",
+        "shot.winMenu": "Tray menu on Windows",
+        "hl1.t": "Free & instant device switching",
+        "hl1.p": "Swap which machine is in control at any moment — no re-pairing, no delay, just a quick switch between control and target device.",
+        "hl2.t": "Drag-based screen layout",
+        "hl2.p": "Arrange your devices exactly how they sit on your desk — just drag screens into place and the cursor flows naturally between them.",
+        "hl3.t": "No subnet requirement",
+        "hl3.p": "Works even when devices aren't on the same subnet — sync happily over a proxy, no special network setup required.",
+        "hl4.t": "Automatic updates",
+        "hl4.p": "Built-in auto-update on both macOS and Windows keeps every device on the latest version — no manual downloads, ever.",
+        "hl5.t": "Fully native",
+        "hl5.p": "Swift on macOS, C# on Windows — no Electron, no web wrapper. Fast, lightweight, and easy on your battery.",
+        "feat.head": "Everything you need, nothing you don't",
+        "feat.sub": "A native app built for speed, privacy, and getting out of your way.",
+        "f1.t": "LAN clipboard sync",
+        "f1.p": "Copy on one machine, paste on another — synced instantly over your local network.",
+        "f2.t": "Text & image support",
+        "f2.p": "Text and images sync automatically, no manual steps or format conversion needed.",
+        "f3.t": "Click-to-sync files",
+        "f3.p": "Send files across devices with a single click, straight from your clipboard.",
+        "f4.t": "Clipboard history",
+        "f4.p": "Never lose a copy — browse and reuse recent clipboard items anytime.",
+        "f5.t": "Password-based encryption",
+        "f5.p": "Every payload is encrypted with your password, so only your devices can read it.",
+        "f6.t": "Mouse & keyboard sharing",
+        "f6.p": "Control multiple machines with a single mouse and keyboard, seamlessly.",
+        "cta.t": "Sync your clipboard in minutes",
+        "cta.p": "Install on macOS and Windows, pair your devices, and start copying across your network.",
+        "footer.text": "Clipboard Sync — native clipboard sync over WebSocket."
+      },
+      zh: {
+        "page.title": "剪贴板同步 — 局域网原生剪贴板同步",
+        "nav.preview": "预览",
+        "nav.features": "功能",
+        "nav.download": "下载",
+        "hero.eyebrow": "macOS 和 Windows · 公测期免费",
+        "hero.title": '你的剪贴板，<br /><span class="gradient">在局域网中无处不在。</span>',
+        "hero.subtitle": "一款轻量的菜单栏应用，在 Mac 和 PC 之间即时同步文本、图片和文件，还能让它们共享一套鼠标和键盘 — 基于 WebSocket，即时、加密、无需云端。",
+        "dl.mac": "下载 macOS 版",
+        "dl.win": "下载 Windows 版",
+        "hero.note": "公测期免费 · 无需账号 · 数据不出你的网络",
+        "shot.macApp": "macOS 菜单栏应用",
+        "shot.winApp": "Windows 原生托盘应用",
+        "shot.macMenu": "macOS 菜单栏菜单",
+        "shot.winMenu": "Windows 托盘菜单",
+        "hl1.t": "自由即时切换控制设备",
+        "hl1.p": "随时切换由哪台机器控制 — 无需重新配对、没有延迟，控制端与被控端一键互换。",
+        "hl2.t": "拖拽式屏幕布局",
+        "hl2.p": "按照设备在桌面上的真实摆放来排列 — 把屏幕拖到相应位置，光标就能自然地在设备间流动。",
+        "hl3.t": "不要求同一子网",
+        "hl3.p": "设备不在同一子网也能工作 — 可以通过代理同步，无需特殊网络配置。",
+        "hl4.t": "自动更新",
+        "hl4.p": "macOS 和 Windows 双端内置自动更新，每台设备始终保持最新版本 — 永远无需手动下载。",
+        "hl5.t": "完全原生",
+        "hl5.p": "macOS 端使用 Swift，Windows 端使用 C# — 没有 Electron、没有网页壳。快速、轻量、省电。",
+        "feat.head": "你需要的都有，多余的都没有",
+        "feat.sub": "一款为速度与隐私打造的原生应用，安静地做好本职工作。",
+        "f1.t": "局域网剪贴板同步",
+        "f1.p": "在一台机器上复制，在另一台上粘贴 — 通过本地网络即时同步。",
+        "f2.t": "支持文本和图片",
+        "f2.p": "文本和图片自动同步，无需手动操作或格式转换。",
+        "f3.t": "一键同步文件",
+        "f3.p": "单击即可把剪贴板中的文件发送到其他设备。",
+        "f4.t": "剪贴板历史",
+        "f4.p": "再也不会丢失复制的内容 — 随时浏览并复用最近的剪贴板条目。",
+        "f5.t": "密码加密",
+        "f5.p": "所有数据都用你的密码加密，只有你的设备才能读取。",
+        "f6.t": "鼠标键盘共享",
+        "f6.p": "用一套鼠标和键盘无缝控制多台机器。",
+        "cta.t": "几分钟内同步你的剪贴板",
+        "cta.p": "在 macOS 和 Windows 上安装，配对设备，开始跨网络复制粘贴。",
+        "footer.text": "剪贴板同步 — 基于 WebSocket 的原生剪贴板同步。"
+      }
+    };
+
+    var langBtn = document.getElementById("langToggle");
+
+    function applyLang(lang) {
+      var dict = I18N[lang];
+      document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+      document.title = dict["page.title"];
+      document.querySelectorAll("[data-i18n]").forEach(function (el) {
+        var key = el.getAttribute("data-i18n");
+        if (dict[key]) el.textContent = dict[key];
+      });
+      document.querySelectorAll("[data-i18n-html]").forEach(function (el) {
+        var key = el.getAttribute("data-i18n-html");
+        if (dict[key]) el.innerHTML = dict[key];
+      });
+      langBtn.textContent = lang === "zh" ? "EN" : "中文";
+      langBtn.setAttribute("aria-label", lang === "zh" ? "Switch to English" : "切换到中文");
+    }
+
+    var stored = null;
+    try { stored = localStorage.getItem("cbs-lang"); } catch (e) {}
+    var lang = stored === "zh" || stored === "en"
+      ? stored
+      : ((navigator.language || "").toLowerCase().indexOf("zh") === 0 ? "zh" : "en");
+    applyLang(lang);
+
+    langBtn.addEventListener("click", function () {
+      lang = lang === "zh" ? "en" : "zh";
+      try { localStorage.setItem("cbs-lang", lang); } catch (e) {}
+      applyLang(lang);
     });
   })();
 </script>
