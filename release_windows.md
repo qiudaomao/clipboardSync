@@ -91,7 +91,15 @@ netsparkle-generate-appcast `
   --overwrite-old-items
 ```
 
-Rename the generated appcast to `win-appcast.xml` if needed, then generate the appcast signature:
+Rename the generated appcast to `win-appcast.xml` if needed, then normalize it to LF line endings before generating the appcast signature. The release repo serves appcasts from GitHub raw with LF bytes, so the signature must be generated from the same bytes users will download:
+
+```powershell
+$path = "win-appcast.xml"
+$text = [System.IO.File]::ReadAllText($path) -replace "`r`n", "`n"
+[System.IO.File]::WriteAllText($path, $text, [System.Text.UTF8Encoding]::new($false))
+```
+
+Generate the appcast signature:
 
 ```powershell
 netsparkle-generate-appcast --generate-signature win-appcast.xml
