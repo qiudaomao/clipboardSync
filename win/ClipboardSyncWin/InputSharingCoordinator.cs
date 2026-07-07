@@ -31,6 +31,8 @@ internal sealed class InputSharingCoordinator : IDisposable
     private const uint SPI_SETCURSORS = 0x0057;
     private const uint WM_QUIT = 0x0012;
     private const uint PM_NOREMOVE = 0x0000;
+    private const int SM_CXCURSOR = 13;
+    private const int SM_CYCURSOR = 14;
     private static readonly int[] SystemCursorIds =
     [
         32512, // OCR_NORMAL
@@ -1250,17 +1252,23 @@ internal sealed class InputSharingCoordinator : IDisposable
         SystemParametersInfo(SPI_SETCURSORS, 0, IntPtr.Zero, 0);
     }
 
+    /// 1bpp masks with AND=0xFF, XOR=0x00 leave the screen untouched → fully transparent.
+    /// CreateCursor only accepts the dimensions the display driver reports via
+    /// GetSystemMetrics(SM_CXCURSOR/SM_CYCURSOR); with a hardcoded 32x32 it fails on machines
+    /// whose pointer size isn't 32 (accessibility pointer-size slider, some DPI setups), the
+    /// swap was skipped, and the local cursor stayed visible while controlling a peer.
     private static IntPtr CreateBlankCursor()
     {
-        // 32x32, 1bpp masks: AND=0xFF, XOR=0x00 leaves the screen untouched → fully transparent.
-        var andMask = new byte[32 * 4];
-        var xorMask = new byte[32 * 4];
+        var width = Math.Max(GetSystemMetrics(SM_CXCURSOR), 32);
+        var height = Math.Max(GetSystemMetrics(SM_CYCURSOR), 32);
+        var stride = (width + 15) / 16 * 2; // 1bpp scanlines are WORD-aligned
+        var andMask = new byte[stride * height];
+        var xorMask = new byte[stride * height];
         for (var i = 0; i < andMask.Length; i++)
         {
             andMask[i] = 0xFF;
-            xorMask[i] = 0x00;
         }
-        return CreateCursor(IntPtr.Zero, 0, 0, 32, 32, andMask, xorMask);
+        return CreateCursor(IntPtr.Zero, 0, 0, width, height, andMask, xorMask);
     }
 
     private static double Now()
@@ -1480,6 +1488,9 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();

@@ -315,6 +315,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         aboutItem.target = self
         menu.addItem(aboutItem)
 
+        let homepageItem = NSMenuItem(title: AppText.text("menu.homepage"), action: #selector(openProjectHomepage), keyEquivalent: "")
+        homepageItem.target = self
+        menu.addItem(homepageItem)
+
         let quitItem = NSMenuItem(title: AppText.text("menu.quit"), action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -751,6 +755,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func showAbout() {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(nil)
+    }
+
+    @objc private func openProjectHomepage() {
+        guard let url = URL(string: "https://clipboardsync.fuzhuo.me") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func showConfiguration() {

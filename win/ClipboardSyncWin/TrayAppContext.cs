@@ -307,6 +307,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.configure"), null, (_, _) => ShowConfiguration()));
         menu.Items.Add(checkForUpdatesItem);
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.about"), null, (_, _) => ShowAbout()));
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.homepage"), null, (_, _) => OpenProjectHomepage()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.start"), null, (_, _) => RestartTransport()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.restart"), null, (_, _) => RestartTransport()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.stop"), null, (_, _) => StopTransport()));
@@ -333,6 +334,15 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "clipboard-sync-icon.ico");
         return File.Exists(iconPath) ? new Icon(iconPath) : SystemIcons.Application;
+    }
+
+    private static void OpenProjectHomepage()
+    {
+        // UseShellExecute is required to open a URL in the default browser on .NET Core+.
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://clipboardsync.fuzhuo.me")
+        {
+            UseShellExecute = true
+        });
     }
 
     private static void ShowAbout()
