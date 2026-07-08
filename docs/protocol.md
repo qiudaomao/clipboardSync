@@ -240,6 +240,107 @@ as `left`, `right`, or `middle`. `kind: "mouseWheel"` uses `deltaX` and `deltaY`
 Keyboard codes are canonical physical-key names such as `KeyA`, `Digit1`,
 `Enter`, `Escape`, `ArrowLeft`, `Shift`, `Control`, `Alt`, and `Meta`.
 
+## Port Forward Messages
+
+Port forwarding reuses the encrypted envelope. Two message families are involved: `input`
+messages of `kind: "forwards"` synchronize the shared rule table, and top-level `tunnel` messages
+carry the actual TCP stream data.
+
+### Forwards (rule table)
+
+```json
+{
+  "type": "input",
+  "origin": "device-id",
+  "target": null,
+  "kind": "forwards",
+  "role": "server",
+  "forwards": [
+    {
+      "id": "rule-uuid",
+      "inDeviceId": "mac-device-id",
+      "inPort": 8022,
+      "inAllowLan": false,
+      "outDeviceId": "win-device-id",
+      "outHost": "127.0.0.1",
+      "outPort": 22,
+      "note": "SSH to the Windows box",
+      "enabled": true
+    }
+  ],
+  "sentAt": 1782835200.0
+}
+```
+
+`kind: "forwards"` carries the shared port-forward rule table. Each rule says: TCP connections
+accepted on `inDeviceId`:`inPort` are tunneled to `outHost`:`outPort` on `outDeviceId`. The
+server is authoritative, exactly like `kind: "layout"`: a client sends its edited table as a
+request (`role: "client"`), the server merges it into its canonical copy and rebroadcasts the
+accepted table (`role: "server"`), and a client receiving the server's table replaces its own
+wholesale. The server also rebroadcasts on peer connect so newly joined devices catch up.
+
+`inAllowLan` chooses the listen interface on the In device: `false` (default) binds `127.0.0.1`
+only, so the forwarded port is reachable just from the In device itself; `true` binds `0.0.0.0`,
+exposing it to other machines on the In device's LAN. `outHost` is the address the Out device
+dials, default `127.0.0.1` (a service on the Out device itself); set it to any address the Out
+device can reach to use that device as a gateway to a third host. Both fields are optional on the
+wire — a rule missing them decodes with these defaults.
+
+### Forward status
+
+```json
+{
+  "type": "input",
+  "origin": "device-id",
+  "target": null,
+  "kind": "forwardStatus",
+  "role": "client",
+  "forwardStatuses": [
+    { "id": "rule-uuid", "ok": true, "reason": null },
+    { "id": "other-rule-uuid", "ok": false, "reason": "Address already in use" }
+  ],
+  "sentAt": 1782835200.0
+}
+```
+
+`kind: "forwardStatus"` reports the live listen state of the rules a device is the In side of —
+the only device that actually opens each listening socket. `ok` true means the port is bound and
+listening; `ok` false means the bind failed and `reason` says why (e.g. address in use, or a
+privileged-port hint). Each device broadcasts only its own rules' statuses; peers merge them by
+rule id to render an accurate status light per rule in the Port Forward panel. It is re-sent on
+peer connect and whenever a local listen state changes. A rule's disabled and "In device offline"
+states are derived locally from the rule table and device presence, so they are not carried here.
+
+### Tunnel (stream data)
+
+```json
+{
+  "type": "tunnel",
+  "origin": "device-id",
+  "target": "peer-device-id",
+  "kind": "open",
+  "connectionId": "connection-uuid",
+  "host": "127.0.0.1",
+  "port": 22,
+  "dataBase64": null,
+  "reason": null,
+  "sentAt": 1782835200.0
+}
+```
+
+A `tunnel` message is encrypted with the version `2` (realtime) envelope, like input events.
+`connectionId` is allocated by the listening ("In") device when it accepts a local TCP
+connection, and identifies that one connection across all three kinds:
+
+- `kind: "open"` — sent by the In device to the Out device; asks it to dial `host:port` (the
+  rule's `outHost`/`outPort`; `host` defaults to `127.0.0.1` when absent).
+- `kind: "data"` — sent in either direction; `dataBase64` is a chunk of the TCP stream.
+- `kind: "close"` — sent in either direction; tears the connection down. `reason` is optional.
+
+Tunnel messages with a `target` other than the receiving device are ignored. The In device only
+opens a tunnel when the Out device is currently online; otherwise the incoming TCP connection is
+refused immediately.
+
 ## Fields
 
 - `type`: always `clipboard`.

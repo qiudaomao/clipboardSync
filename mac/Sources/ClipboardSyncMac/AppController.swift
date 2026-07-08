@@ -49,6 +49,41 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         return controller
     }()
+    private let portForwardStore = PortForwardStore()
+    /// This device's own live listen state, keyed by rule id (fed by the coordinator).
+    private var localForwardStatuses: [String: PortForwardStatus] = [:]
+    /// Listen state reported by peers for the rules they host, keyed by rule id.
+    private var remoteForwardStatuses: [String: PortForwardStatus] = [:]
+    private var isPortForwardWindowOpen = false
+    private lazy var portForwardCoordinator: PortForwardCoordinator = {
+        let coordinator = PortForwardCoordinator()
+        coordinator.onSend = { [weak self] message in
+            DispatchQueue.main.async {
+                self?.publishTunnel(message)
+            }
+        }
+        coordinator.onStatus = { [weak self] status in
+            DispatchQueue.main.async {
+                self?.statusText = status
+            }
+        }
+        coordinator.onStatusesChanged = { [weak self] statuses in
+            DispatchQueue.main.async {
+                self?.handleLocalForwardStatuses(statuses)
+            }
+        }
+        return coordinator
+    }()
+    private lazy var portForwardWindowController: PortForwardWindowController = {
+        let controller = PortForwardWindowController()
+        controller.onSave = { [weak self] rules in
+            self?.applyPortForwardRules(rules)
+        }
+        controller.onWindowClosed = { [weak self] in
+            self?.isPortForwardWindowOpen = false
+        }
+        return controller
+    }()
     private lazy var screenLayoutWindowController: ScreenLayoutWindowController = {
         let controller = ScreenLayoutWindowController()
         controller.onLayoutChanged = { [weak self] entries in
@@ -150,6 +185,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
         clipboard.stop()
         inputCoordinator.stop()
+        portForwardCoordinator.stop()
         transport?.stop()
         presenceTimer?.invalidate()
         cursorReportTimer?.invalidate()
@@ -285,6 +321,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let screenLayoutItem = NSMenuItem(title: AppText.text("menu.screenLayout"), action: #selector(showScreenLayout), keyEquivalent: "")
         screenLayoutItem.target = self
         menu.addItem(screenLayoutItem)
+
+        let portForwardItem = NSMenuItem(title: AppText.text("menu.portForward"), action: #selector(showPortForward), keyEquivalent: "")
+        portForwardItem.target = self
+        menu.addItem(portForwardItem)
         menu.addItem(NSMenuItem.separator())
 
         clientModeItem = NSMenuItem(title: AppText.text("menu.clientMode"), action: #selector(setClientMode), keyEquivalent: "")
@@ -493,6 +533,203 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             onlineDeviceIds: onlineDeviceIds,
             deviceEnabledMap: deviceEnabledMap
         )
+    }
+
+    /// The device choices offered by the Port Forward panel: this machine first, then every
+    /// online peer, then any offline device still referenced by an existing rule (so its rows
+    /// stay editable instead of silently losing their selection).
+    private var portForwardDeviceOptions: [PortForwardWindowController.DeviceOption] {
+        var options = [PortForwardWindowController.DeviceOption(id: deviceId, title: localInputDevice.baseTitle)]
+        options.append(contentsOf: inputDevices.values
+            .filter { $0.id != deviceId }
+            .sorted { $0.baseTitle.localizedCaseInsensitiveCompare($1.baseTitle) == .orderedAscending }
+            .map { PortForwardWindowController.DeviceOption(id: $0.id, title: $0.baseTitle) })
+
+        let knownIds = Set(options.map(\.id))
+        let referencedIds = portForwardStore.snapshot().flatMap { [$0.inDeviceId, $0.outDeviceId] }
+        for referencedId in referencedIds where !knownIds.contains(referencedId) && !options.contains(where: { $0.id == referencedId }) {
+            let title = "\(AppText.text("device.unknown")) (\(referencedId.prefix(8)))"
+            options.append(PortForwardWindowController.DeviceOption(id: referencedId, title: title))
+        }
+        return options
+    }
+
+    @objc private func showPortForward() {
+        isPortForwardWindowOpen = true
+        portForwardWindowController.show(
+            rules: portForwardStore.snapshot(),
+            devices: portForwardDeviceOptions,
+            statuses: portForwardDisplayStatuses()
+        )
+    }
+
+    private func applyPortForwardRules(_ rules: [PortForwardRule]) {
+        // Apply locally right away (mirroring layout edits), then let the server's canonical copy
+        // propagate: a server broadcasts the accepted table, a client sends a change request.
+        portForwardStore.applySnapshot(rules)
+        pruneForwardStatuses()
+        sendForwards()
+        updatePortForwardCoordinator()
+        refreshPortForwardPanelStatusesIfVisible()
+    }
+
+    private func handleLocalForwardStatuses(_ statuses: [PortForwardStatus]) {
+        localForwardStatuses = Dictionary(statuses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        sendForwardStatuses()
+        refreshPortForwardPanelStatusesIfVisible()
+    }
+
+    /// Broadcasts this device's own listen state so peers can show accurate status lights for rules
+    /// that listen here. Only this device's local statuses are sent; each device reports its own.
+    private func sendForwardStatuses() {
+        guard transport != nil, !config.password.isEmpty, peerCount > 0 else {
+            return
+        }
+        publishInput(InputMessage(
+            type: "input",
+            origin: deviceId,
+            target: nil,
+            kind: "forwardStatus",
+            role: config.mode.rawValue,
+            deviceName: nil,
+            deviceAddress: nil,
+            screens: nil,
+            enabled: nil,
+            controlDeviceId: nil,
+            layout: nil,
+            capture: nil,
+            mouse: nil,
+            key: nil,
+            sentAt: Date().timeIntervalSince1970,
+            forwardStatuses: Array(localForwardStatuses.values)
+        ))
+    }
+
+    private func handleForwardStatusMessage(_ message: InputMessage) {
+        guard let statuses = message.forwardStatuses else {
+            return
+        }
+        for status in statuses {
+            remoteForwardStatuses[status.id] = status
+        }
+        refreshPortForwardPanelStatusesIfVisible()
+    }
+
+    /// Drops status entries for rules no longer in the table, keeping the two status maps bounded.
+    private func pruneForwardStatuses() {
+        let liveIds = Set(portForwardStore.snapshot().map(\.id))
+        localForwardStatuses = localForwardStatuses.filter { liveIds.contains($0.key) }
+        remoteForwardStatuses = remoteForwardStatuses.filter { liveIds.contains($0.key) }
+    }
+
+    /// Computes the status light + hover tooltip for every rule, merging this device's own listen
+    /// state with peer reports and gating by the rule's enabled flag and its In device's presence.
+    private func portForwardDisplayStatuses() -> [String: PortForwardWindowController.RuleStatus] {
+        var result: [String: PortForwardWindowController.RuleStatus] = [:]
+        let online = onlineDeviceIds
+        for rule in portForwardStore.snapshot() {
+            result[rule.id] = displayStatus(for: rule, online: online)
+        }
+        return result
+    }
+
+    private func displayStatus(for rule: PortForwardRule, online: Set<String>) -> PortForwardWindowController.RuleStatus {
+        if !rule.enabled {
+            return PortForwardWindowController.RuleStatus(light: .gray, tooltip: AppText.text("forward.statusDisabled"))
+        }
+        let status = rule.inDeviceId == deviceId ? localForwardStatuses[rule.id] : remoteForwardStatuses[rule.id]
+        if rule.inDeviceId != deviceId, !online.contains(rule.inDeviceId) {
+            return PortForwardWindowController.RuleStatus(light: .gray, tooltip: AppText.text("forward.statusOffline"))
+        }
+        guard let status else {
+            return PortForwardWindowController.RuleStatus(light: .gray, tooltip: AppText.text("forward.statusStarting"))
+        }
+        if status.ok {
+            return PortForwardWindowController.RuleStatus(light: .green, tooltip: AppText.format("forward.statusListening", rule.inPort))
+        }
+        let reason = status.reason ?? ""
+        return PortForwardWindowController.RuleStatus(light: .red, tooltip: AppText.format("forward.statusFailed", reason))
+    }
+
+    private func refreshPortForwardPanelStatusesIfVisible() {
+        guard isPortForwardWindowOpen else {
+            return
+        }
+        portForwardWindowController.updateStatuses(portForwardDisplayStatuses())
+    }
+
+    private func sendForwards() {
+        guard transport != nil, !config.password.isEmpty else {
+            return
+        }
+        publishInput(InputMessage(
+            type: "input",
+            origin: deviceId,
+            target: nil,
+            kind: "forwards",
+            role: config.mode.rawValue,
+            deviceName: nil,
+            deviceAddress: nil,
+            screens: nil,
+            enabled: nil,
+            controlDeviceId: nil,
+            layout: nil,
+            capture: nil,
+            mouse: nil,
+            key: nil,
+            sentAt: Date().timeIntervalSince1970,
+            forwards: portForwardStore.snapshot()
+        ))
+    }
+
+    private func handleForwardsMessage(_ message: InputMessage) {
+        guard let forwards = message.forwards else {
+            return
+        }
+        switch config.mode {
+        case .server:
+            guard message.role == SyncMode.client.rawValue else {
+                return
+            }
+            portForwardStore.applySnapshot(forwards)
+            sendForwards()
+        case .client:
+            guard message.role == SyncMode.server.rawValue else {
+                return
+            }
+            portForwardStore.applySnapshot(forwards)
+        }
+        pruneForwardStatuses()
+        updatePortForwardCoordinator()
+        refreshPortForwardPanelStatusesIfVisible()
+    }
+
+    private func updatePortForwardCoordinator() {
+        portForwardCoordinator.update(
+            deviceId: deviceId,
+            rules: portForwardStore.snapshot(),
+            transportReady: transport != nil && !config.password.isEmpty,
+            onlinePeers: Set(inputDevices.keys)
+        )
+        // Presence and transport changes flow through here; refresh the panel's lights so remote
+        // rules flip to "offline"/back live.
+        refreshPortForwardPanelStatusesIfVisible()
+    }
+
+    private func publishTunnel(_ message: TunnelMessage) {
+        _ = sendEncryptedRealtime(message)
+    }
+
+    private func handleTunnelMessage(_ data: Data) {
+        guard
+            let message = try? jsonDecoder.decode(TunnelMessage.self, from: data),
+            message.type == "tunnel",
+            message.origin != deviceId,
+            message.target == deviceId
+        else {
+            return
+        }
+        portForwardCoordinator.handle(message)
     }
 
     private func handleScreenLayoutWindowClosed() {
@@ -948,6 +1185,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.sendInputConfig()
                     self.pendingInputConfigSync = false
                 }
+                // The server's rule table is canonical; push it whenever peers change so a newly
+                // connected device starts (or an offline editor catches up) with the shared rules.
+                if self.config.mode == .server, count > 0 {
+                    self.sendForwards()
+                }
+                // Re-announce our own listen state so a newly connected peer's status lights are
+                // accurate without waiting for the next local change.
+                if count > 0 {
+                    self.sendForwardStatuses()
+                }
                 if self.isLocalLayoutWindowOpen {
                     self.broadcastLayoutWatch(enabled: true)
                 }
@@ -1003,6 +1250,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @discardableResult
     private func sendEncryptedInput(_ message: InputMessage) -> Bool {
+        sendEncryptedRealtime(message)
+    }
+
+    @discardableResult
+    private func sendEncryptedRealtime<T: Encodable>(_ message: T) -> Bool {
         guard
             let data = try? jsonEncoder.encode(message),
             let envelope = try? CryptoBox.encryptRealtime(data, password: config.password),
@@ -1037,6 +1289,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             handleClipboardMessage(data)
         case "input":
             handleInputMessage(data)
+        case "tunnel":
+            handleTunnelMessage(data)
         default:
             break
         }
@@ -1103,6 +1357,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
+        if message.kind == "forwards" {
+            handleForwardsMessage(message)
+            return
+        }
+
+        if message.kind == "forwardStatus" {
+            handleForwardStatusMessage(message)
+            return
+        }
+
         if message.kind == "hello", config.mode == .client, message.role == SyncMode.server.rawValue {
             if let controlDeviceId = message.controlDeviceId, config.controlDeviceId != controlDeviceId {
                 config.controlDeviceId = controlDeviceId
@@ -1152,6 +1416,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             deviceEnabled: deviceEnabledMap,
             deviceNames: deviceDisplayNames
         )
+        // Piggybacks on this catch-all "config/peers changed" hook so forward listeners follow
+        // transport state and peer presence without a parallel set of call sites.
+        updatePortForwardCoordinator()
         updateMenu()
         if sendHello {
             sendInputHello()

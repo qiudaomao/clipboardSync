@@ -35,6 +35,11 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem launchAtLoginItem;
     private readonly ClipboardMonitor clipboardMonitor;
     private readonly ScreenLayoutStore screenLayoutStore = new();
+    private readonly PortForwardStore portForwardStore = new();
+    private readonly PortForwardCoordinator portForwardCoordinator = new();
+    private readonly Dictionary<string, PortForwardStatus> localForwardStatuses = [];
+    private readonly Dictionary<string, PortForwardStatus> remoteForwardStatuses = [];
+    private PortForwardForm? portForwardForm;
     private readonly InputSharingCoordinator inputCoordinator;
     private readonly WinUpdateController updateController;
     private readonly object inputCoordinatorLock = new();
@@ -134,6 +139,15 @@ internal sealed class TrayAppContext : ApplicationContext
         // thread would queue realtime mouse moves behind clipboard polls and menu rebuilds.
         inputCoordinator.MessageReady += message => PublishInput(message);
         inputCoordinator.StatusChanged += text => OnUi(() => inputStatusItem.Text = text);
+        // Like input, tunnel traffic is sent straight from the coordinator's worker threads;
+        // encrypt+send is thread-safe and must not queue behind UI-thread work.
+        portForwardCoordinator.MessageReady += message => PublishTunnel(message);
+        portForwardCoordinator.StatusChanged += text => OnUi(() =>
+        {
+            status = text;
+            UpdateMenu();
+        });
+        portForwardCoordinator.StatusesChanged += statuses => OnUi(() => HandleLocalForwardStatuses(statuses));
 
         // Periodically re-broadcasts our own hello (so peers keep our LastSeen fresh even when we
         // have nothing else to send) and prunes any peer we haven't heard from in a while -
@@ -174,6 +188,8 @@ internal sealed class TrayAppContext : ApplicationContext
             cursorReportTimer?.Dispose();
             transport?.Dispose();
             updateController.Dispose();
+            portForwardCoordinator.Dispose();
+            portForwardForm?.Dispose();
             inputCoordinator.Dispose();
             clipboardMonitor.Dispose();
             notifyIcon.Dispose();
@@ -309,6 +325,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(inputSharingItem);
         menu.Items.Add(controlDeviceItem);
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.screenLayout"), null, (_, _) => ShowScreenLayout()));
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.portForward"), null, (_, _) => ShowPortForward()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(clientModeItem);
         menu.Items.Add(serverModeItem);
@@ -657,6 +674,240 @@ internal sealed class TrayAppContext : ApplicationContext
         RefreshScreenLayoutFormIfVisible();
     }
 
+    /// The device choices offered by the Port Forward dialog: this machine first, then every
+    /// online peer, then any offline device still referenced by an existing rule (so its rows
+    /// stay editable instead of silently losing their selection).
+    private List<PortForwardForm.DeviceOption> PortForwardDeviceOptions()
+    {
+        var options = new List<PortForwardForm.DeviceOption>
+        {
+            new(config.DeviceId, LocalInputDevice.BaseTitle)
+        };
+        options.AddRange(inputDevices.Values
+            .Where(device => device.Id != config.DeviceId)
+            .OrderBy(device => device.BaseTitle, StringComparer.CurrentCultureIgnoreCase)
+            .Select(device => new PortForwardForm.DeviceOption(device.Id, device.BaseTitle)));
+
+        var knownIds = options.Select(option => option.Id).ToHashSet();
+        foreach (var rule in portForwardStore.Snapshot())
+        {
+            foreach (var referencedId in new[] { rule.InDeviceId, rule.OutDeviceId })
+            {
+                if (!string.IsNullOrEmpty(referencedId) && knownIds.Add(referencedId))
+                {
+                    var shortId = referencedId.Length > 8 ? referencedId[..8] : referencedId;
+                    options.Add(new PortForwardForm.DeviceOption(referencedId, $"{AppText.Text("device.unknown")} ({shortId})"));
+                }
+            }
+        }
+        return options;
+    }
+
+    private void ShowPortForward()
+    {
+        // Modeless (like the screen layout window) so live status can be pushed while it stays open;
+        // rebuilt each open so its rows reflect the current rule table and device list.
+        portForwardForm?.Dispose();
+        portForwardForm = new PortForwardForm(portForwardStore.Snapshot(), PortForwardDeviceOptions());
+        portForwardForm.RulesApplied += ApplyPortForwardRules;
+        portForwardForm.FormClosed += (_, _) => portForwardForm = null;
+        portForwardForm.UpdateStatuses(PortForwardDisplayStatuses());
+        portForwardForm.Show();
+        portForwardForm.Activate();
+    }
+
+    private void ApplyPortForwardRules(List<PortForwardRule> rules)
+    {
+        // Apply locally right away (mirroring layout edits), then let the server's canonical copy
+        // propagate: a server broadcasts the accepted table, a client sends a change request.
+        portForwardStore.ApplySnapshot(rules);
+        PruneForwardStatuses();
+        SendForwards();
+        UpdatePortForwardCoordinator();
+        RefreshPortForwardFormIfVisible();
+    }
+
+    private void HandleLocalForwardStatuses(List<PortForwardStatus> statuses)
+    {
+        localForwardStatuses.Clear();
+        foreach (var s in statuses)
+        {
+            localForwardStatuses[s.Id] = s;
+        }
+        SendForwardStatuses();
+        RefreshPortForwardFormIfVisible();
+    }
+
+    /// Broadcasts this device's own listen state so peers can show accurate status lights for rules
+    /// that listen here. Only this device's local statuses are sent; each device reports its own.
+    private void SendForwardStatuses()
+    {
+        if (transport is null || string.IsNullOrEmpty(config.Password) || peerCount == 0)
+        {
+            return;
+        }
+        PublishInput(new InputMessage
+        {
+            Type = "input",
+            Origin = config.DeviceId,
+            Kind = "forwardStatus",
+            Role = config.Mode == SyncMode.Server ? "server" : "client",
+            ForwardStatuses = localForwardStatuses.Values.ToList(),
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        });
+    }
+
+    private void HandleForwardStatusMessage(InputMessage message)
+    {
+        if (message.ForwardStatuses is not { } statuses)
+        {
+            return;
+        }
+        foreach (var s in statuses)
+        {
+            remoteForwardStatuses[s.Id] = s;
+        }
+        RefreshPortForwardFormIfVisible();
+    }
+
+    /// Drops status entries for rules no longer in the table, keeping the two status maps bounded.
+    private void PruneForwardStatuses()
+    {
+        var liveIds = portForwardStore.Snapshot().Select(rule => rule.Id).ToHashSet();
+        foreach (var id in localForwardStatuses.Keys.Where(id => !liveIds.Contains(id)).ToList())
+        {
+            localForwardStatuses.Remove(id);
+        }
+        foreach (var id in remoteForwardStatuses.Keys.Where(id => !liveIds.Contains(id)).ToList())
+        {
+            remoteForwardStatuses.Remove(id);
+        }
+    }
+
+    /// Computes the status light + hover tooltip for every rule, merging this device's own listen
+    /// state with peer reports and gating by the rule's enabled flag and its In device's presence.
+    private Dictionary<string, PortForwardForm.RuleStatus> PortForwardDisplayStatuses()
+    {
+        var online = OnlineDeviceIds();
+        var result = new Dictionary<string, PortForwardForm.RuleStatus>();
+        foreach (var rule in portForwardStore.Snapshot())
+        {
+            result[rule.Id] = DisplayStatus(rule, online);
+        }
+        return result;
+    }
+
+    private PortForwardForm.RuleStatus DisplayStatus(PortForwardRule rule, HashSet<string> online)
+    {
+        if (!rule.Enabled)
+        {
+            return new PortForwardForm.RuleStatus(PortForwardForm.StatusLight.Gray, AppText.Text("forward.statusDisabled"));
+        }
+        if (rule.InDeviceId != config.DeviceId && !online.Contains(rule.InDeviceId))
+        {
+            return new PortForwardForm.RuleStatus(PortForwardForm.StatusLight.Gray, AppText.Text("forward.statusOffline"));
+        }
+        var status = rule.InDeviceId == config.DeviceId
+            ? localForwardStatuses.GetValueOrDefault(rule.Id)
+            : remoteForwardStatuses.GetValueOrDefault(rule.Id);
+        if (status is null)
+        {
+            return new PortForwardForm.RuleStatus(PortForwardForm.StatusLight.Gray, AppText.Text("forward.statusStarting"));
+        }
+        return status.Ok
+            ? new PortForwardForm.RuleStatus(PortForwardForm.StatusLight.Green, AppText.Format("forward.statusListening", rule.InPort))
+            : new PortForwardForm.RuleStatus(PortForwardForm.StatusLight.Red, AppText.Format("forward.statusFailed", status.Reason ?? ""));
+    }
+
+    private void RefreshPortForwardFormIfVisible()
+    {
+        if (portForwardForm is { IsDisposed: false, Visible: true })
+        {
+            portForwardForm.UpdateStatuses(PortForwardDisplayStatuses());
+        }
+    }
+
+    private void SendForwards()
+    {
+        if (transport is null || string.IsNullOrEmpty(config.Password))
+        {
+            return;
+        }
+        PublishInput(new InputMessage
+        {
+            Type = "input",
+            Origin = config.DeviceId,
+            Kind = "forwards",
+            Role = config.Mode == SyncMode.Server ? "server" : "client",
+            Forwards = portForwardStore.Snapshot(),
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        });
+    }
+
+    private void HandleForwardsMessage(InputMessage message)
+    {
+        if (message.Forwards is not { } forwards)
+        {
+            return;
+        }
+        if (config.Mode == SyncMode.Server)
+        {
+            if (message.Role != "client")
+            {
+                return;
+            }
+            portForwardStore.ApplySnapshot(forwards);
+            SendForwards();
+        }
+        else
+        {
+            if (message.Role != "server")
+            {
+                return;
+            }
+            portForwardStore.ApplySnapshot(forwards);
+        }
+        PruneForwardStatuses();
+        UpdatePortForwardCoordinator();
+        RefreshPortForwardFormIfVisible();
+    }
+
+    private void UpdatePortForwardCoordinator()
+    {
+        portForwardCoordinator.Update(
+            config.DeviceId,
+            portForwardStore.Snapshot(),
+            transport is not null && !string.IsNullOrEmpty(config.Password),
+            new HashSet<string>(inputDevices.Keys));
+        // Presence and transport changes flow through here; refresh the dialog's lights so remote
+        // rules flip to "offline"/back live.
+        RefreshPortForwardFormIfVisible();
+    }
+
+    private void PublishTunnel(TunnelMessage message)
+    {
+        _ = SendEncrypted(message, realtime: true);
+    }
+
+    private void HandleTunnelMessage(byte[] plaintext)
+    {
+        TunnelMessage? message;
+        try
+        {
+            message = JsonSerializer.Deserialize<TunnelMessage>(plaintext, MessageJsonOptions);
+        }
+        catch
+        {
+            return;
+        }
+
+        if (message?.Type != "tunnel" || message.Origin == config.DeviceId || message.Target != config.DeviceId)
+        {
+            return;
+        }
+        portForwardCoordinator.Handle(message);
+    }
+
     /// Lets every peer know whether this device is (or isn't) watching the shared layout, so peers
     /// with their own window closed still start reporting their live cursor position - otherwise
     /// only whichever device already has its window open would ever show up moving.
@@ -947,6 +1198,18 @@ internal sealed class TrayAppContext : ApplicationContext
             {
                 BroadcastLayoutWatch(enabled: true);
             }
+            // The server's rule table is canonical; push it whenever peers change so a newly
+            // connected device starts (or an offline editor catches up) with the shared rules.
+            if (config.Mode == SyncMode.Server && count > 0)
+            {
+                SendForwards();
+            }
+            // Re-announce our own listen state so a newly connected peer's status lights are
+            // accurate without waiting for the next local change.
+            if (count > 0)
+            {
+                SendForwardStatuses();
+            }
             if (count == 0 && previousCount > 0)
             {
                 ClearAllKnownPeers();
@@ -1121,6 +1384,9 @@ internal sealed class TrayAppContext : ApplicationContext
                     }
                     HandleInputMessage(plaintext);
                     break;
+                case "tunnel":
+                    HandleTunnelMessage(plaintext);
+                    break;
             }
         }
         catch
@@ -1235,6 +1501,18 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
+        if (message.Kind == "forwards")
+        {
+            HandleForwardsMessage(message);
+            return;
+        }
+
+        if (message.Kind == "forwardStatus")
+        {
+            HandleForwardStatusMessage(message);
+            return;
+        }
+
         if (message.Kind == "hello" && config.Mode == SyncMode.Client && message.Role == "server")
         {
             if (message.ControlDeviceId is not null && config.ControlDeviceId != message.ControlDeviceId)
@@ -1310,6 +1588,9 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             inputCoordinator.Update(config, config.Mode, peerCount, DeviceEnabledMap(), DeviceDisplayNames());
         }
+        // Piggybacks on this catch-all "config/peers changed" hook so forward listeners follow
+        // transport state and peer presence without a parallel set of call sites.
+        UpdatePortForwardCoordinator();
         UpdateMenu();
         if (sendHello)
         {

@@ -177,6 +177,8 @@ internal sealed class InputMessage
     public InputKeyPayload? Key { get; set; }
     public double SentAt { get; set; }
     public InputCursorPayload? Cursor { get; set; }
+    public List<PortForwardRule>? Forwards { get; set; }
+    public List<PortForwardStatus>? ForwardStatuses { get; set; }
 
     public static InputMessage Hello(
         string origin,
@@ -407,6 +409,123 @@ internal sealed class ScreenLayoutStore
         }
         return [];
     }
+}
+
+/// One user-configured port forward: TCP connections accepted on InDeviceId:InPort are tunneled
+/// over the sync connection and delivered to OutHost:OutPort on OutDeviceId. InAllowLan chooses the
+/// listen interface - loopback-only by default, or all interfaces (0.0.0.0) so other machines on
+/// the LAN can reach the forwarded port. OutHost defaults to 127.0.0.1 (a service on the Out device
+/// itself) but may be any address the Out device can reach. A record so rule lists compare by value
+/// when reconciling listeners. Missing JSON fields (rules saved before InAllowLan/OutHost existed)
+/// keep these safe defaults.
+internal sealed record PortForwardRule
+{
+    public string Id { get; set; } = "";
+    public string InDeviceId { get; set; } = "";
+    public int InPort { get; set; }
+    public bool InAllowLan { get; set; }
+    public string OutDeviceId { get; set; } = "";
+    public string OutHost { get; set; } = "127.0.0.1";
+    public int OutPort { get; set; }
+    public string Note { get; set; } = "";
+    public bool Enabled { get; set; } = true;
+}
+
+/// Persists the shared port-forward rule table. Like the screen layout, the server's copy is
+/// canonical: clients send edits as requests and apply whatever the server rebroadcasts.
+internal sealed class PortForwardStore
+{
+    private List<PortForwardRule> rules;
+
+    public PortForwardStore()
+    {
+        rules = Load();
+    }
+
+    public void ApplySnapshot(List<PortForwardRule> snapshot)
+    {
+        rules = snapshot;
+        Save();
+    }
+
+    public List<PortForwardRule> Snapshot()
+    {
+        return rules.Select(rule => rule with { }).ToList();
+    }
+
+    private static string StorePath
+    {
+        get
+        {
+            var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            return Path.Combine(root, "ClipboardSync", "portForwards.json");
+        }
+    }
+
+    private void Save()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(StorePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+            File.WriteAllText(StorePath, JsonSerializer.Serialize(rules));
+        }
+        catch
+        {
+            // Best effort; the table will resync from the server's next broadcast.
+        }
+    }
+
+    private static List<PortForwardRule> Load()
+    {
+        try
+        {
+            if (File.Exists(StorePath))
+            {
+                var list = JsonSerializer.Deserialize<List<PortForwardRule>>(File.ReadAllText(StorePath));
+                if (list is not null)
+                {
+                    return list;
+                }
+            }
+        }
+        catch
+        {
+            // Fall through to an empty table.
+        }
+        return [];
+    }
+}
+
+/// Live listen state of one rule, reported by whichever device is the rule's "In" side (the only
+/// device that actually opens the listening socket). Ok true means the port is bound and listening;
+/// Ok false means the bind failed and Reason says why. Broadcast to peers so the Port Forward
+/// dialog can show an accurate status light for rules that listen on other machines.
+internal sealed class PortForwardStatus
+{
+    public string Id { get; set; } = "";
+    public bool Ok { get; set; }
+    public string? Reason { get; set; }
+}
+
+/// One hop of tunneled TCP traffic. "open" asks Target to dial 127.0.0.1:Port, "data" carries a
+/// chunk of the stream in either direction, and "close" tears the connection down. All three
+/// share ConnectionId, allocated by the listening side when it accepts a local TCP connection.
+internal sealed class TunnelMessage
+{
+    public string Type { get; set; } = "tunnel";
+    public string Origin { get; set; } = "";
+    public string Target { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public string ConnectionId { get; set; } = "";
+    public string? Host { get; set; }
+    public int? Port { get; set; }
+    public string? DataBase64 { get; set; }
+    public string? Reason { get; set; }
+    public double SentAt { get; set; }
 }
 
 internal sealed class InputCapturePayload

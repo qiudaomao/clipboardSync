@@ -95,6 +95,33 @@ enum AppText {
             "menu.controlDevice": "Control Device",
             "menu.controlDeviceWithTitle": "Control Device: %@",
             "menu.screenLayout": "Screen Layout...",
+            "menu.portForward": "Port Forward...",
+            "forward.title": "Port Forward",
+            "forward.subtitle": "Forward a TCP port on one device to a port on another. Connections to In are tunneled over the encrypted sync connection and delivered to Out.",
+            "forward.in": "In (listen)",
+            "forward.out": "Out (destination)",
+            "forward.lan": "LAN",
+            "forward.note": "Note",
+            "forward.notePlaceholder": "Optional note",
+            "forward.lanTooltip": "Off: listen on 127.0.0.1 only (this machine). On: listen on 0.0.0.0 so other machines on the LAN can reach this port.",
+            "forward.hostTooltip": "Address the Out device connects to. Default 127.0.0.1 (a service on the Out device itself); change it to reach another host the Out device can see.",
+            "forward.status": "",
+            "forward.enabled": "On",
+            "forward.enabledTooltip": "Enable or disable this forward. Applies immediately.",
+            "forward.reasonPrivileged": "needs a port ≥ 1024 (admin required)",
+            "forward.statusListening": "listening on port %d",
+            "forward.statusFailed": "port listening failed: %@",
+            "forward.statusDisabled": "disabled",
+            "forward.statusOffline": "In device offline",
+            "forward.statusStarting": "starting…",
+            "forward.add": "Add Forward",
+            "forward.remove": "Remove",
+            "forward.empty": "No port forwards yet. Click Add Forward to create one.",
+            "forward.validationPort": "Ports must be numbers from 1 to 65535.",
+            "forward.validationSame": "In and Out cannot be the same port on the same device.",
+            "forward.validationDuplicate": "Two rules listen on the same port of the same device.",
+            "status.forwardListenFailed": "port forward %d failed: %@",
+            "status.forwardListenPermission": "port forward %d denied — use a port ≥ 1024 (privileged ports need admin)",
             "menu.clientMode": "Client mode",
             "menu.serverMode": "Server mode",
             "menu.settings": "Settings...",
@@ -208,6 +235,33 @@ enum AppText {
             "menu.controlDevice": "控制设备",
             "menu.controlDeviceWithTitle": "控制设备：%@",
             "menu.screenLayout": "屏幕布局...",
+            "menu.portForward": "端口转发...",
+            "forward.title": "端口转发",
+            "forward.subtitle": "将一台设备的 TCP 端口转发到另一台设备的端口。连接到“入口”的流量会经加密同步连接隧道送达“出口”。",
+            "forward.in": "入口（监听）",
+            "forward.out": "出口（目标）",
+            "forward.lan": "局域网",
+            "forward.note": "备注",
+            "forward.notePlaceholder": "备注（可选）",
+            "forward.lanTooltip": "关闭：仅监听 127.0.0.1（本机）。开启：监听 0.0.0.0，局域网内其他机器也能访问此端口。",
+            "forward.hostTooltip": "出口设备连接的地址。默认 127.0.0.1（出口设备自身的服务）；可改为出口设备能访问的其他主机。",
+            "forward.status": "",
+            "forward.enabled": "启用",
+            "forward.enabledTooltip": "启用或禁用此转发，立即生效。",
+            "forward.reasonPrivileged": "需要 ≥ 1024 的端口（否则需要管理员权限）",
+            "forward.statusListening": "正在监听端口 %d",
+            "forward.statusFailed": "端口监听失败：%@",
+            "forward.statusDisabled": "已禁用",
+            "forward.statusOffline": "入口设备离线",
+            "forward.statusStarting": "正在启动…",
+            "forward.add": "添加转发",
+            "forward.remove": "删除",
+            "forward.empty": "暂无端口转发。点击“添加转发”创建。",
+            "forward.validationPort": "端口必须是 1 到 65535 之间的数字。",
+            "forward.validationSame": "入口和出口不能是同一设备上的同一端口。",
+            "forward.validationDuplicate": "同一设备上的同一端口被多条规则监听。",
+            "status.forwardListenFailed": "端口转发 %d 失败：%@",
+            "status.forwardListenPermission": "端口转发 %d 被拒绝 — 请使用 ≥ 1024 的端口（特权端口需要管理员权限）",
             "menu.clientMode": "客户端模式",
             "menu.serverMode": "服务器模式",
             "menu.settings": "设置...",
@@ -321,6 +375,33 @@ enum AppText {
             "menu.controlDevice": "제어 장치",
             "menu.controlDeviceWithTitle": "제어 장치: %@",
             "menu.screenLayout": "화면 레이아웃...",
+            "menu.portForward": "포트 포워딩...",
+            "forward.title": "포트 포워딩",
+            "forward.subtitle": "한 기기의 TCP 포트를 다른 기기의 포트로 전달합니다. In으로 들어온 연결은 암호화된 동기화 연결을 통해 Out으로 전달됩니다.",
+            "forward.in": "In (수신)",
+            "forward.out": "Out (대상)",
+            "forward.lan": "LAN",
+            "forward.note": "메모",
+            "forward.notePlaceholder": "메모 (선택)",
+            "forward.lanTooltip": "끄면 127.0.0.1(이 기기)에서만 수신합니다. 켜면 0.0.0.0에서 수신하여 LAN의 다른 기기도 이 포트에 접근할 수 있습니다.",
+            "forward.hostTooltip": "Out 기기가 연결하는 주소. 기본값 127.0.0.1(Out 기기 자체의 서비스); Out 기기가 접근 가능한 다른 호스트로 변경할 수 있습니다.",
+            "forward.status": "",
+            "forward.enabled": "사용",
+            "forward.enabledTooltip": "이 포워딩을 사용/해제합니다. 즉시 적용됩니다.",
+            "forward.reasonPrivileged": "1024 이상 포트가 필요합니다(특권 포트는 관리자 권한 필요)",
+            "forward.statusListening": "포트 %d 수신 중",
+            "forward.statusFailed": "포트 수신 실패: %@",
+            "forward.statusDisabled": "사용 안 함",
+            "forward.statusOffline": "In 기기 오프라인",
+            "forward.statusStarting": "시작 중…",
+            "forward.add": "포워딩 추가",
+            "forward.remove": "삭제",
+            "forward.empty": "포트 포워딩이 없습니다. 포워딩 추가를 눌러 만드세요.",
+            "forward.validationPort": "포트는 1에서 65535 사이의 숫자여야 합니다.",
+            "forward.validationSame": "In과 Out은 같은 기기의 같은 포트일 수 없습니다.",
+            "forward.validationDuplicate": "같은 기기의 같은 포트를 여러 규칙이 수신합니다.",
+            "status.forwardListenFailed": "포트 포워딩 %d 실패: %@",
+            "status.forwardListenPermission": "포트 포워딩 %d 거부됨 — 1024 이상 포트를 사용하세요(특권 포트는 관리자 권한 필요)",
             "menu.clientMode": "클라이언트 모드",
             "menu.serverMode": "서버 모드",
             "menu.settings": "설정...",
@@ -434,6 +515,33 @@ enum AppText {
             "menu.controlDevice": "制御デバイス",
             "menu.controlDeviceWithTitle": "制御デバイス: %@",
             "menu.screenLayout": "画面レイアウト...",
+            "menu.portForward": "ポート転送...",
+            "forward.title": "ポート転送",
+            "forward.subtitle": "あるデバイスの TCP ポートを別のデバイスのポートへ転送します。In への接続は暗号化された同期接続を経由して Out に届きます。",
+            "forward.in": "In（待ち受け）",
+            "forward.out": "Out（宛先）",
+            "forward.lan": "LAN",
+            "forward.note": "メモ",
+            "forward.notePlaceholder": "メモ（任意）",
+            "forward.lanTooltip": "オフ: 127.0.0.1（このマシン）のみで待ち受けます。オン: 0.0.0.0 で待ち受け、LAN 上の他のマシンからもこのポートにアクセスできます。",
+            "forward.hostTooltip": "Out デバイスが接続する宛先アドレス。既定は 127.0.0.1（Out デバイス自身のサービス）。Out デバイスから到達できる別のホストに変更できます。",
+            "forward.status": "",
+            "forward.enabled": "有効",
+            "forward.enabledTooltip": "この転送を有効/無効にします。すぐに反映されます。",
+            "forward.reasonPrivileged": "1024 以上のポートが必要です（特権ポートは管理者権限が必要）",
+            "forward.statusListening": "ポート %d で待ち受け中",
+            "forward.statusFailed": "ポート待ち受け失敗: %@",
+            "forward.statusDisabled": "無効",
+            "forward.statusOffline": "In デバイスがオフライン",
+            "forward.statusStarting": "開始中…",
+            "forward.add": "転送を追加",
+            "forward.remove": "削除",
+            "forward.empty": "ポート転送はまだありません。「転送を追加」で作成してください。",
+            "forward.validationPort": "ポートは 1 から 65535 の数字である必要があります。",
+            "forward.validationSame": "In と Out を同じデバイスの同じポートにはできません。",
+            "forward.validationDuplicate": "同じデバイスの同じポートを複数のルールが待ち受けています。",
+            "status.forwardListenFailed": "ポート転送 %d が失敗しました: %@",
+            "status.forwardListenPermission": "ポート転送 %d は拒否されました — 1024 以上のポートを使用してください（特権ポートは管理者権限が必要）",
             "menu.clientMode": "クライアントモード",
             "menu.serverMode": "サーバーモード",
             "menu.settings": "設定...",
@@ -693,6 +801,8 @@ struct InputMessage: Codable {
     let key: InputKeyPayload?
     let sentAt: TimeInterval
     let cursor: InputCursorPayload?
+    let forwards: [PortForwardRule]?
+    let forwardStatuses: [PortForwardStatus]?
 
     init(
         type: String,
@@ -710,7 +820,9 @@ struct InputMessage: Codable {
         mouse: InputMousePayload?,
         key: InputKeyPayload?,
         sentAt: TimeInterval,
-        cursor: InputCursorPayload? = nil
+        cursor: InputCursorPayload? = nil,
+        forwards: [PortForwardRule]? = nil,
+        forwardStatuses: [PortForwardStatus]? = nil
     ) {
         self.type = type
         self.origin = origin
@@ -728,6 +840,8 @@ struct InputMessage: Codable {
         self.key = key
         self.sentAt = sentAt
         self.cursor = cursor
+        self.forwards = forwards
+        self.forwardStatuses = forwardStatuses
     }
 
     static func hello(
@@ -898,6 +1012,123 @@ final class ScreenLayoutStore {
         }
         return Dictionary(uniqueKeysWithValues: list.map { ($0.screenId, $0) })
     }
+}
+
+/// One user-configured port forward: TCP connections accepted on `inDeviceId`:`inPort` are
+/// tunneled over the sync connection and delivered to `outHost`:`outPort` on `outDeviceId`.
+/// `inAllowLan` chooses the listen interface — loopback-only by default, or all interfaces
+/// (`0.0.0.0`) so other machines on the LAN can reach the forwarded port. `outHost` defaults to
+/// `127.0.0.1` (a service on the Out device itself) but may be any address the Out device can
+/// reach, letting the Out device act as a gateway to a third host.
+struct PortForwardRule: Codable, Equatable {
+    var id: String
+    var inDeviceId: String
+    var inPort: Int
+    var inAllowLan: Bool
+    var outDeviceId: String
+    var outHost: String
+    var outPort: Int
+    var note: String
+    var enabled: Bool
+
+    init(
+        id: String,
+        inDeviceId: String,
+        inPort: Int,
+        inAllowLan: Bool = false,
+        outDeviceId: String,
+        outHost: String = "127.0.0.1",
+        outPort: Int,
+        note: String,
+        enabled: Bool
+    ) {
+        self.id = id
+        self.inDeviceId = inDeviceId
+        self.inPort = inPort
+        self.inAllowLan = inAllowLan
+        self.outDeviceId = outDeviceId
+        self.outHost = outHost
+        self.outPort = outPort
+        self.note = note
+        self.enabled = enabled
+    }
+
+    // Tolerant decoding so rules saved before `inAllowLan`/`outHost` existed still load with their
+    // safe defaults (loopback listen, 127.0.0.1 destination) instead of failing the whole table.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        inDeviceId = try container.decode(String.self, forKey: .inDeviceId)
+        inPort = try container.decode(Int.self, forKey: .inPort)
+        inAllowLan = try container.decodeIfPresent(Bool.self, forKey: .inAllowLan) ?? false
+        outDeviceId = try container.decode(String.self, forKey: .outDeviceId)
+        outHost = try container.decodeIfPresent(String.self, forKey: .outHost) ?? "127.0.0.1"
+        outPort = try container.decode(Int.self, forKey: .outPort)
+        note = try container.decodeIfPresent(String.self, forKey: .note) ?? ""
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+}
+
+/// Persists the shared port-forward rule table. Like the screen layout, the server's copy is
+/// canonical: clients send edits as requests and apply whatever the server rebroadcasts.
+final class PortForwardStore {
+    private(set) var rules: [PortForwardRule] = []
+    private static let storageKey = "ClipboardSyncMac.portForwards"
+
+    init() {
+        rules = Self.load()
+    }
+
+    func applySnapshot(_ snapshot: [PortForwardRule]) {
+        rules = snapshot
+        save()
+    }
+
+    func snapshot() -> [PortForwardRule] {
+        rules
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder().encode(rules) {
+            UserDefaults.standard.set(data, forKey: Self.storageKey)
+        }
+    }
+
+    private static func load() -> [PortForwardRule] {
+        guard
+            let data = UserDefaults.standard.data(forKey: storageKey),
+            let list = try? JSONDecoder().decode([PortForwardRule].self, from: data)
+        else {
+            return []
+        }
+        return list
+    }
+}
+
+/// Live listen state of one rule, reported by whichever device is the rule's "In" side (the only
+/// device that actually opens the listening socket). `ok` true means the port is bound and
+/// listening; `ok` false means the bind failed and `reason` says why. Broadcast to peers so the
+/// Port Forward panel can show an accurate status light for rules that listen on other machines.
+struct PortForwardStatus: Codable, Equatable {
+    let id: String
+    let ok: Bool
+    let reason: String?
+}
+
+/// One hop of tunneled TCP traffic. `open` asks `target` to dial `127.0.0.1:port`, `data` carries
+/// a chunk of the stream in either direction, and `close` tears the connection down. All three
+/// share `connectionId`, allocated by the listening side when it accepts a local TCP connection.
+struct TunnelMessage: Codable {
+    let type: String
+    let origin: String
+    let target: String
+    let kind: String
+    let connectionId: String
+    let host: String?
+    let port: Int?
+    let dataBase64: String?
+    let reason: String?
+    let sentAt: TimeInterval
 }
 
 struct InputCapturePayload: Codable {
