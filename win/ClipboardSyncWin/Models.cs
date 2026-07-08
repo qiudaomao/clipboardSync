@@ -139,6 +139,20 @@ internal sealed class EncryptedEnvelope
     public string Nonce { get; set; } = "";
     public string Ciphertext { get; set; } = "";
     public string Tag { get; set; } = "";
+    /// Plaintext routing hints so a relaying server can deliver targeted traffic (file-transfer
+    /// chunks, tunnel data) to just the matching peer connection instead of broadcasting it.
+    /// From teaches the server which connection belongs to which device id; To names the intended
+    /// receiver. Optional — absent on messages from older peers and on broadcasts — and advisory
+    /// only: receivers still filter by the encrypted payload's own Target.
+    public string? From { get; set; }
+    public string? To { get; set; }
+}
+
+/// Just the routing hints of an encrypted envelope, for relays that must not (and cannot) decrypt.
+internal sealed class EnvelopeRouting
+{
+    public string? From { get; set; }
+    public string? To { get; set; }
 }
 
 internal sealed class MessageHeader
@@ -524,6 +538,36 @@ internal sealed class TunnelMessage
     public string? Host { get; set; }
     public int? Port { get; set; }
     public string? DataBase64 { get; set; }
+    public string? Reason { get; set; }
+    public double SentAt { get; set; }
+}
+
+/// One file's metadata inside a transfer offer. Size is the raw byte count on disk at offer time;
+/// the sender re-checks it while streaming and aborts if the file changed underneath it.
+internal sealed class FileTransferFileInfo
+{
+    public string Name { get; set; } = "";
+    public long Size { get; set; }
+}
+
+/// One step of a chunked, targeted file transfer. "offer" proposes a file list, "accept" opens the
+/// transfer, "chunk" carries one piece of file data (acknowledged by the receiver with "ack" for
+/// windowed backpressure), "fileDone" closes one file with its SHA-256, "done" is the receiver's
+/// final confirmation, and "cancel" aborts in either direction. Both ends stream disk-to-disk, so
+/// there is no whole-file buffering and no hard size limit. Like tunnel messages, Target filtering
+/// happens on the receiver: messages addressed to another device are ignored.
+internal sealed class FileTransferMessage
+{
+    public string Type { get; set; } = "file";
+    public string Origin { get; set; } = "";
+    public string Target { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public string TransferId { get; set; } = "";
+    public List<FileTransferFileInfo>? Files { get; set; }
+    public int? FileIndex { get; set; }
+    public int? ChunkIndex { get; set; }
+    public string? DataBase64 { get; set; }
+    public string? Sha256 { get; set; }
     public string? Reason { get; set; }
     public double SentAt { get; set; }
 }

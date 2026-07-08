@@ -21,8 +21,44 @@ final class ClipboardCoordinator {
         timer = nil
     }
 
-    func readFilesForManualSend() -> ClipboardContent? {
-        readFileContent(from: NSPasteboard.general)
+    /// The file URLs currently on the clipboard, for a chunked transfer. Only regular files are
+    /// supported; folders surface a skip status and return nil. Size is deliberately not checked —
+    /// transfers stream disk-to-disk.
+    func readFileURLsForManualSend() -> [URL]? {
+        guard
+            let urls = NSPasteboard.general.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) as? [NSURL],
+            !urls.isEmpty
+        else {
+            return nil
+        }
+
+        var fileURLs: [URL] = []
+        for nsURL in urls {
+            let url = nsURL as URL
+            guard url.isFileURL else {
+                continue
+            }
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values?.isRegularFile == true else {
+                onLocalSkipped?(AppText.text("status.folderUnsupported"))
+                return nil
+            }
+            fileURLs.append(url)
+        }
+        return fileURLs.isEmpty ? nil : fileURLs
+    }
+
+    /// Puts files a completed transfer already wrote to disk onto the clipboard as file-drop URLs.
+    @discardableResult
+    func applyReceivedFileURLs(_ urls: [URL]) -> Bool {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let written = pasteboard.writeObjects(urls as [NSURL])
+        lastChangeCount = pasteboard.changeCount
+        return written
     }
 
     @discardableResult
@@ -81,51 +117,6 @@ final class ClipboardCoordinator {
             return false
         }
         return !urls.isEmpty
-    }
-
-    private func readFileContent(from pasteboard: NSPasteboard) -> ClipboardContent? {
-        guard
-            let urls = pasteboard.readObjects(
-                forClasses: [NSURL.self],
-                options: [.urlReadingFileURLsOnly: true]
-            ) as? [NSURL],
-            !urls.isEmpty
-        else {
-            return nil
-        }
-
-        var files: [ClipboardFilePayload] = []
-        for nsURL in urls {
-            let url = nsURL as URL
-            guard url.isFileURL else {
-                continue
-            }
-
-            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-            guard values?.isRegularFile == true else {
-                onLocalSkipped?(AppText.text("status.folderUnsupported"))
-                return nil
-            }
-
-            let size = values?.fileSize ?? 0
-            guard size <= ClipboardLimits.maxFileBytes else {
-                onLocalSkipped?(AppText.text("status.fileTooLarge"))
-                return nil
-            }
-
-            guard let data = try? Data(contentsOf: url), data.count <= ClipboardLimits.maxFileBytes else {
-                onLocalSkipped?(AppText.text("status.fileTooLarge"))
-                return nil
-            }
-
-            files.append(ClipboardFilePayload(
-                name: Self.safeFileName(url.lastPathComponent, fallback: "clipboard-file"),
-                dataBase64: data.base64EncodedString(),
-                size: data.count
-            ))
-        }
-
-        return files.isEmpty ? nil : .files(files)
     }
 
     private func readImageContent(from pasteboard: NSPasteboard) -> ClipboardContent? {

@@ -33,6 +33,8 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem serverModeItem;
     private readonly ToolStripMenuItem startStopItem;
     private readonly ToolStripMenuItem launchAtLoginItem;
+    private readonly ToolStripMenuItem sendFilesItem;
+    private readonly FileTransferCoordinator fileTransferCoordinator = new();
     private readonly ClipboardMonitor clipboardMonitor;
     private readonly ScreenLayoutStore screenLayoutStore = new();
     private readonly PortForwardStore portForwardStore = new();
@@ -115,6 +117,7 @@ internal sealed class TrayAppContext : ApplicationContext
         serverModeItem = new ToolStripMenuItem(AppText.Text("menu.serverMode"), null, (_, _) => SetMode(SyncMode.Server));
         startStopItem = new ToolStripMenuItem(AppText.Text("menu.start"), null, (_, _) => ToggleTransport());
         launchAtLoginItem = new ToolStripMenuItem(AppText.Text("menu.launchAtLogin"), null, (_, _) => ToggleLaunchAtLogin());
+        sendFilesItem = new ToolStripMenuItem(AppText.Text("menu.sendFiles"));
         trayIcon = LoadTrayIcon();
         inputCoordinator = new InputSharingCoordinator(config.DeviceId, screenLayoutStore);
         updateController = new WinUpdateController(trayIcon, CloseForUpdate);
@@ -151,6 +154,23 @@ internal sealed class TrayAppContext : ApplicationContext
             UpdateMenu();
         });
         portForwardCoordinator.StatusesChanged += statuses => OnUi(() => HandleLocalForwardStatuses(statuses));
+
+        // File-transfer chunks are sent straight from the coordinator's lock, like tunnel data;
+        // encrypt+send is thread-safe. Status/completion touch the UI, so those hop threads.
+        fileTransferCoordinator.Configure(config.DeviceId);
+        fileTransferCoordinator.MessageReady += message => _ = SendEncrypted(message, realtime: true, routedTo: message.Target);
+        fileTransferCoordinator.StatusChanged += text => OnUi(() =>
+        {
+            status = text;
+            UpdateMenu();
+        });
+        fileTransferCoordinator.FilesReceived += paths => OnUi(() =>
+        {
+            clipboardMonitor.ApplyReceivedFilePaths(paths);
+            status = AppText.Text("status.filesReceived");
+            UpdateMenu();
+            notifyIcon.ShowBalloonTip(3000, AppText.Text("app.name"), AppText.Text("status.filesReceived"), ToolTipIcon.Info);
+        });
 
         // Periodically re-broadcasts our own hello (so peers keep our LastSeen fresh even when we
         // have nothing else to send) and prunes any peer we haven't heard from in a while -
@@ -191,6 +211,7 @@ internal sealed class TrayAppContext : ApplicationContext
             cursorReportTimer?.Dispose();
             transport?.Dispose();
             updateController.Dispose();
+            fileTransferCoordinator.Dispose();
             portForwardCoordinator.Dispose();
             portForwardForm?.Dispose();
             inputCoordinator.Dispose();
@@ -322,7 +343,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(historyItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.sendFiles"), null, (_, _) => SendFilesFromClipboard()));
+        menu.Items.Add(sendFilesItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(inputStatusItem);
         menu.Items.Add(inputSharingItem);
@@ -402,7 +423,32 @@ internal sealed class TrayAppContext : ApplicationContext
         startStopItem.Text = AppText.Text(transport is null ? "menu.start" : "menu.stop");
         launchAtLoginItem.Checked = IsLaunchAtLoginEnabled();
         RefreshControlDeviceMenu();
+        RefreshSendFilesMenu();
         RefreshHistoryMenu();
+    }
+
+    /// One entry per online peer: files go to exactly the device the user picks, never to every
+    /// peer at once.
+    private void RefreshSendFilesMenu()
+    {
+        sendFilesItem.DropDownItems.Clear();
+        var peers = inputDevices.Values
+            .Where(item => item.Id != config.DeviceId)
+            .OrderBy(item => item.BaseTitle, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        if (peers.Count == 0)
+        {
+            sendFilesItem.DropDownItems.Add(new ToolStripMenuItem(AppText.Text("menu.noPeers")) { Enabled = false });
+            return;
+        }
+
+        foreach (var peer in peers)
+        {
+            var item = new ToolStripMenuItem(peer.BaseTitle) { Tag = peer.Id };
+            item.Click += (_, _) => SendFilesToDevice(peer.Id, peer.BaseTitle);
+            sendFilesItem.DropDownItems.Add(item);
+        }
     }
 
     private string EffectiveControlDeviceId => string.IsNullOrWhiteSpace(config.ControlDeviceId)
@@ -937,7 +983,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void PublishTunnel(TunnelMessage message)
     {
-        _ = SendEncrypted(message, realtime: true);
+        _ = SendEncrypted(message, realtime: true, routedTo: message.Target);
     }
 
     private void HandleTunnelMessage(byte[] plaintext)
@@ -957,6 +1003,25 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
         portForwardCoordinator.Handle(message);
+    }
+
+    private void HandleFileMessage(byte[] plaintext)
+    {
+        FileTransferMessage? message;
+        try
+        {
+            message = JsonSerializer.Deserialize<FileTransferMessage>(plaintext, MessageJsonOptions);
+        }
+        catch
+        {
+            return;
+        }
+
+        if (message?.Type != "file" || message.Origin == config.DeviceId || message.Target != config.DeviceId)
+        {
+            return;
+        }
+        fileTransferCoordinator.Handle(message);
     }
 
     /// Lets every peer know whether this device is (or isn't) watching the shared layout, so peers
@@ -1197,6 +1262,7 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         transport?.Dispose();
         peerCount = 0;
+        fileTransferCoordinator.CancelAll();
         layoutWatchers.Clear();
         UpdateCursorReporting();
         UpdateInputCoordinator();
@@ -1226,8 +1292,8 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         transport = config.Mode == SyncMode.Server
-            ? new ServerTransport(config.Port)
-            : new ClientTransport(config.Host, config.Port);
+            ? new ServerTransport(config.Port) { LocalDeviceId = config.DeviceId }
+            : (ISyncTransport)new ClientTransport(config.Host, config.Port);
 
         transport.StatusChanged += text => OnUi(() =>
         {
@@ -1275,6 +1341,7 @@ internal sealed class TrayAppContext : ApplicationContext
         transport?.Dispose();
         transport = null;
         peerCount = 0;
+        fileTransferCoordinator.CancelAll();
         layoutWatchers.Clear();
         UpdateCursorReporting();
         UpdateInputCoordinator();
@@ -1324,10 +1391,10 @@ internal sealed class TrayAppContext : ApplicationContext
         UpdateMenu();
     }
 
-    private void SendFilesFromClipboard()
+    private void SendFilesToDevice(string targetId, string targetName)
     {
-        var content = clipboardMonitor.ReadFilesForManualSend();
-        if (content is null)
+        var paths = clipboardMonitor.ReadFilePathsForManualSend();
+        if (paths is null)
         {
             status = AppText.Text("status.copyFilesFirst");
             UpdateMenu();
@@ -1344,11 +1411,7 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
 
-        if (Publish(content))
-        {
-            status = AppText.Text("status.fileTransferStarted");
-            UpdateMenu();
-        }
+        fileTransferCoordinator.SendFiles(paths, targetId, targetName);
     }
 
     private bool Publish(ClipboardContent content, bool recordHistory = true)
@@ -1369,10 +1432,10 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void PublishInput(InputMessage message)
     {
-        _ = SendEncrypted(message, realtime: true);
+        _ = SendEncrypted(message, realtime: true, routedTo: message.Target);
     }
 
-    private bool SendEncrypted<T>(T message, bool realtime = false)
+    private bool SendEncrypted<T>(T message, bool realtime = false, string? routedTo = null)
     {
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(message, MessageJsonOptions);
         EncryptedEnvelope envelope;
@@ -1382,6 +1445,8 @@ internal sealed class TrayAppContext : ApplicationContext
             envelope = realtime
                 ? CryptoBox.EncryptRealtime(payloadBytes, config.Password)
                 : CryptoBox.Encrypt(payloadBytes, config.Password);
+            envelope.From = config.DeviceId;
+            envelope.To = routedTo;
             envelopeBytes = JsonSerializer.SerializeToUtf8Bytes(envelope, MessageJsonOptions);
         }
         catch
@@ -1405,7 +1470,7 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         var payload = System.Text.Encoding.UTF8.GetString(envelopeBytes);
-        _ = transport?.SendAsync(payload);
+        _ = transport?.SendAsync(payload, routedTo);
         return true;
     }
 
@@ -1437,6 +1502,9 @@ internal sealed class TrayAppContext : ApplicationContext
                     break;
                 case "tunnel":
                     HandleTunnelMessage(plaintext);
+                    break;
+                case "file":
+                    HandleFileMessage(plaintext);
                     break;
             }
         }

@@ -26,9 +26,21 @@ Every WebSocket text message is an AES-256-GCM envelope:
   "salt": "base64-random-salt",
   "nonce": "base64-random-nonce",
   "ciphertext": "base64-encrypted-clipboard-json",
-  "tag": "base64-authentication-tag"
+  "tag": "base64-authentication-tag",
+  "from": "sender-device-id",
+  "to": "receiver-device-id"
 }
 ```
+
+`from` and `to` are optional plaintext routing hints for relaying servers, which
+cannot decrypt the payload. `from` teaches the server which connection belongs
+to which device id; `to` names the intended receiver of targeted traffic
+(file-transfer chunks, tunnel data, targeted input events), letting the server
+deliver it to just that peer's connection instead of broadcasting. They are
+advisory only: a server that doesn't know the target yet falls back to
+broadcast, messages routed to the server's own device id are consumed locally,
+and receivers always still filter by the encrypted payload's own `target`
+field. Messages from older peers simply omit both fields and are broadcast.
 
 Version `1` is used for clipboard messages. Its AES key is derived from the
 configured sync password with PBKDF2-HMAC-SHA256, 100,000 rounds, a per-message
@@ -80,7 +92,7 @@ Plaintext structures are never sent directly.
 }
 ```
 
-### Clipboard Files
+### Clipboard Files (legacy)
 
 ```json
 {
@@ -97,6 +109,70 @@ Plaintext structures are never sent directly.
   "sentAt": 1782835200.0
 }
 ```
+
+Whole-file clipboard messages are still accepted for compatibility with older
+peers, but current versions no longer send them — files are sent with the
+chunked `type: "file"` transfer below, which streams disk-to-disk and has no
+size limit.
+
+## File Transfer Messages
+
+Sending files is targeted: the user picks one online peer from the Send Files
+menu, and only that device materializes the files. A transfer is a sequence of
+`type: "file"` messages, all encrypted with the version `2` (realtime)
+envelope. Like `tunnel` messages, `target` filtering happens on the receiver —
+a device ignores `file` messages addressed to someone else — and every `file`
+message additionally carries the envelope's `from`/`to` routing hints so a
+relaying server sends chunks only toward the chosen device.
+
+```json
+{
+  "type": "file",
+  "origin": "device-id",
+  "target": "peer-device-id",
+  "kind": "offer",
+  "transferId": "transfer-uuid",
+  "files": [
+    { "name": "example.bin", "size": 123456789 }
+  ],
+  "fileIndex": null,
+  "chunkIndex": null,
+  "dataBase64": null,
+  "sha256": null,
+  "reason": null,
+  "sentAt": 1782835200.0
+}
+```
+
+The kinds, in the order they normally flow:
+
+- `kind: "offer"` — sender proposes the transfer: `files` lists every file's
+  sanitized name and raw byte size. Nothing streams until the receiver answers.
+- `kind: "accept"` — receiver created its destination directory and is ready.
+- `kind: "chunk"` — one piece of file data: `fileIndex` says which file,
+  `chunkIndex` is a transfer-wide sequence number starting at 0, and
+  `dataBase64` carries up to 1 MiB of raw bytes. Chunks are strictly ordered;
+  the receiver rejects any out-of-sequence chunk.
+- `kind: "ack"` — receiver confirms one `chunkIndex`. The sender keeps at most
+  4 unacknowledged chunks in flight, so a slow peer applies backpressure
+  instead of ballooning transport buffers; sender progress is derived from
+  acknowledged bytes.
+- `kind: "fileDone"` — sender finished one file: `sha256` is the lowercase hex
+  digest of its raw bytes. The receiver closes the file and verifies both size
+  and digest; a zero-byte file is just a bare `fileDone` with no chunks.
+- `kind: "done"` — sent by the receiver after the last file verified and the
+  received files were placed on its clipboard; confirms the whole transfer to
+  the sender.
+- `kind: "cancel"` — either side aborts, with an optional `reason`. The
+  receiver deletes its partial destination directory.
+
+Both ends stream disk-to-disk — the sender reads each chunk from disk as it is
+sent and the receiver appends each chunk to disk as it arrives — so transfers
+have no file-size limit and use bounded memory. Either side abandons a transfer
+after 30 seconds without progress (a vanished peer, or an old version that
+ignores the unknown `offer`), and the receiver's partial files are deleted.
+Received files are materialized into the app-managed received-files directory
+before being placed on the receiving clipboard as file-drop URLs.
 
 ## Input Message
 
@@ -377,21 +453,24 @@ Encrypted envelope fields:
 - `nonce`: base64-encoded AES-GCM nonce.
 - `ciphertext`: base64-encoded encrypted clipboard JSON.
 - `tag`: base64-encoded AES-GCM authentication tag.
+- `from` / `to`: optional plaintext routing hints for relaying servers — see Encrypted Message.
 
 ## Limits
 
 - Clipboard history keeps the latest 10 unique items in memory.
-- Each image or file payload is capped at 10 MB raw bytes.
+- Each image payload (and each legacy whole-file payload) is capped at 10 MB raw bytes.
+- Chunked file transfers have no size limit; each chunk carries at most 1 MiB of raw bytes.
 - WebSocket JSON messages are capped at 16 MB to allow for base64 expansion.
+- Servers reassemble fragmented WebSocket messages (RFC 6455 continuation frames) up to the same 16 MB cap; clients accept messages up to that cap as well.
 
 ## Behavior
 
 - Local text and image clipboard changes send one `clipboard` message automatically.
-- Local file clipboard changes are ignored by the clipboard poller. The user must click `Send Files from Clipboard` to package and send the current file clipboard.
+- Local file clipboard changes are ignored by the clipboard poller. The user picks a target device under `Send Files from Clipboard` to start a chunked `file` transfer of the current file clipboard to that one device.
 - A received `clipboard` message overwrites the local clipboard with text, image data, or file-drop URLs.
 - Received files are materialized into an app-managed received-files directory before being placed on the clipboard.
 - A receiver ignores messages where `origin` matches its own device id.
-- A server broadcasts the encrypted envelope from one client to other clients.
+- A server broadcasts the encrypted envelope from one client to other clients, except envelopes carrying a `to` routing hint for a device it knows — those are relayed to just that device's connection (or consumed locally when the server itself is the target).
 - A server applies remote messages locally only when it is configured with the same password.
 - Input sharing is off by default and must be enabled in settings or the tray/menu.
 - Input-sharing enablement is local to each device. It is not synchronized by `kind: "config"`.

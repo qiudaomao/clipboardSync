@@ -58,6 +58,33 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The device-option list the open panel's rows were last built from, so presence changes only
     /// rebuild the rows (which would discard in-progress edits) when the choices actually changed.
     private var portForwardPanelDeviceSignature = ""
+    private var sendFilesMenuItem = NSMenuItem(title: AppText.text("menu.sendFiles"), action: nil, keyEquivalent: "")
+    private var sendFilesMenu = NSMenu(title: AppText.text("menu.sendFiles"))
+    private lazy var fileTransferCoordinator: FileTransferCoordinator = {
+        let coordinator = FileTransferCoordinator()
+        coordinator.configure(deviceId: deviceId)
+        coordinator.onSend = { [weak self] message in
+            DispatchQueue.main.async {
+                _ = self?.sendEncryptedRealtime(message, routedTo: message.target)
+            }
+        }
+        coordinator.onStatus = { [weak self] status in
+            DispatchQueue.main.async {
+                self?.statusText = status
+            }
+        }
+        coordinator.onFilesReceived = { [weak self] urls in
+            DispatchQueue.main.async {
+                guard let self else {
+                    return
+                }
+                self.clipboard.applyReceivedFileURLs(urls)
+                self.statusText = AppText.text("status.filesReceived")
+                self.postFilesReceivedNotification()
+            }
+        }
+        return coordinator
+    }()
     private lazy var portForwardCoordinator: PortForwardCoordinator = {
         let coordinator = PortForwardCoordinator()
         coordinator.onSend = { [weak self] message in
@@ -305,9 +332,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(historyMenuItem)
         menu.addItem(NSMenuItem.separator())
 
-        let sendFilesItem = NSMenuItem(title: AppText.text("menu.sendFiles"), action: #selector(sendFilesFromClipboard), keyEquivalent: "")
-        sendFilesItem.target = self
-        menu.addItem(sendFilesItem)
+        sendFilesMenuItem.submenu = sendFilesMenu
+        menu.addItem(sendFilesMenuItem)
         menu.addItem(NSMenuItem.separator())
 
         inputStatusMenuItem = NSMenuItem(title: AppText.text("input.off"), action: nil, keyEquivalent: "")
@@ -403,7 +429,31 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startStopItem.title = AppText.text(transport == nil ? "menu.start" : "menu.stop")
         launchAtLoginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         refreshControlDeviceMenu()
+        refreshSendFilesMenu()
         refreshHistoryMenu()
+    }
+
+    /// One entry per online peer: files go to exactly the device the user picks, never to every
+    /// peer at once.
+    private func refreshSendFilesMenu() {
+        sendFilesMenu.removeAllItems()
+        let peers = inputDevices.values
+            .filter { $0.id != deviceId }
+            .sorted { $0.baseTitle.localizedCaseInsensitiveCompare($1.baseTitle) == .orderedAscending }
+
+        guard !peers.isEmpty else {
+            let item = NSMenuItem(title: AppText.text("menu.noPeers"), action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            sendFilesMenu.addItem(item)
+            return
+        }
+
+        for peer in peers {
+            let item = NSMenuItem(title: peer.baseTitle, action: #selector(sendFilesToDevice), keyEquivalent: "")
+            item.target = self
+            item.representedObject = peer.id
+            sendFilesMenu.addItem(item)
+        }
     }
 
     private var effectiveControlDeviceId: String {
@@ -769,7 +819,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func publishTunnel(_ message: TunnelMessage) {
-        _ = sendEncryptedRealtime(message)
+        _ = sendEncryptedRealtime(message, routedTo: message.target)
     }
 
     private func handleTunnelMessage(_ data: Data) {
@@ -1113,8 +1163,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         syncInputConfig()
     }
 
-    @objc private func sendFilesFromClipboard() {
-        guard let content = clipboard.readFilesForManualSend() else {
+    @objc private func sendFilesToDevice(_ sender: NSMenuItem) {
+        guard let targetId = sender.representedObject as? String else {
+            return
+        }
+        guard let urls = clipboard.readFileURLsForManualSend() else {
             statusText = AppText.text("status.copyFilesFirst")
             return
         }
@@ -1126,9 +1179,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        if publish(content) {
-            statusText = AppText.text("status.fileTransferStarted")
-        }
+        let targetName = inputDevices[targetId]?.baseTitle ?? AppText.text("device.unknown")
+        fileTransferCoordinator.sendFiles(urls, to: targetId, targetName: targetName)
     }
 
     private func applyConfig(_ nextConfig: AppConfig) {
@@ -1187,6 +1239,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func restartTransport() {
         transport?.stop()
         peerCount = 0
+        fileTransferCoordinator.cancelAll()
         layoutWatchers.removeAll()
         updateCursorReporting()
         updateInputCoordinator()
@@ -1212,7 +1265,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             nextTransport = WebSocketClientTransport(host: config.host, port: config.port)
         case .server:
-            nextTransport = WebSocketServerTransport(port: config.port)
+            let server = WebSocketServerTransport(port: config.port)
+            server.localDeviceId = deviceId
+            nextTransport = server
         }
 
         nextTransport.onStatus = { [weak self] status in
@@ -1280,10 +1335,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @discardableResult
-    private func sendEncrypted<T: Encodable>(_ message: T) -> Bool {
+    private func sendEncrypted<T: Encodable>(_ message: T, routedTo: String? = nil) -> Bool {
         guard
             let data = try? jsonEncoder.encode(message),
-            let envelope = try? CryptoBox.encrypt(data, password: config.password),
+            var envelope = try? CryptoBox.encrypt(data, password: config.password)
+        else {
+            statusText = AppText.text("status.encryptionFailed")
+            return false
+        }
+        envelope.from = deviceId
+        envelope.to = routedTo
+
+        guard
             let envelopeData = try? jsonEncoder.encode(envelope),
             let payload = String(data: envelopeData, encoding: .utf8)
         else {
@@ -1296,20 +1359,28 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return false
         }
 
-        transport?.send(payload)
+        transport?.send(payload, to: routedTo)
         return true
     }
 
     @discardableResult
     private func sendEncryptedInput(_ message: InputMessage) -> Bool {
-        sendEncryptedRealtime(message)
+        sendEncryptedRealtime(message, routedTo: message.target)
     }
 
     @discardableResult
-    private func sendEncryptedRealtime<T: Encodable>(_ message: T) -> Bool {
+    private func sendEncryptedRealtime<T: Encodable>(_ message: T, routedTo: String? = nil) -> Bool {
         guard
             let data = try? jsonEncoder.encode(message),
-            let envelope = try? CryptoBox.encryptRealtime(data, password: config.password),
+            var envelope = try? CryptoBox.encryptRealtime(data, password: config.password)
+        else {
+            statusText = AppText.text("status.encryptionFailed")
+            return false
+        }
+        envelope.from = deviceId
+        envelope.to = routedTo
+
+        guard
             let envelopeData = try? jsonEncoder.encode(envelope),
             let payload = String(data: envelopeData, encoding: .utf8)
         else {
@@ -1322,7 +1393,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return false
         }
 
-        transport?.send(payload)
+        transport?.send(payload, to: routedTo)
         return true
     }
 
@@ -1343,9 +1414,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             handleInputMessage(data)
         case "tunnel":
             handleTunnelMessage(data)
+        case "file":
+            handleFileMessage(data)
         default:
             break
         }
+    }
+
+    private func handleFileMessage(_ data: Data) {
+        guard
+            let message = try? jsonDecoder.decode(FileTransferMessage.self, from: data),
+            message.type == "file",
+            message.origin != deviceId,
+            message.target == deviceId
+        else {
+            return
+        }
+        fileTransferCoordinator.handle(message)
     }
 
     private func handleClipboardMessage(_ data: Data) {

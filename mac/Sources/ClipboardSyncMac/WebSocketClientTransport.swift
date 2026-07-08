@@ -38,7 +38,9 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         onStatus?(AppText.text("status.stopped"))
     }
 
-    func send(_ message: String) {
+    func send(_ message: String, to deviceId: String?) {
+        // A client has a single connection to its server; the server relays targeted messages
+        // using the routing hint inside the envelope itself.
         task?.send(.string(message)) { [weak self] error in
             if let error {
                 self?.onStatus?(AppText.format("status.sendFailed", error.localizedDescription))
@@ -55,6 +57,9 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         onStatus?(AppText.format("status.connecting", host, port))
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: url)
+        // The default receive cap is 1 MiB; a clipboard image or file-transfer chunk envelope can
+        // exceed that, and hitting the cap kills the connection instead of delivering the message.
+        task.maximumMessageSize = ClipboardLimits.maxWebSocketMessageBytes
         self.session = session
         self.task = task
         task.resume()
