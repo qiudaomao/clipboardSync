@@ -46,7 +46,9 @@ internal sealed class PortForwardForm : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(1180, 440);
+        // Snug to the fixed-width row content (~996px + rowsPanel padding + scrollbar) so there is
+        // no dead space to the right of the note column, which is a fixed width on Windows.
+        ClientSize = new Size(1044, 440);
         MinimumSize = new Size(1040, 340);
 
         var subtitle = new Label
