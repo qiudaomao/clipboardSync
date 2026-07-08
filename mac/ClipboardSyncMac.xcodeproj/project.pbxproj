@@ -23,6 +23,8 @@
 		B00000000000000000000004 /* UpdateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000005 /* UpdateController.swift */; };
 		B00000000000000000000003 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = B00000000000000000000002 /* Sparkle */; };
 		C00000000000000000000002 /* BetaLicense.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000001 /* BetaLicense.swift */; };
+		C00000000000000000000011 /* PortForwardCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000010 /* PortForwardCoordinator.swift */; };
+		C00000000000000000000021 /* PortForwardWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000020 /* PortForwardWindowController.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +45,8 @@
 		A0000000000000000000002A /* ScreenLayoutWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenLayoutWindowController.swift; sourceTree = "<group>"; };
 		B00000000000000000000005 /* UpdateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateController.swift; sourceTree = "<group>"; };
 		C00000000000000000000001 /* BetaLicense.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BetaLicense.swift; sourceTree = "<group>"; };
+		C00000000000000000000010 /* PortForwardCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortForwardCoordinator.swift; sourceTree = "<group>"; };
+		C00000000000000000000020 /* PortForwardWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortForwardWindowController.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -88,6 +92,8 @@
 				A0000000000000000000000E /* WebSocketServerTransport.swift */,
 				A00000000000000000000021 /* SettingsWindowController.swift */,
 				A0000000000000000000002A /* ScreenLayoutWindowController.swift */,
+				C00000000000000000000010 /* PortForwardCoordinator.swift */,
+				C00000000000000000000020 /* PortForwardWindowController.swift */,
 				A00000000000000000000025 /* NetworkAddress.swift */,
 				B00000000000000000000005 /* UpdateController.swift */,
 				C00000000000000000000001 /* BetaLicense.swift */,
@@ -191,6 +197,8 @@
 				A00000000000000000000026 /* CryptoBox.swift in Sources */,
 				A00000000000000000000028 /* InputSharingCoordinator.swift in Sources */,
 				A0000000000000000000002B /* ScreenLayoutWindowController.swift in Sources */,
+				C00000000000000000000011 /* PortForwardCoordinator.swift in Sources */,
+				C00000000000000000000021 /* PortForwardWindowController.swift in Sources */,
 				B00000000000000000000004 /* UpdateController.swift in Sources */,
 				C00000000000000000000002 /* BetaLicense.swift in Sources */,
 			);
