@@ -3,9 +3,25 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="color-scheme" content="dark light" />
 <title>Clipboard Sync — Native clipboard sync over LAN</title>
+<script>
+  // Apply the saved (or system) theme before first paint to avoid a flash.
+  (function () {
+    try {
+      var t = localStorage.getItem("cbs-theme");
+      if (t !== "light" && t !== "dark") {
+        t = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      }
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {
+      document.documentElement.setAttribute("data-theme", "dark");
+    }
+  })();
+</script>
 <style>
   :root {
+    color-scheme: dark;
     --bg: #06070a;
     --bg-soft: #0c0e14;
     --panel: #12141c;
@@ -16,7 +32,37 @@
     --accent-2: #a78bfa;
     --accent-3: #34e0b0;
   }
+  /* Light theme: only overrides — the dark values above stay the default. */
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f5f7fa;
+    --bg-soft: #eceff4;
+    --panel: #ffffff;
+    --border: rgba(15,23,42,0.12);
+    --text: #0f1420;
+    --muted: #55606f;
+    --accent: #2f6df6;
+    --accent-2: #7c5cff;
+    --accent-3: #0fb488;
+  }
+  :root[data-theme="light"] .glow { opacity: 0.5; }
+  :root[data-theme="light"] header.nav { background: rgba(255,255,255,0.72); }
+  :root[data-theme="light"] .beta-tag,
+  :root[data-theme="light"] .shot-label span.badge { background: rgba(15,23,42,0.05); }
+  :root[data-theme="light"] .btn-ghost,
+  :root[data-theme="light"] .eyebrow { background: rgba(15,23,42,0.03); }
+  :root[data-theme="light"] .btn-ghost:hover { background: rgba(15,23,42,0.06); }
+  :root[data-theme="light"] .shot-card { background: linear-gradient(180deg, #ffffff, #f4f6fa); box-shadow: 0 24px 60px -34px rgba(15,23,42,0.45); }
+  :root[data-theme="light"] .shot-card img { border-color: rgba(15,23,42,0.10); }
+  :root[data-theme="light"] .highlight-card { background: #ffffff; }
+  :root[data-theme="light"] .highlight-card:hover,
+  :root[data-theme="light"] .feature-card:hover { border-color: rgba(15,23,42,0.22); }
+  :root[data-theme="light"] .hero-img img { filter: drop-shadow(0 24px 50px rgba(15,23,42,0.22)); }
+
   * { box-sizing: border-box; }
+  body, header.nav, .beta-tag, .eyebrow, .shot-card, .shot-label span.badge, .cta-band {
+    transition: background-color .3s ease, color .3s ease, border-color .3s ease;
+  }
   html { scroll-behavior: smooth; }
   body {
     margin: 0;
@@ -86,6 +132,7 @@
   .lang-btn { cursor: pointer; font-family: inherit; }
   .gh-btn { padding: 10px 12px; }
   .gh-btn svg { display: block; }
+  .theme-btn { cursor: pointer; padding: 9px 11px; font-size: 15px; line-height: 1; }
 
   nav.links { display: flex; gap: 28px; }
   nav.links a {
@@ -371,6 +418,9 @@
     .highlight-grid { grid-template-columns: 1fr 1fr; }
     .highlight-card:nth-child(5) { grid-column: 1 / -1; }
   }
+  @media (max-width: 900px) {
+    nav.links { display: none; }
+  }
   @media (max-width: 860px) {
     .shots { grid-template-columns: 1fr; }
     .feature-grid { grid-template-columns: 1fr 1fr; }
@@ -425,6 +475,7 @@
          data-i18n-title="nav.reportIssue" title="Report an issue" aria-label="Report an issue">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
       </a>
+      <button class="btn btn-ghost theme-btn" id="themeToggle" type="button" data-i18n-title="theme.toggle" title="Switch color theme" aria-label="Switch color theme">🌙</button>
       <button class="btn btn-ghost lang-btn" id="langToggle" type="button" aria-label="Switch language">中文</button>
       <a class="btn btn-ghost" href="#download" data-i18n="nav.download">Download</a>
     </div>
@@ -602,6 +653,25 @@
   })();
 
   (function () {
+    var themeBtn = document.getElementById("themeToggle");
+    var root = document.documentElement;
+
+    function applyTheme(theme) {
+      root.setAttribute("data-theme", theme);
+      // Icon reflects the current theme (moon in dark, sun in light).
+      themeBtn.textContent = theme === "light" ? "☀️" : "🌙";
+      try { localStorage.setItem("cbs-theme", theme); } catch (e) {}
+    }
+
+    // The head script already set data-theme before paint; sync the icon to it.
+    applyTheme(root.getAttribute("data-theme") === "light" ? "light" : "dark");
+
+    themeBtn.addEventListener("click", function () {
+      applyTheme(root.getAttribute("data-theme") === "light" ? "dark" : "light");
+    });
+  })();
+
+  (function () {
     var I18N = {
       en: {
         "page.title": "Clipboard Sync — Native clipboard sync over LAN",
@@ -610,6 +680,7 @@
         "nav.features": "Features",
         "nav.download": "Download",
         "nav.reportIssue": "Report an issue on GitHub",
+        "theme.toggle": "Switch color theme",
         "hero.eyebrow": "macOS & Windows · Free in beta",
         "hero.title": 'Your clipboard,<br /><span class="gradient">everywhere on your LAN.</span>',
         "hero.subtitle": "A lightweight menubar app that syncs text, images, and files across your Mac and PC, and lets you share one mouse and keyboard between them — over WebSocket, instantly, encrypted, and without the cloud.",
@@ -665,6 +736,7 @@
         "nav.features": "功能",
         "nav.download": "下载",
         "nav.reportIssue": "在 GitHub 上报告问题",
+        "theme.toggle": "切换主题",
         "hero.eyebrow": "macOS 和 Windows · 公测期免费",
         "hero.title": '你的剪贴板，<br /><span class="gradient">在局域网中无处不在。</span>',
         "hero.subtitle": "一款轻量的菜单栏应用，在 Mac 和 PC 之间即时同步文本、图片和文件，还能让它们共享一套鼠标和键盘 — 基于 WebSocket，即时、加密、无需云端。",
