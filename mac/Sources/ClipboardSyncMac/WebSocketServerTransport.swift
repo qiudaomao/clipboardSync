@@ -11,6 +11,9 @@ final class WebSocketServerTransport: Transport {
     private let queue = DispatchQueue(label: "ClipboardSyncMac.server")
     private var listener: NWListener?
     private var peers: [ObjectIdentifier: ServerPeer] = [:]
+    /// This machine's own device id. Messages routed `to` it are already delivered locally via
+    /// `onMessage`, so the relay must not fall back to broadcasting them at other peers.
+    var localDeviceId: String?
 
     init(port: Int) {
         self.port = port
@@ -61,9 +64,9 @@ final class WebSocketServerTransport: Transport {
         }
     }
 
-    func send(_ message: String) {
+    func send(_ message: String, to deviceId: String?) {
         queue.async {
-            self.broadcast(message, excluding: nil)
+            self.deliver(message, to: deviceId, excluding: nil)
         }
     }
 
@@ -75,8 +78,15 @@ final class WebSocketServerTransport: Transport {
             guard let self else {
                 return
             }
+            // Envelope routing hints are plaintext, so the relay can learn which connection
+            // belongs to which device (`from`) and deliver targeted traffic (`to`) to just that
+            // peer instead of broadcasting file chunks and tunnel data to everyone.
+            let routing = try? JSONDecoder().decode(EnvelopeRouting.self, from: Data(text.utf8))
+            if let from = routing?.from, !from.isEmpty {
+                peer?.deviceId = from
+            }
             self.onMessage?(text)
-            self.broadcast(text, excluding: peer)
+            self.deliver(text, to: routing?.to, excluding: peer)
         }
         peer.onReady = { [weak self] in
             self?.pushStatus()
@@ -93,7 +103,22 @@ final class WebSocketServerTransport: Transport {
         peer.start()
     }
 
-    private func broadcast(_ message: String, excluding excluded: ServerPeer?) {
+    /// Sends `message` to the one ready peer registered under the `to` device id, or to every
+    /// ready peer (except `excluding`) when the target is absent or not (yet) known — a peer that
+    /// hasn't sent anything since connecting has no registered device id, and the receiver-side
+    /// target filter makes the broadcast fallback harmless.
+    private func deliver(_ message: String, to deviceId: String?, excluding excluded: ServerPeer?) {
+        if let deviceId, !deviceId.isEmpty {
+            if deviceId == localDeviceId {
+                return
+            }
+            if let target = peers.values.first(where: { $0.deviceId == deviceId && $0.isReady }) {
+                if target !== excluded {
+                    target.sendText(message)
+                }
+                return
+            }
+        }
         for peer in peers.values where peer !== excluded && peer.isReady {
             peer.sendText(message)
         }
@@ -110,12 +135,19 @@ private final class ServerPeer {
     var onReady: (() -> Void)?
     var onText: ((String) -> Void)?
     var onClose: (() -> Void)?
+    /// The device id this connection last announced via an envelope's `from` hint, once known.
+    var deviceId: String?
     private(set) var isReady = false
 
     private let connection: NWConnection
     private let queue: DispatchQueue
     private var didClose = false
     private var handshakeBuffer = Data()
+    /// Reassembly state for a fragmented message (RFC 6455 §5.4): the first frame's opcode and the
+    /// fragment payloads accumulated so far. Clients are allowed to split any message into
+    /// continuation frames — Apple's own WebSocket client does for large messages.
+    private var fragmentOpcode: UInt8?
+    private var fragmentBuffer = Data()
 
     init(connection: NWConnection, queue: DispatchQueue) {
         self.connection = connection
@@ -210,6 +242,7 @@ private final class ServerPeer {
                 return
             }
 
+            let fin = (header[0] & 0x80) != 0
             let opcode = header[0] & 0x0f
             let masked = (header[1] & 0x80) != 0
             let firstLength = UInt64(header[1] & 0x7f)
@@ -222,7 +255,7 @@ private final class ServerPeer {
                         return
                     }
                     let length = (UInt64(data[0]) << 8) | UInt64(data[1])
-                    self.receivePayload(opcode: opcode, masked: masked, length: length)
+                    self.receivePayload(fin: fin, opcode: opcode, masked: masked, length: length)
                 }
             case 127:
                 self.receiveExact(8) { [weak self] data in
@@ -231,15 +264,15 @@ private final class ServerPeer {
                         return
                     }
                     let length = data.reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
-                    self.receivePayload(opcode: opcode, masked: masked, length: length)
+                    self.receivePayload(fin: fin, opcode: opcode, masked: masked, length: length)
                 }
             default:
-                self.receivePayload(opcode: opcode, masked: masked, length: firstLength)
+                self.receivePayload(fin: fin, opcode: opcode, masked: masked, length: firstLength)
             }
         }
     }
 
-    private func receivePayload(opcode: UInt8, masked: Bool, length: UInt64) {
+    private func receivePayload(fin: Bool, opcode: UInt8, masked: Bool, length: UInt64) {
         guard length <= UInt64(ClipboardLimits.maxWebSocketMessageBytes) else {
             close()
             return
@@ -251,22 +284,23 @@ private final class ServerPeer {
                 return
             }
 
+            // Control frames (close/ping/pong) are never fragmented and may interleave with the
+            // fragments of a data message, so handle them before any reassembly bookkeeping.
             if opcode == 0x8 {
                 self.close()
                 return
             }
-
             if opcode == 0x9 {
                 self.sendFrame(opcode: 0xA, payload: payload)
                 self.receiveFrame()
                 return
             }
-
-            if opcode == 0x1, let text = String(data: payload, encoding: .utf8) {
-                self.onText?(text)
+            if opcode == 0xA {
+                self.receiveFrame()
+                return
             }
 
-            self.receiveFrame()
+            self.handleDataFrame(fin: fin, opcode: opcode, payload: payload)
         }
 
         if masked {
@@ -288,6 +322,53 @@ private final class ServerPeer {
             }
         } else {
             receiveExact(Int(length), completion: readPayload)
+        }
+    }
+
+    /// Reassembles data frames into messages: a frame with FIN set and a data opcode is a whole
+    /// message; otherwise fragments accumulate until the continuation frame with FIN arrives.
+    /// Out-of-order fragments (a continuation with nothing started, or a new data opcode while a
+    /// message is still open) and oversized reassembled messages close the connection.
+    private func handleDataFrame(fin: Bool, opcode: UInt8, payload: Data) {
+        switch opcode {
+        case 0x1, 0x2:
+            guard fragmentOpcode == nil else {
+                close()
+                return
+            }
+            if fin {
+                deliver(opcode: opcode, payload: payload)
+            } else {
+                fragmentOpcode = opcode
+                fragmentBuffer = payload
+            }
+        case 0x0:
+            guard let firstOpcode = fragmentOpcode else {
+                close()
+                return
+            }
+            fragmentBuffer.append(payload)
+            guard fragmentBuffer.count <= ClipboardLimits.maxWebSocketMessageBytes else {
+                close()
+                return
+            }
+            if fin {
+                let message = fragmentBuffer
+                fragmentOpcode = nil
+                fragmentBuffer = Data()
+                deliver(opcode: firstOpcode, payload: message)
+            }
+        default:
+            close()
+            return
+        }
+
+        receiveFrame()
+    }
+
+    private func deliver(opcode: UInt8, payload: Data) {
+        if opcode == 0x1, let text = String(data: payload, encoding: .utf8) {
+            onText?(text)
         }
     }
 

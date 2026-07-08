@@ -30,7 +30,10 @@ internal sealed class ClipboardMonitor : IDisposable
         timer.Start();
     }
 
-    public ClipboardContent? ReadFilesForManualSend()
+    /// The file paths currently on the clipboard, for a chunked transfer. Only regular files are
+    /// supported; folders surface a skip status and return null. Size is deliberately not checked —
+    /// transfers stream disk-to-disk.
+    public List<string>? ReadFilePathsForManualSend()
     {
         try
         {
@@ -39,12 +42,48 @@ internal sealed class ClipboardMonitor : IDisposable
                 return null;
             }
 
-            var files = Clipboard.GetFileDropList().Cast<string>().ToList();
-            return files.Count == 0 ? null : ReadFileContent(files);
+            var paths = Clipboard.GetFileDropList().Cast<string>().ToList();
+            if (paths.Count == 0)
+            {
+                return null;
+            }
+
+            foreach (var path in paths)
+            {
+                if (!File.Exists(path))
+                {
+                    LocalSkipped?.Invoke(AppText.Text("status.folderUnsupported"));
+                    return null;
+                }
+            }
+            return paths;
         }
         catch (ExternalException)
         {
             return null;
+        }
+    }
+
+    /// Puts files a completed transfer already wrote to disk onto the clipboard as a file-drop list.
+    public bool ApplyReceivedFilePaths(List<string> paths)
+    {
+        try
+        {
+            var fileDropList = new StringCollection();
+            foreach (var path in paths)
+            {
+                fileDropList.Add(path);
+            }
+            if (fileDropList.Count == 0)
+            {
+                return false;
+            }
+            Clipboard.SetFileDropList(fileDropList);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -124,54 +163,6 @@ internal sealed class ClipboardMonitor : IDisposable
         {
             return null;
         }
-    }
-
-    private ClipboardContent? ReadFileContent(IEnumerable<string> paths)
-    {
-        var pathList = paths.ToList();
-        var skippedKey = "files:" + string.Join("|", pathList);
-        var files = new List<ClipboardFilePayload>();
-        foreach (var path in pathList)
-        {
-            if (!File.Exists(path))
-            {
-                NotifySkipped(AppText.Text("status.folderUnsupported"), skippedKey);
-                return null;
-            }
-
-            var info = new FileInfo(path);
-            if (info.Length > ClipboardLimits.MaxFileBytes)
-            {
-                NotifySkipped(AppText.Text("status.fileTooLarge"), skippedKey);
-                return null;
-            }
-
-            byte[] data;
-            try
-            {
-                data = File.ReadAllBytes(path);
-            }
-            catch
-            {
-                NotifySkipped(AppText.Text("status.fileReadFailed"), skippedKey);
-                return null;
-            }
-
-            if (data.Length > ClipboardLimits.MaxFileBytes)
-            {
-                NotifySkipped(AppText.Text("status.fileTooLarge"), skippedKey);
-                return null;
-            }
-
-            files.Add(new ClipboardFilePayload
-            {
-                Name = SafeFileName(Path.GetFileName(path), $"clipboard-file-{files.Count + 1}"),
-                DataBase64 = Convert.ToBase64String(data),
-                Size = data.Length
-            });
-        }
-
-        return files.Count == 0 ? null : ClipboardContent.FileContent(files);
     }
 
     private ClipboardContent? ReadImageContent()

@@ -8,6 +8,7 @@ using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -21,7 +22,11 @@ internal interface ISyncTransport : IDisposable
 
     void Start();
     void Stop();
-    Task SendAsync(string message);
+    /// <c>to</c> is an optional routing hint naming the intended receiver's device id. A server
+    /// transport delivers the message to just that peer's connection when it knows which one that
+    /// is (falling back to broadcast); a client transport ignores it — its server relays by the
+    /// same hint carried inside the message envelope.
+    Task SendAsync(string message, string? to = null);
 }
 
 internal sealed class ClientTransport : ISyncTransport
@@ -61,8 +66,10 @@ internal sealed class ClientTransport : ISyncTransport
         StatusChanged?.Invoke(AppText.Text("status.stopped"));
     }
 
-    public async Task SendAsync(string message)
+    public async Task SendAsync(string message, string? to = null)
     {
+        // A client has a single connection to its server; the server relays targeted messages
+        // using the routing hint inside the envelope itself.
         var activeSocket = socket;
         if (activeSocket?.State != WebSocketState.Open)
         {
@@ -188,10 +195,20 @@ internal sealed class ClientTransport : ISyncTransport
 
 internal sealed class ServerTransport : ISyncTransport
 {
+    private static readonly JsonSerializerOptions RoutingJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+
     private readonly int port;
     private readonly ConcurrentDictionary<Guid, ServerPeer> peers = new();
     private CancellationTokenSource? cts;
     private TcpListener? listener;
+
+    /// This machine's own device id. Messages routed to it are already delivered locally via
+    /// MessageReceived, so the relay must not fall back to broadcasting them at other peers.
+    public string? LocalDeviceId { get; set; }
 
     public event Action<string>? StatusChanged;
     public event Action<string>? MessageReceived;
@@ -233,9 +250,9 @@ internal sealed class ServerTransport : ISyncTransport
         StatusChanged?.Invoke(AppText.Text("status.stopped"));
     }
 
-    public Task SendAsync(string message)
+    public Task SendAsync(string message, string? to = null)
     {
-        return BroadcastAsync(message, null);
+        return DeliverAsync(message, to, excludedPeer: null);
     }
 
     public void Dispose()
@@ -257,6 +274,15 @@ internal sealed class ServerTransport : ISyncTransport
 
                 peer.TextReceived += async text =>
                 {
+                    // Envelope routing hints are plaintext, so the relay can learn which
+                    // connection belongs to which device (From) and deliver targeted traffic (To)
+                    // to just that peer instead of broadcasting file chunks and tunnel data to
+                    // everyone.
+                    var routing = ParseRouting(text);
+                    if (!string.IsNullOrEmpty(routing?.From))
+                    {
+                        peer.DeviceId = routing!.From;
+                    }
                     try
                     {
                         MessageReceived?.Invoke(text);
@@ -265,7 +291,7 @@ internal sealed class ServerTransport : ISyncTransport
                     {
                         StatusChanged?.Invoke(AppText.Text("status.messageHandlerFailed"));
                     }
-                    await BroadcastAsync(text, id).ConfigureAwait(false);
+                    await DeliverAsync(text, routing?.To, id).ConfigureAwait(false);
                 };
                 peer.Ready += PushStatus;
                 peer.Closed += () =>
@@ -285,6 +311,52 @@ internal sealed class ServerTransport : ISyncTransport
                 StatusChanged?.Invoke(AppText.Text("status.serverAcceptFailed"));
             }
         }
+    }
+
+    private static EnvelopeRouting? ParseRouting(string message)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<EnvelopeRouting>(message, RoutingJsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// Sends the message to the one ready peer registered under the <c>to</c> device id, or to
+    /// every ready peer (except <c>excludedPeer</c>) when the target is absent or not (yet)
+    /// known — a peer that hasn't sent anything since connecting has no registered device id, and
+    /// the receiver-side target filter makes the broadcast fallback harmless.
+    private async Task DeliverAsync(string message, string? to, Guid? excludedPeer)
+    {
+        if (!string.IsNullOrEmpty(to))
+        {
+            if (to == LocalDeviceId)
+            {
+                return;
+            }
+            var target = peers.FirstOrDefault(item => item.Value.DeviceId == to && item.Value.IsReady);
+            if (target.Value is not null)
+            {
+                if (excludedPeer.HasValue && target.Key == excludedPeer.Value)
+                {
+                    return;
+                }
+                try
+                {
+                    await target.Value.SendTextAsync(message).ConfigureAwait(false);
+                }
+                catch
+                {
+                    target.Value.Close();
+                }
+                return;
+            }
+        }
+
+        await BroadcastAsync(message, excludedPeer).ConfigureAwait(false);
     }
 
     private async Task BroadcastAsync(string message, Guid? excludedPeer)
@@ -326,8 +398,15 @@ internal sealed class ServerPeer
     private readonly NetworkStream stream;
     private readonly SemaphoreSlim sendLock = new(1, 1);
     private bool closed;
+    // Reassembly state for a fragmented message (RFC 6455 §5.4): the first frame's opcode and the
+    // fragment payloads accumulated so far. Clients are allowed to split any message into
+    // continuation frames — Apple's WebSocket client does for large messages.
+    private byte? fragmentOpcode;
+    private MemoryStream? fragmentBuffer;
 
     public bool IsReady { get; private set; }
+    /// The device id this connection last announced via an envelope's From hint, once known.
+    public string? DeviceId { get; set; }
     public event Action? Ready;
     public event Func<string, Task>? TextReceived;
     public event Action? Closed;
@@ -439,6 +518,7 @@ internal sealed class ServerPeer
             return FrameResult.Close;
         }
 
+        var fin = (header[0] & 0x80) != 0;
         var opcode = (byte)(header[0] & 0x0f);
         var masked = (header[1] & 0x80) != 0;
         var length = (ulong)(header[1] & 0x7f);
@@ -491,6 +571,8 @@ internal sealed class ServerPeer
             }
         }
 
+        // Control frames (close/ping/pong) are never fragmented and may interleave with the
+        // fragments of a data message, so handle them before any reassembly bookkeeping.
         if (opcode == 0x8)
         {
             return FrameResult.Close;
@@ -502,12 +584,56 @@ internal sealed class ServerPeer
             return FrameResult.Empty;
         }
 
-        if (opcode == 0x1)
+        if (opcode == 0xA)
         {
-            return new FrameResult(false, Encoding.UTF8.GetString(payload));
+            return FrameResult.Empty;
         }
 
-        return FrameResult.Empty;
+        return HandleDataFrame(fin, opcode, payload);
+    }
+
+    /// Reassembles data frames into messages: a frame with FIN set and a data opcode is a whole
+    /// message; otherwise fragments accumulate until the continuation frame with FIN arrives.
+    /// Out-of-order fragments (a continuation with nothing started, or a new data opcode while a
+    /// message is still open) and oversized reassembled messages close the connection.
+    private FrameResult HandleDataFrame(bool fin, byte opcode, byte[] payload)
+    {
+        switch (opcode)
+        {
+            case 0x1 or 0x2:
+                if (fragmentOpcode is not null)
+                {
+                    return FrameResult.Close;
+                }
+                if (fin)
+                {
+                    return opcode == 0x1 ? new FrameResult(false, Encoding.UTF8.GetString(payload)) : FrameResult.Empty;
+                }
+                fragmentOpcode = opcode;
+                fragmentBuffer = new MemoryStream();
+                fragmentBuffer.Write(payload);
+                return FrameResult.Empty;
+            case 0x0:
+                if (fragmentOpcode is not { } firstOpcode || fragmentBuffer is null)
+                {
+                    return FrameResult.Close;
+                }
+                fragmentBuffer.Write(payload);
+                if (fragmentBuffer.Length > ClipboardLimits.MaxWebSocketMessageBytes)
+                {
+                    return FrameResult.Close;
+                }
+                if (!fin)
+                {
+                    return FrameResult.Empty;
+                }
+                var message = fragmentBuffer.ToArray();
+                fragmentOpcode = null;
+                fragmentBuffer = null;
+                return firstOpcode == 0x1 ? new FrameResult(false, Encoding.UTF8.GetString(message)) : FrameResult.Empty;
+            default:
+                return FrameResult.Close;
+        }
     }
 
     private async Task SendFrameAsync(byte opcode, byte[] payload, CancellationToken token)

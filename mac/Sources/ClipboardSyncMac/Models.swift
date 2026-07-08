@@ -66,6 +66,11 @@ enum AppText {
             "status.copyFilesFirst": "copy files first",
             "status.fileTransferStarted": "file transfer started",
             "status.filesReceived": "files received",
+            "status.fileSendProgress": "sending files to %@… %d%%",
+            "status.fileReceiveProgress": "receiving files… %d%%",
+            "status.filesSent": "files sent to %@",
+            "status.fileTransferFailed": "file transfer failed: %@",
+            "status.fileTransferBusy": "a file transfer is already running",
             "status.setSyncPassword": "set sync password",
             "status.setServerLanIp": "set server LAN IP",
             "status.useLanIp": "use LAN IP, not 127.0.0.1",
@@ -91,6 +96,7 @@ enum AppText {
             "menu.noClipboardHistory": "No clipboard history",
             "menu.clearClipboardHistory": "Clear Clipboard History",
             "menu.sendFiles": "Send Files from Clipboard",
+            "menu.noPeers": "No Connected Devices",
             "menu.enableInputSharing": "Enable Input Sharing",
             "menu.controlDevice": "Control Device",
             "menu.controlDeviceWithTitle": "Control Device: %@",
@@ -208,6 +214,11 @@ enum AppText {
             "status.copyFilesFirst": "请先复制文件",
             "status.fileTransferStarted": "文件传输已开始",
             "status.filesReceived": "已收到文件",
+            "status.fileSendProgress": "正在发送文件到 %@… %d%%",
+            "status.fileReceiveProgress": "正在接收文件… %d%%",
+            "status.filesSent": "文件已发送到 %@",
+            "status.fileTransferFailed": "文件传输失败：%@",
+            "status.fileTransferBusy": "已有文件传输正在进行",
             "status.setSyncPassword": "请设置同步密码",
             "status.setServerLanIp": "请设置服务器局域网 IP",
             "status.useLanIp": "请使用局域网 IP，不要用 127.0.0.1",
@@ -233,6 +244,7 @@ enum AppText {
             "menu.noClipboardHistory": "无剪贴板历史",
             "menu.clearClipboardHistory": "清除剪贴板历史",
             "menu.sendFiles": "从剪贴板发送文件",
+            "menu.noPeers": "无已连接设备",
             "menu.enableInputSharing": "启用输入共享",
             "menu.controlDevice": "控制设备",
             "menu.controlDeviceWithTitle": "控制设备：%@",
@@ -350,6 +362,11 @@ enum AppText {
             "status.copyFilesFirst": "먼저 파일을 복사하세요",
             "status.fileTransferStarted": "파일 전송 시작됨",
             "status.filesReceived": "파일을 받았습니다",
+            "status.fileSendProgress": "%@(으)로 파일 전송 중… %d%%",
+            "status.fileReceiveProgress": "파일 수신 중… %d%%",
+            "status.filesSent": "%@(으)로 파일을 보냈습니다",
+            "status.fileTransferFailed": "파일 전송 실패: %@",
+            "status.fileTransferBusy": "이미 파일 전송이 진행 중입니다",
             "status.setSyncPassword": "동기화 암호를 설정하세요",
             "status.setServerLanIp": "서버 LAN IP를 설정하세요",
             "status.useLanIp": "127.0.0.1 대신 LAN IP를 사용하세요",
@@ -375,6 +392,7 @@ enum AppText {
             "menu.noClipboardHistory": "클립보드 기록 없음",
             "menu.clearClipboardHistory": "클립보드 기록 지우기",
             "menu.sendFiles": "클립보드에서 파일 보내기",
+            "menu.noPeers": "연결된 기기 없음",
             "menu.enableInputSharing": "입력 공유 활성화",
             "menu.controlDevice": "제어 장치",
             "menu.controlDeviceWithTitle": "제어 장치: %@",
@@ -492,6 +510,11 @@ enum AppText {
             "status.copyFilesFirst": "先にファイルをコピーしてください",
             "status.fileTransferStarted": "ファイル転送を開始しました",
             "status.filesReceived": "ファイルを受信しました",
+            "status.fileSendProgress": "%@ へファイル送信中… %d%%",
+            "status.fileReceiveProgress": "ファイル受信中… %d%%",
+            "status.filesSent": "%@ へファイルを送信しました",
+            "status.fileTransferFailed": "ファイル転送に失敗しました: %@",
+            "status.fileTransferBusy": "ファイル転送は既に実行中です",
             "status.setSyncPassword": "同期パスワードを設定してください",
             "status.setServerLanIp": "サーバーの LAN IP を設定してください",
             "status.useLanIp": "127.0.0.1 ではなく LAN IP を使用してください",
@@ -517,6 +540,7 @@ enum AppText {
             "menu.noClipboardHistory": "クリップボード履歴はありません",
             "menu.clearClipboardHistory": "クリップボード履歴を消去",
             "menu.sendFiles": "クリップボードからファイルを送信",
+            "menu.noPeers": "接続中のデバイスなし",
             "menu.enableInputSharing": "入力共有を有効化",
             "menu.controlDevice": "制御デバイス",
             "menu.controlDeviceWithTitle": "制御デバイス: %@",
@@ -775,6 +799,30 @@ struct EncryptedEnvelope: Codable {
     let nonce: String
     let ciphertext: String
     let tag: String
+    /// Plaintext routing hints so a relaying server can deliver targeted traffic (file-transfer
+    /// chunks, tunnel data) to just the matching peer connection instead of broadcasting it.
+    /// `from` teaches the server which connection belongs to which device id; `to` names the
+    /// intended receiver. Optional — absent on messages from older peers and on broadcasts — and
+    /// advisory only: receivers still filter by the encrypted payload's own `target`.
+    var from: String?
+    var to: String?
+
+    init(type: String, version: Int, salt: String, nonce: String, ciphertext: String, tag: String, from: String? = nil, to: String? = nil) {
+        self.type = type
+        self.version = version
+        self.salt = salt
+        self.nonce = nonce
+        self.ciphertext = ciphertext
+        self.tag = tag
+        self.from = from
+        self.to = to
+    }
+}
+
+/// Just the routing hints of an encrypted envelope, for relays that must not (and cannot) decrypt.
+struct EnvelopeRouting: Codable {
+    let from: String?
+    let to: String?
 }
 
 struct MessageHeader: Codable {
@@ -1135,6 +1183,34 @@ struct TunnelMessage: Codable {
     let host: String?
     let port: Int?
     let dataBase64: String?
+    let reason: String?
+    let sentAt: TimeInterval
+}
+
+/// One file's metadata inside a transfer offer. `size` is the raw byte count on disk at offer
+/// time; the sender re-checks it while streaming and aborts if the file changed underneath it.
+struct FileTransferFileInfo: Codable, Equatable {
+    let name: String
+    let size: Int64
+}
+
+/// One step of a chunked, targeted file transfer. `offer` proposes a file list, `accept` opens the
+/// transfer, `chunk` carries one piece of file data (acknowledged by the receiver with `ack` for
+/// windowed backpressure), `fileDone` closes one file with its SHA-256, `done` is the receiver's
+/// final confirmation, and `cancel` aborts in either direction. Both ends stream disk-to-disk, so
+/// there is no whole-file buffering and no hard size limit. Like `tunnel` messages, `target`
+/// filtering happens on the receiver: messages addressed to another device are ignored.
+struct FileTransferMessage: Codable {
+    let type: String
+    let origin: String
+    let target: String
+    let kind: String
+    let transferId: String
+    let files: [FileTransferFileInfo]?
+    let fileIndex: Int?
+    let chunkIndex: Int?
+    let dataBase64: String?
+    let sha256: String?
     let reason: String?
     let sentAt: TimeInterval
 }
