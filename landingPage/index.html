@@ -269,6 +269,44 @@
   .highlight-card h3 { font-size: 17px; margin: 0 0 8px; letter-spacing: -0.01em; }
   .highlight-card p { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 0; }
 
+  /* Spotlight (Port Forward) */
+  section.spotlight { padding: 10px 0 90px; }
+  .spotlight-grid {
+    display: grid;
+    grid-template-columns: 0.92fr 1.08fr;
+    gap: 44px;
+    align-items: center;
+  }
+  .spotlight-copy .eyebrow { margin-bottom: 18px; }
+  .spotlight-copy h2 {
+    font-size: clamp(26px, 3.4vw, 34px);
+    letter-spacing: -0.02em;
+    margin: 0 0 14px;
+    font-weight: 800;
+  }
+  .spotlight-copy p {
+    color: var(--muted);
+    font-size: 16px;
+    line-height: 1.65;
+    margin: 0 0 24px;
+  }
+  .spotlight-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 13px; }
+  .spotlight-list li {
+    display: flex;
+    gap: 11px;
+    align-items: flex-start;
+    font-size: 14.5px;
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .spotlight-list .check {
+    flex: none;
+    color: var(--accent-3);
+    font-weight: 800;
+    margin-top: 1px;
+  }
+  .spotlight-shot { align-self: center; }
+
   /* Features */
   section.features { padding: 20px 0 100px; }
   .section-head { text-align: center; margin-bottom: 56px; }
@@ -336,6 +374,7 @@
   @media (max-width: 860px) {
     .shots { grid-template-columns: 1fr; }
     .feature-grid { grid-template-columns: 1fr 1fr; }
+    .spotlight-grid { grid-template-columns: 1fr; gap: 26px; }
   }
   @media (max-width: 560px) {
     .highlight-grid { grid-template-columns: 1fr; }
@@ -378,6 +417,7 @@
     </div>
     <nav class="links">
       <a href="#showcase" data-i18n="nav.preview">Preview</a>
+      <a href="#portforward" data-i18n="nav.portforward">Port Forward</a>
       <a href="#features" data-i18n="nav.features">Features</a>
     </nav>
     <div class="nav-actions">
@@ -467,6 +507,25 @@
   </div>
 </section>
 
+<section class="spotlight wrap" id="portforward">
+  <div class="spotlight-grid">
+    <div class="spotlight-copy">
+      <div class="eyebrow"><span class="dot"></span> <span data-i18n="pf.eyebrow">New</span></div>
+      <h2 data-i18n="pf.t">Port forwarding, built in</h2>
+      <p data-i18n="pf.p">Reach a service on any of your devices — SSH, a remote desktop, a dev server, a router's admin page — as if it were local. Connections tunnel over the same encrypted sync link, so there's nothing extra to expose or configure.</p>
+      <ul class="spotlight-list">
+        <li><span class="check">✓</span> <span data-i18n="pf.b1">Map In (a device + port) to Out (another device + host + port), with a note per rule.</span></li>
+        <li><span class="check">✓</span> <span data-i18n="pf.b2">Listen on loopback only, or open a port to your whole LAN with one toggle.</span></li>
+        <li><span class="check">✓</span> <span data-i18n="pf.b3">A live status light shows every forward — listening, failed, or offline — at a glance.</span></li>
+      </ul>
+    </div>
+    <div class="shot-card spotlight-shot">
+      <img src="assets/port-forward.png" alt="Port Forward panel in Clipboard Sync, mapping ports between a Mac and a Windows PC" />
+      <div class="shot-label"><span data-i18n="pf.shot">Port Forward panel</span> <span class="badge" data-i18n="pf.badge">macOS &amp; Windows</span></div>
+    </div>
+  </div>
+</section>
+
 <section class="features wrap" id="features">
   <div class="section-head">
     <h2 data-i18n="feat.head">Everything you need, nothing you don't</h2>
@@ -502,6 +561,11 @@
       <div class="feature-icon">🖱️</div>
       <h3 data-i18n="f6.t">Mouse &amp; keyboard sharing</h3>
       <p data-i18n="f6.p">Control multiple machines with a single mouse and keyboard, seamlessly.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🚇</div>
+      <h3 data-i18n="f7.t">Port forwarding</h3>
+      <p data-i18n="f7.p">Tunnel a TCP port from one device to another over the same encrypted connection — reach SSH, VNC, or a dev server anywhere.</p>
     </div>
   </div>
 </section>
@@ -542,6 +606,7 @@
       en: {
         "page.title": "Clipboard Sync — Native clipboard sync over LAN",
         "nav.preview": "Preview",
+        "nav.portforward": "Port Forward",
         "nav.features": "Features",
         "nav.download": "Download",
         "nav.reportIssue": "Report an issue on GitHub",
@@ -579,6 +644,16 @@
         "f5.p": "Every payload is encrypted with your password, so only your devices can read it.",
         "f6.t": "Mouse & keyboard sharing",
         "f6.p": "Control multiple machines with a single mouse and keyboard, seamlessly.",
+        "f7.t": "Port forwarding",
+        "f7.p": "Tunnel a TCP port from one device to another over the same encrypted connection — reach SSH, VNC, or a dev server anywhere.",
+        "pf.eyebrow": "New",
+        "pf.t": "Port forwarding, built in",
+        "pf.p": "Reach a service on any of your devices — SSH, a remote desktop, a dev server, a router's admin page — as if it were local. Connections tunnel over the same encrypted sync link, so there's nothing extra to expose or configure.",
+        "pf.b1": "Map In (a device + port) to Out (another device + host + port), with a note per rule.",
+        "pf.b2": "Listen on loopback only, or open a port to your whole LAN with one toggle.",
+        "pf.b3": "A live status light shows every forward — listening, failed, or offline — at a glance.",
+        "pf.shot": "Port Forward panel",
+        "pf.badge": "macOS & Windows",
         "cta.t": "Sync your clipboard in minutes",
         "cta.p": "Install on macOS and Windows, pair your devices, and start copying across your network.",
         "footer.text": "Clipboard Sync — native clipboard sync over WebSocket."
@@ -586,6 +661,7 @@
       zh: {
         "page.title": "剪贴板同步 — 局域网原生剪贴板同步",
         "nav.preview": "预览",
+        "nav.portforward": "端口转发",
         "nav.features": "功能",
         "nav.download": "下载",
         "nav.reportIssue": "在 GitHub 上报告问题",
@@ -623,6 +699,16 @@
         "f5.p": "所有数据都用你的密码加密，只有你的设备才能读取。",
         "f6.t": "鼠标键盘共享",
         "f6.p": "用一套鼠标和键盘无缝控制多台机器。",
+        "f7.t": "端口转发",
+        "f7.p": "通过同一条加密连接，把一台设备的 TCP 端口隧道转发到另一台 — 随时访问任意设备上的 SSH、VNC 或开发服务器。",
+        "pf.eyebrow": "全新",
+        "pf.t": "内置端口转发",
+        "pf.p": "像访问本地服务一样，访问你任意设备上运行的服务 — SSH、远程桌面、开发服务器、路由器管理页面。连接通过同一条加密同步链路隧道传输，无需额外暴露端口或配置。",
+        "pf.b1": "将“入口”（设备 + 端口）映射到“出口”（另一台设备 + 主机 + 端口），每条规则可加备注。",
+        "pf.b2": "仅监听本机回环，或一键开放端口给整个局域网。",
+        "pf.b3": "实时状态灯一眼看清每条转发 — 正在监听、失败或离线。",
+        "pf.shot": "端口转发面板",
+        "pf.badge": "macOS 和 Windows",
         "cta.t": "几分钟内同步你的剪贴板",
         "cta.p": "在 macOS 和 Windows 上安装，配对设备，开始跨网络复制粘贴。",
         "footer.text": "剪贴板同步 — 基于 WebSocket 的原生剪贴板同步。"
