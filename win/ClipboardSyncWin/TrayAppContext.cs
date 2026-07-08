@@ -31,6 +31,8 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly Dictionary<string, InputDeviceMenuDevice> inputDevices = [];
     private readonly ToolStripMenuItem clientModeItem;
     private readonly ToolStripMenuItem serverModeItem;
+    private readonly ToolStripMenuItem startStopItem;
+    private readonly ToolStripMenuItem launchAtLoginItem;
     private readonly ClipboardMonitor clipboardMonitor;
     private readonly ScreenLayoutStore screenLayoutStore = new();
     private readonly InputSharingCoordinator inputCoordinator;
@@ -103,6 +105,8 @@ internal sealed class TrayAppContext : ApplicationContext
         controlDeviceItem = new ToolStripMenuItem(AppText.Text("menu.controlDevice"));
         clientModeItem = new ToolStripMenuItem(AppText.Text("menu.clientMode"), null, (_, _) => SetMode(SyncMode.Client));
         serverModeItem = new ToolStripMenuItem(AppText.Text("menu.serverMode"), null, (_, _) => SetMode(SyncMode.Server));
+        startStopItem = new ToolStripMenuItem(AppText.Text("menu.start"), null, (_, _) => ToggleTransport());
+        launchAtLoginItem = new ToolStripMenuItem(AppText.Text("menu.launchAtLogin"), null, (_, _) => ToggleLaunchAtLogin());
         trayIcon = LoadTrayIcon();
         inputCoordinator = new InputSharingCoordinator(config.DeviceId, screenLayoutStore);
         updateController = new WinUpdateController(trayIcon, CloseForUpdate);
@@ -313,9 +317,10 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(checkForUpdatesItem);
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.about"), null, (_, _) => ShowAbout()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.homepage"), null, (_, _) => OpenProjectHomepage()));
-        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.start"), null, (_, _) => RestartTransport()));
+        menu.Items.Add(startStopItem);
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.restart"), null, (_, _) => RestartTransport()));
-        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.stop"), null, (_, _) => StopTransport()));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(launchAtLoginItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.exit"), null, (_, _) => ExitThread()));
         return menu;
@@ -374,6 +379,8 @@ internal sealed class TrayAppContext : ApplicationContext
         clientModeItem.Checked = config.Mode == SyncMode.Client;
         serverModeItem.Checked = config.Mode == SyncMode.Server;
         inputSharingItem.Checked = config.InputSharingEnabled;
+        startStopItem.Text = AppText.Text(transport is null ? "menu.start" : "menu.stop");
+        launchAtLoginItem.Checked = IsLaunchAtLoginEnabled();
         RefreshControlDeviceMenu();
         RefreshHistoryMenu();
     }
@@ -958,6 +965,48 @@ internal sealed class TrayAppContext : ApplicationContext
         UpdateCursorReporting();
         UpdateInputCoordinator();
         status = AppText.Text("status.stopped");
+        UpdateMenu();
+    }
+
+    private void ToggleTransport()
+    {
+        if (transport is null)
+        {
+            RestartTransport();
+        }
+        else
+        {
+            StopTransport();
+        }
+    }
+
+    private const string RunRegistryKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string RunRegistryValueName = "ClipboardSync";
+
+    private static bool IsLaunchAtLoginEnabled()
+    {
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunRegistryKeyPath);
+        return key?.GetValue(RunRegistryValueName) is not null;
+    }
+
+    private void ToggleLaunchAtLogin()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunRegistryKeyPath);
+            if (key.GetValue(RunRegistryValueName) is null)
+            {
+                key.SetValue(RunRegistryValueName, $"\"{Application.ExecutablePath}\"");
+            }
+            else
+            {
+                key.DeleteValue(RunRegistryValueName, throwOnMissingValue: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            status = ex.Message;
+        }
         UpdateMenu();
     }
 

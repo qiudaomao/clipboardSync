@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ServiceManagement
 
 final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -31,6 +32,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusMenuItem = NSMenuItem()
     private var serverModeItem = NSMenuItem()
     private var clientModeItem = NSMenuItem()
+    private var startStopItem = NSMenuItem()
+    private var launchAtLoginItem = NSMenuItem()
     private var inputStatusMenuItem = NSMenuItem()
     private var inputSharingItem = NSMenuItem()
     private var controlDeviceMenuItem = NSMenuItem(title: AppText.text("menu.controlDevice"), action: nil, keyEquivalent: "")
@@ -302,17 +305,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         checkForUpdatesItem.target = self
         menu.addItem(checkForUpdatesItem)
 
-        let startItem = NSMenuItem(title: AppText.text("menu.start"), action: #selector(startTransport), keyEquivalent: "")
-        startItem.target = self
-        menu.addItem(startItem)
+        startStopItem = NSMenuItem(title: AppText.text("menu.start"), action: #selector(toggleTransport), keyEquivalent: "")
+        startStopItem.target = self
+        menu.addItem(startStopItem)
 
         let restartItem = NSMenuItem(title: AppText.text("menu.restart"), action: #selector(restartTransportFromMenu), keyEquivalent: "")
         restartItem.target = self
         menu.addItem(restartItem)
 
-        let stopItem = NSMenuItem(title: AppText.text("menu.stop"), action: #selector(stopTransport), keyEquivalent: "")
-        stopItem.target = self
-        menu.addItem(stopItem)
+        menu.addItem(NSMenuItem.separator())
+
+        launchAtLoginItem = NSMenuItem(title: AppText.text("menu.launchAtLogin"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchAtLoginItem.target = self
+        menu.addItem(launchAtLoginItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -334,6 +339,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         updateInputCoordinator(sendHello: true)
+        updateMenu()
     }
 
     @objc private func workspaceApplicationDidActivate(_ notification: Notification) {
@@ -351,6 +357,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clientModeItem.state = config.mode == .client ? .on : .off
         serverModeItem.state = config.mode == .server ? .on : .off
         inputSharingItem.state = config.inputSharingEnabled ? .on : .off
+        startStopItem.title = AppText.text(transport == nil ? "menu.start" : "menu.stop")
+        launchAtLoginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         refreshControlDeviceMenu()
         refreshHistoryMenu()
     }
@@ -740,8 +748,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         restartTransport()
     }
 
-    @objc private func startTransport() {
-        restartTransport()
+    @objc private func toggleTransport() {
+        if transport == nil {
+            restartTransport()
+        } else {
+            stopTransport()
+        }
     }
 
     @objc private func restartTransportFromMenu() {
@@ -756,6 +768,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateCursorReporting()
         updateInputCoordinator()
         statusText = AppText.text("status.stopped")
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            NSLog("Failed to toggle launch at login: \(error.localizedDescription)")
+        }
+        updateMenu()
     }
 
     @objc private func quit() {
@@ -887,10 +912,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch config.mode {
         case .client:
             guard !config.host.isEmpty else {
+                transport = nil
                 statusText = AppText.text("status.setServerLanIp")
                 return
             }
             guard !NetworkAddress.isLoopbackHost(config.host) else {
+                transport = nil
                 statusText = AppText.text("status.useLanIp")
                 return
             }
@@ -932,6 +959,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         transport = nextTransport
         nextTransport.start()
+        updateMenu()
     }
 
     @discardableResult
