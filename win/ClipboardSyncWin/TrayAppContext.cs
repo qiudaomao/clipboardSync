@@ -40,6 +40,9 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly Dictionary<string, PortForwardStatus> localForwardStatuses = [];
     private readonly Dictionary<string, PortForwardStatus> remoteForwardStatuses = [];
     private PortForwardForm? portForwardForm;
+    // The device-option list the open dialog's rows were last built from, so presence changes only
+    // rebuild the rows (which would discard in-progress edits) when the choices actually changed.
+    private string portForwardFormDeviceSignature = "";
     private readonly InputSharingCoordinator inputCoordinator;
     private readonly WinUpdateController updateController;
     private readonly object inputCoordinatorLock = new();
@@ -465,11 +468,16 @@ internal sealed class TrayAppContext : ApplicationContext
         var wasOffline = !inputDevices.TryGetValue(message.Origin, out var existing);
         var newInputEnabled = message.Enabled ?? existing?.InputEnabled;
         var inputEnabledChanged = newInputEnabled != existing?.InputEnabled;
+        var newName = message.DeviceName ?? existing?.Name;
+        var newAddress = message.DeviceAddress ?? existing?.Address;
+        // The name/address can resolve on a later message (e.g. a nameless message arrives first,
+        // then a hello): the Port Forward dialog needs to swap "Offline Device" for the real name.
+        var identityChanged = newName != existing?.Name || newAddress != existing?.Address;
         inputDevices[message.Origin] = new InputDeviceMenuDevice
         {
             Id = message.Origin,
-            Name = message.DeviceName ?? existing?.Name,
-            Address = message.DeviceAddress ?? existing?.Address,
+            Name = newName,
+            Address = newAddress,
             Role = message.Role ?? existing?.Role,
             InputEnabled = newInputEnabled,
             LastSeen = DateTimeOffset.UtcNow
@@ -480,13 +488,14 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             BroadcastLayout();
         }
-        if (layoutChanged || wasOffline || inputEnabledChanged)
+        if (layoutChanged || wasOffline || inputEnabledChanged || identityChanged)
         {
             RefreshScreenLayoutFormIfVisible();
             // The coordinator only sees peers through the enabled/name snapshots passed via
             // Update(). Without this, a peer that restarts (dropped from inputDevices, then
             // hellos back in) never re-enters those snapshots and the controller sits in
             // "waiting for peer screen" until some unrelated event refreshes the coordinator.
+            // UpdateInputCoordinator() also runs the signature-gated Port Forward dialog refresh.
             UpdateInputCoordinator();
         }
 
@@ -696,11 +705,16 @@ internal sealed class TrayAppContext : ApplicationContext
                 if (!string.IsNullOrEmpty(referencedId) && knownIds.Add(referencedId))
                 {
                     var shortId = referencedId.Length > 8 ? referencedId[..8] : referencedId;
-                    options.Add(new PortForwardForm.DeviceOption(referencedId, $"{AppText.Text("device.unknown")} ({shortId})"));
+                    options.Add(new PortForwardForm.DeviceOption(referencedId, $"{AppText.Text("forward.offlineDevice")} ({shortId})"));
                 }
             }
         }
         return options;
+    }
+
+    private static string PortForwardDeviceSignature(List<PortForwardForm.DeviceOption> options)
+    {
+        return string.Join("|", options.Select(option => $"{option.Id}:{option.Title}"));
     }
 
     private void ShowPortForward()
@@ -708,7 +722,9 @@ internal sealed class TrayAppContext : ApplicationContext
         // Modeless (like the screen layout window) so live status can be pushed while it stays open;
         // rebuilt each open so its rows reflect the current rule table and device list.
         portForwardForm?.Dispose();
-        portForwardForm = new PortForwardForm(portForwardStore.Snapshot(), PortForwardDeviceOptions());
+        var options = PortForwardDeviceOptions();
+        portForwardFormDeviceSignature = PortForwardDeviceSignature(options);
+        portForwardForm = new PortForwardForm(portForwardStore.Snapshot(), options);
         portForwardForm.RulesApplied += ApplyPortForwardRules;
         portForwardForm.FormClosed += (_, _) => portForwardForm = null;
         portForwardForm.UpdateStatuses(PortForwardDisplayStatuses());
@@ -803,9 +819,16 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             return new PortForwardForm.RuleStatus(PortForwardForm.StatusLight.Gray, AppText.Text("forward.statusDisabled"));
         }
+        // A forward only works when both ends are reachable: the In device has to be up to listen,
+        // and the Out device has to be up to receive. A peer (not us) is offline when it isn't in
+        // the online set. Gray out either way so a quit/offline peer stops reading as healthy.
         if (rule.InDeviceId != config.DeviceId && !online.Contains(rule.InDeviceId))
         {
             return new PortForwardForm.RuleStatus(PortForwardForm.StatusLight.Gray, AppText.Text("forward.statusOffline"));
+        }
+        if (rule.OutDeviceId != config.DeviceId && !online.Contains(rule.OutDeviceId))
+        {
+            return new PortForwardForm.RuleStatus(PortForwardForm.StatusLight.Gray, AppText.Text("forward.statusOutOffline"));
         }
         var status = rule.InDeviceId == config.DeviceId
             ? localForwardStatuses.GetValueOrDefault(rule.Id)
@@ -819,9 +842,23 @@ internal sealed class TrayAppContext : ApplicationContext
             : new PortForwardForm.RuleStatus(PortForwardForm.StatusLight.Red, AppText.Format("forward.statusFailed", status.Reason ?? ""));
     }
 
+    /// Refreshes the open dialog after a presence or status change: rebuilds the rows only when the
+    /// device options changed (a peer went offline/online, or its name resolved), otherwise just
+    /// recolors the status lights so in-progress edits survive.
     private void RefreshPortForwardFormIfVisible()
     {
-        if (portForwardForm is { IsDisposed: false, Visible: true })
+        if (portForwardForm is not { IsDisposed: false, Visible: true })
+        {
+            return;
+        }
+        var options = PortForwardDeviceOptions();
+        var signature = PortForwardDeviceSignature(options);
+        if (signature != portForwardFormDeviceSignature)
+        {
+            portForwardFormDeviceSignature = signature;
+            portForwardForm.SetRules(portForwardStore.Snapshot(), options, PortForwardDisplayStatuses());
+        }
+        else
         {
             portForwardForm.UpdateStatuses(PortForwardDisplayStatuses());
         }
@@ -874,12 +911,15 @@ internal sealed class TrayAppContext : ApplicationContext
         RefreshPortForwardFormRowsIfVisible();
     }
 
-    /// Rebuilds the dialog's rows from the current (possibly peer-updated) rule table, if it's open.
+    /// Forces a full rows rebuild from the current (possibly peer-updated) rule table, if the dialog
+    /// is open - used when the rule set itself changed rather than just presence.
     private void RefreshPortForwardFormRowsIfVisible()
     {
         if (portForwardForm is { IsDisposed: false, Visible: true })
         {
-            portForwardForm.SetRules(portForwardStore.Snapshot(), PortForwardDeviceOptions(), PortForwardDisplayStatuses());
+            var options = PortForwardDeviceOptions();
+            portForwardFormDeviceSignature = PortForwardDeviceSignature(options);
+            portForwardForm.SetRules(portForwardStore.Snapshot(), options, PortForwardDisplayStatuses());
         }
     }
 

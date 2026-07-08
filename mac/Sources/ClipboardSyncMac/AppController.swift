@@ -55,6 +55,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Listen state reported by peers for the rules they host, keyed by rule id.
     private var remoteForwardStatuses: [String: PortForwardStatus] = [:]
     private var isPortForwardWindowOpen = false
+    /// The device-option list the open panel's rows were last built from, so presence changes only
+    /// rebuild the rows (which would discard in-progress edits) when the choices actually changed.
+    private var portForwardPanelDeviceSignature = ""
     private lazy var portForwardCoordinator: PortForwardCoordinator = {
         let coordinator = PortForwardCoordinator()
         coordinator.onSend = { [weak self] message in
@@ -465,10 +468,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let existing = inputDevices[message.origin]
         let newInputEnabled = message.enabled ?? existing?.inputEnabled
         let inputEnabledChanged = newInputEnabled != existing?.inputEnabled
+        let newName = message.deviceName ?? existing?.name
+        let newAddress = message.deviceAddress ?? existing?.address
+        // The name/address can resolve on a later message (e.g. a nameless message arrives first,
+        // then a hello): the Port Forward panel needs to swap "Offline Device" for the real name.
+        let identityChanged = newName != existing?.name || newAddress != existing?.address
         inputDevices[message.origin] = InputDeviceMenuDevice(
             id: message.origin,
-            name: message.deviceName ?? existing?.name,
-            address: message.deviceAddress ?? existing?.address,
+            name: newName,
+            address: newAddress,
             role: message.role ?? existing?.role,
             inputEnabled: newInputEnabled,
             lastSeen: Date()
@@ -478,12 +486,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if layoutChanged, config.mode == .server {
             broadcastLayout()
         }
-        if layoutChanged || wasOffline || inputEnabledChanged {
+        if layoutChanged || wasOffline || inputEnabledChanged || identityChanged {
             refreshScreenLayoutWindowIfVisible()
             // The coordinator only sees peers through the enabled/name snapshots passed via
             // update(). Without this, a peer that restarts (dropped from inputDevices, then
             // hellos back in) never re-enters those snapshots and the controller sits in
             // "waiting for peer screen" until some unrelated event refreshes the coordinator.
+            // updateInputCoordinator() also runs the signature-gated Port Forward panel refresh.
             updateInputCoordinator()
         }
 
@@ -548,17 +557,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let knownIds = Set(options.map(\.id))
         let referencedIds = portForwardStore.snapshot().flatMap { [$0.inDeviceId, $0.outDeviceId] }
         for referencedId in referencedIds where !knownIds.contains(referencedId) && !options.contains(where: { $0.id == referencedId }) {
-            let title = "\(AppText.text("device.unknown")) (\(referencedId.prefix(8)))"
+            let title = "\(AppText.text("forward.offlineDevice")) (\(referencedId.prefix(8)))"
             options.append(PortForwardWindowController.DeviceOption(id: referencedId, title: title))
         }
         return options
     }
 
+    private func portForwardDeviceSignature(_ options: [PortForwardWindowController.DeviceOption]) -> String {
+        options.map { "\($0.id):\($0.title)" }.joined(separator: "|")
+    }
+
     @objc private func showPortForward() {
         isPortForwardWindowOpen = true
+        let options = portForwardDeviceOptions
+        portForwardPanelDeviceSignature = portForwardDeviceSignature(options)
         portForwardWindowController.show(
             rules: portForwardStore.snapshot(),
-            devices: portForwardDeviceOptions,
+            devices: options,
             statuses: portForwardDisplayStatuses()
         )
     }
@@ -570,13 +585,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pruneForwardStatuses()
         sendForwards()
         updatePortForwardCoordinator()
-        refreshPortForwardPanelStatusesIfVisible()
+        refreshPortForwardPanelIfVisible()
     }
 
     private func handleLocalForwardStatuses(_ statuses: [PortForwardStatus]) {
         localForwardStatuses = Dictionary(statuses.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         sendForwardStatuses()
-        refreshPortForwardPanelStatusesIfVisible()
+        refreshPortForwardPanelIfVisible()
     }
 
     /// Broadcasts this device's own listen state so peers can show accurate status lights for rules
@@ -612,7 +627,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for status in statuses {
             remoteForwardStatuses[status.id] = status
         }
-        refreshPortForwardPanelStatusesIfVisible()
+        refreshPortForwardPanelIfVisible()
     }
 
     /// Drops status entries for rules no longer in the table, keeping the two status maps bounded.
@@ -637,10 +652,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !rule.enabled {
             return PortForwardWindowController.RuleStatus(light: .gray, tooltip: AppText.text("forward.statusDisabled"))
         }
-        let status = rule.inDeviceId == deviceId ? localForwardStatuses[rule.id] : remoteForwardStatuses[rule.id]
+        // A forward only works when both ends are reachable: the In device has to be up to listen,
+        // and the Out device has to be up to receive. A peer (not us) is offline when it isn't in
+        // the online set. Gray out either way so a quit/offline peer stops reading as healthy.
         if rule.inDeviceId != deviceId, !online.contains(rule.inDeviceId) {
             return PortForwardWindowController.RuleStatus(light: .gray, tooltip: AppText.text("forward.statusOffline"))
         }
+        if rule.outDeviceId != deviceId, !online.contains(rule.outDeviceId) {
+            return PortForwardWindowController.RuleStatus(light: .gray, tooltip: AppText.text("forward.statusOutOffline"))
+        }
+        let status = rule.inDeviceId == deviceId ? localForwardStatuses[rule.id] : remoteForwardStatuses[rule.id]
         guard let status else {
             return PortForwardWindowController.RuleStatus(light: .gray, tooltip: AppText.text("forward.statusStarting"))
         }
@@ -651,11 +672,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return PortForwardWindowController.RuleStatus(light: .red, tooltip: AppText.format("forward.statusFailed", reason))
     }
 
-    private func refreshPortForwardPanelStatusesIfVisible() {
+    /// Refreshes the open panel after a presence or status change: rebuilds the rows only when the
+    /// device options changed (a peer went offline/online, or its name resolved), otherwise just
+    /// recolors the status lights so in-progress edits survive.
+    private func refreshPortForwardPanelIfVisible() {
         guard isPortForwardWindowOpen else {
             return
         }
-        portForwardWindowController.updateStatuses(portForwardDisplayStatuses())
+        let options = portForwardDeviceOptions
+        let signature = portForwardDeviceSignature(options)
+        if signature != portForwardPanelDeviceSignature {
+            portForwardPanelDeviceSignature = signature
+            portForwardWindowController.refresh(
+                rules: portForwardStore.snapshot(),
+                devices: options,
+                statuses: portForwardDisplayStatuses()
+            )
+        } else {
+            portForwardWindowController.updateStatuses(portForwardDisplayStatuses())
+        }
     }
 
     private func sendForwards() {
@@ -701,19 +736,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         pruneForwardStatuses()
         updatePortForwardCoordinator()
-        // A peer changed the shared table — rebuild the panel's rows (a new/removed rule), not just
-        // the status lights.
-        refreshPortForwardPanelIfVisible()
+        // A peer changed the shared table — force a rows rebuild (a new/removed rule), not just the
+        // status lights.
+        rebuildPortForwardPanelIfVisible()
     }
 
-    /// Rebuilds the panel's rows from the current (possibly peer-updated) rule table, if it's open.
-    private func refreshPortForwardPanelIfVisible() {
+    /// Forces a full rows rebuild from the current (possibly peer-updated) rule table, if the panel
+    /// is open — used when the rule set itself changed rather than just presence.
+    private func rebuildPortForwardPanelIfVisible() {
         guard isPortForwardWindowOpen else {
             return
         }
+        let options = portForwardDeviceOptions
+        portForwardPanelDeviceSignature = portForwardDeviceSignature(options)
         portForwardWindowController.refresh(
             rules: portForwardStore.snapshot(),
-            devices: portForwardDeviceOptions,
+            devices: options,
             statuses: portForwardDisplayStatuses()
         )
     }
@@ -727,7 +765,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         // Presence and transport changes flow through here; refresh the panel's lights so remote
         // rules flip to "offline"/back live.
-        refreshPortForwardPanelStatusesIfVisible()
+        refreshPortForwardPanelIfVisible()
     }
 
     private func publishTunnel(_ message: TunnelMessage) {

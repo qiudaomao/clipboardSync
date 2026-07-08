@@ -308,8 +308,9 @@ the only device that actually opens each listening socket. `ok` true means the p
 listening; `ok` false means the bind failed and `reason` says why (e.g. address in use, or a
 privileged-port hint). Each device broadcasts only its own rules' statuses; peers merge them by
 rule id to render an accurate status light per rule in the Port Forward panel. It is re-sent on
-peer connect and whenever a local listen state changes. A rule's disabled and "In device offline"
-states are derived locally from the rule table and device presence, so they are not carried here.
+peer connect and whenever a local listen state changes. A rule's disabled state and its "In device
+offline" / "Out device offline" states are derived locally from the rule table and device presence
+(a forward is only healthy when both ends are online), so they are not carried here.
 
 ### Tunnel (stream data)
 
