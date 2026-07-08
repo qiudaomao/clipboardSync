@@ -701,7 +701,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         pruneForwardStatuses()
         updatePortForwardCoordinator()
-        refreshPortForwardPanelStatusesIfVisible()
+        // A peer changed the shared table — rebuild the panel's rows (a new/removed rule), not just
+        // the status lights.
+        refreshPortForwardPanelIfVisible()
+    }
+
+    /// Rebuilds the panel's rows from the current (possibly peer-updated) rule table, if it's open.
+    private func refreshPortForwardPanelIfVisible() {
+        guard isPortForwardWindowOpen else {
+            return
+        }
+        portForwardWindowController.refresh(
+            rules: portForwardStore.snapshot(),
+            devices: portForwardDeviceOptions,
+            statuses: portForwardDisplayStatuses()
+        )
     }
 
     private func updatePortForwardCoordinator() {

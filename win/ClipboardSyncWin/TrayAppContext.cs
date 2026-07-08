@@ -869,7 +869,18 @@ internal sealed class TrayAppContext : ApplicationContext
         }
         PruneForwardStatuses();
         UpdatePortForwardCoordinator();
-        RefreshPortForwardFormIfVisible();
+        // A peer changed the shared table - rebuild the dialog's rows (a new/removed rule), not just
+        // the status lights.
+        RefreshPortForwardFormRowsIfVisible();
+    }
+
+    /// Rebuilds the dialog's rows from the current (possibly peer-updated) rule table, if it's open.
+    private void RefreshPortForwardFormRowsIfVisible()
+    {
+        if (portForwardForm is { IsDisposed: false, Visible: true })
+        {
+            portForwardForm.SetRules(portForwardStore.Snapshot(), PortForwardDeviceOptions(), PortForwardDisplayStatuses());
+        }
     }
 
     private void UpdatePortForwardCoordinator()

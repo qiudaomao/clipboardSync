@@ -90,6 +90,20 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    /// Rebuilds the rule rows from an updated table (e.g. a peer added or removed a rule) while the
+    /// panel stays open, without stealing focus or recentering. Replaces the shown rows wholesale
+    /// with the authoritative table, so any unsaved local edits are discarded in favor of it.
+    func refresh(rules: [PortForwardRule], devices: [DeviceOption], statuses: [String: RuleStatus]) {
+        self.devices = devices
+        self.statuses = statuses
+        rowViews.forEach { $0.removeFromSuperview() }
+        rowViews = []
+        for rule in rules {
+            addRow(for: rule)
+        }
+        updateEmptyState()
+    }
+
     func windowWillClose(_ notification: Notification) {
         onWindowClosed?()
     }

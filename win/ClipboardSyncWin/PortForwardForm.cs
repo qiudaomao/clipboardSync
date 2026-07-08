@@ -30,7 +30,7 @@ internal sealed class PortForwardForm : Form
     /// dialog open so its status light can update in place.
     public event Action<List<PortForwardRule>>? RulesApplied;
 
-    private readonly List<DeviceOption> devices;
+    private List<DeviceOption> devices;
     private readonly FlowLayoutPanel rowsPanel;
     private readonly Label emptyLabel;
     private readonly List<RuleRow> rows = [];
@@ -135,6 +135,26 @@ internal sealed class PortForwardForm : Form
         {
             row.ApplyStatus(next.TryGetValue(row.RuleId, out var status) ? status : null);
         }
+    }
+
+    /// Rebuilds the rule rows from an updated table (e.g. a peer added or removed a rule) while the
+    /// dialog stays open. Replaces the shown rows wholesale with the authoritative table, so any
+    /// unsaved local edits are discarded in favor of it.
+    public void SetRules(List<PortForwardRule> rules, List<DeviceOption> deviceOptions, Dictionary<string, RuleStatus> next)
+    {
+        devices = deviceOptions;
+        statuses = next;
+        foreach (var row in rows.ToList())
+        {
+            rowsPanel.Controls.Remove(row);
+            row.Dispose();
+        }
+        rows.Clear();
+        foreach (var rule in rules)
+        {
+            AddRow(rule);
+        }
+        UpdateEmptyState();
     }
 
     /// Fixed-width column captions kept in sync with RuleRow's layout, so the stacked rows read as
