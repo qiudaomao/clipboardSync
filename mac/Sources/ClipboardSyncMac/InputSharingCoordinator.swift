@@ -803,6 +803,9 @@ final class InputSharingCoordinator {
         }
 
         if mouse.action == "down" {
+            if remotePressedMouseButtons.isEmpty {
+                activateWindowUnderRemoteClick(at: point)
+            }
             remotePressedMouseButtons.insert(buttonName)
         }
         postMouseEvent(type: eventType, button: button, at: point)
@@ -939,6 +942,65 @@ final class InputSharingCoordinator {
             x: rect.minX + CGFloat(min(max(normalizedX, 0), 1)) * rect.width,
             y: rect.minY + CGFloat(min(max(normalizedY, 0), 1)) * rect.height
         )
+    }
+
+    /// macOS 27 (Golden Gate) betas stopped activating a window when a synthetic click lands on
+    /// its body — only title-bar chrome still activates. Until Apple fixes or documents that,
+    /// explicitly focus the window under the click point before posting the mouse-down.
+    private static let needsSyntheticClickActivationWorkaround =
+        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+
+    private func activateWindowUnderRemoteClick(at point: CGPoint) {
+        guard Self.needsSyntheticClickActivationWorkaround else {
+            return
+        }
+        guard let pid = windowOwnerPid(at: point), pid != getpid(),
+              let app = NSRunningApplication(processIdentifier: pid), !app.isActive else {
+            return
+        }
+
+        let appElement = AXUIElementCreateApplication(pid)
+        var hit: AXUIElement?
+        if AXUIElementCopyElementAtPosition(appElement, Float(point.x), Float(point.y), &hit) == .success,
+           let hit {
+            var windowRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(hit, kAXWindowAttribute as CFString, &windowRef) == .success,
+               let windowRef, CFGetTypeID(windowRef) == AXUIElementGetTypeID() {
+                let window = windowRef as! AXUIElement
+                AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+                AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            }
+        }
+        if #available(macOS 14.0, *) {
+            app.activate()
+        } else {
+            app.activate(options: [])
+        }
+    }
+
+    /// Topmost normal-layer window containing `point`, so we only activate the app the click
+    /// actually lands on (and skip menu bar, Dock, and other shell chrome).
+    private func windowOwnerPid(at point: CGPoint) -> pid_t? {
+        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+        for window in windows {
+            guard let layer = window[kCGWindowLayer as String] as? Int, layer == 0,
+                  let boundsDict = window[kCGWindowBounds as String] as? [String: CGFloat] else {
+                continue
+            }
+            let bounds = CGRect(
+                x: boundsDict["X"] ?? 0,
+                y: boundsDict["Y"] ?? 0,
+                width: boundsDict["Width"] ?? 0,
+                height: boundsDict["Height"] ?? 0
+            )
+            guard bounds.contains(point) else {
+                continue
+            }
+            return window[kCGWindowOwnerPID as String] as? pid_t
+        }
+        return nil
     }
 
     private func postMouseEvent(type: CGEventType, button: CGMouseButton, at point: CGPoint) {
