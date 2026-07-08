@@ -25,11 +25,16 @@ internal sealed class WinUpdateController : IDisposable
             return;
         }
 
+        var uiFactory = new UIFactory(appIcon)
+        {
+            ProcessFormAfterInit = AdjustNetSparkleForm
+        };
+
         updater = new SparkleUpdater(
             AppCastUrl,
             new Ed25519Checker(SecurityMode.Strict, PublicKey))
         {
-            UIFactory = new UIFactory(appIcon),
+            UIFactory = uiFactory,
             RelaunchAfterUpdate = false,
             CustomInstallerArguments = "/CLOSEAPPLICATIONS",
             CheckServerFileName = false,
@@ -97,6 +102,98 @@ internal sealed class WinUpdateController : IDisposable
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
         }, null);
+    }
+
+    private static void AdjustNetSparkleForm(Form form, UIFactory _)
+    {
+        if (form.GetType().Name != "UpdateAvailableWindow")
+        {
+            return;
+        }
+
+        form.StartPosition = FormStartPosition.CenterScreen;
+        form.MinimumSize = ScaleSize(form, new Size(760, 560));
+        form.Shown += (_, _) => EnsureUpdateButtonsVisible(form);
+    }
+
+    private static void EnsureUpdateButtonsVisible(Form form)
+    {
+        form.BeginInvoke(() =>
+        {
+            var workingArea = Screen.FromControl(form).WorkingArea;
+            var targetWidth = Math.Max(form.Width, ScaleValue(form, 760));
+            var targetHeight = Math.Max(form.Height, ScaleValue(form, 620));
+            form.Size = new Size(
+                Math.Min(targetWidth, workingArea.Width - ScaleValue(form, 32)),
+                Math.Min(targetHeight, workingArea.Height - ScaleValue(form, 32)));
+            form.Location = new Point(
+                workingArea.Left + (workingArea.Width - form.Width) / 2,
+                workingArea.Top + (workingArea.Height - form.Height) / 2);
+
+            var buttons = Descendants(form)
+                .OfType<Button>()
+                .Where(button => button.Visible)
+                .OrderBy(button => button.Left)
+                .ToList();
+            if (buttons.Count == 0)
+            {
+                FileLogWriter.WriteLine("NetSparkle update dialog has no visible action buttons after initialization.");
+                return;
+            }
+
+            var margin = ScaleValue(form, 16);
+            var gap = ScaleValue(form, 8);
+            var buttonHeight = buttons.Max(button => Math.Max(button.Height, ScaleValue(form, 32)));
+            var y = form.ClientSize.Height - margin - buttonHeight;
+            var x = form.ClientSize.Width - margin;
+
+            foreach (var button in buttons.AsEnumerable().Reverse())
+            {
+                var width = Math.Max(button.Width, ScaleValue(form, 112));
+                x -= width;
+                button.AutoSize = false;
+                button.Size = new Size(width, buttonHeight);
+                button.Location = new Point(x, y);
+                button.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
+                button.BringToFront();
+                x -= gap;
+            }
+
+            var buttonTop = y - margin;
+            foreach (var control in Descendants(form).Where(control => control is not Button && control.Visible))
+            {
+                var bounds = control.Bounds;
+                if (control.Parent is null || bounds.Top >= buttonTop || bounds.Bottom <= buttonTop)
+                {
+                    continue;
+                }
+
+                control.Height = Math.Max(ScaleValue(form, 80), buttonTop - bounds.Top);
+            }
+        });
+    }
+
+    private static IEnumerable<Control> Descendants(Control root)
+    {
+        foreach (Control child in root.Controls)
+        {
+            yield return child;
+
+            foreach (var descendant in Descendants(child))
+            {
+                yield return descendant;
+            }
+        }
+    }
+
+    private static Size ScaleSize(Control control, Size size)
+    {
+        return new Size(ScaleValue(control, size.Width), ScaleValue(control, size.Height));
+    }
+
+    private static int ScaleValue(Control control, int value)
+    {
+        return (int)Math.Round(value * control.DeviceDpi / 96.0);
     }
 
     private sealed class FileLogWriter : LogWriter
