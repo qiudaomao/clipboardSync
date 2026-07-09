@@ -51,6 +51,35 @@ final class ClipboardCoordinator {
         return fileURLs.isEmpty ? nil : fileURLs
     }
 
+    /// Names of the files currently on the clipboard, for menu display only. Mirrors
+    /// `readFileURLsForManualSend` (nil for folders or an empty clipboard) but never surfaces a
+    /// skip status.
+    func peekFileNamesForManualSend() -> [String]? {
+        guard
+            let urls = NSPasteboard.general.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) as? [NSURL],
+            !urls.isEmpty
+        else {
+            return nil
+        }
+
+        var names: [String] = []
+        for nsURL in urls {
+            let url = nsURL as URL
+            guard url.isFileURL else {
+                continue
+            }
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values?.isRegularFile == true else {
+                return nil
+            }
+            names.append(url.lastPathComponent)
+        }
+        return names.isEmpty ? nil : names
+    }
+
     /// Puts files a completed transfer already wrote to disk onto the clipboard as file-drop URLs.
     @discardableResult
     func applyReceivedFileURLs(_ urls: [URL]) -> Bool {
