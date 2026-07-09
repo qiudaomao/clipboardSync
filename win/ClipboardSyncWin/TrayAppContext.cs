@@ -51,6 +51,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly SynchronizationContext uiContext;
     private readonly Icon trayIcon;
     private readonly List<ClipboardHistoryEntry> history = [];
+    private readonly Dictionary<Guid, Image> historyThumbnails = [];
     private ScreenLayoutForm? screenLayoutForm;
 
     private AppConfig config;
@@ -428,10 +429,25 @@ internal sealed class TrayAppContext : ApplicationContext
     }
 
     /// One entry per online peer: files go to exactly the device the user picks, never to every
-    /// peer at once.
+    /// peer at once. The parent item is grayed out while the clipboard holds no sendable files,
+    /// and names the copied file otherwise.
     private void RefreshSendFilesMenu()
     {
         sendFilesItem.DropDownItems.Clear();
+
+        var fileNames = clipboardMonitor.PeekFileNamesForManualSend();
+        if (fileNames is null)
+        {
+            sendFilesItem.Text = AppText.Text("menu.sendFilesNoFile");
+            sendFilesItem.Enabled = false;
+            return;
+        }
+        var summary = fileNames.Count > 1
+            ? $"{fileNames[0]} +{fileNames.Count - 1}"
+            : fileNames[0];
+        sendFilesItem.Text = AppText.Format("menu.sendFilesWithName", summary);
+        sendFilesItem.Enabled = true;
+
         var peers = inputDevices.Values
             .Where(item => item.Id != config.DeviceId)
             .OrderBy(item => item.BaseTitle, StringComparer.CurrentCultureIgnoreCase)
@@ -1771,6 +1787,54 @@ internal sealed class TrayAppContext : ApplicationContext
             history.RemoveRange(ClipboardLimits.HistoryLimit, history.Count - ClipboardLimits.HistoryLimit);
         }
         RefreshHistoryMenu();
+        PruneHistoryThumbnails();
+    }
+
+    /// Disposes thumbnails for dropped entries. Call only after RefreshHistoryMenu so no menu
+    /// item still references a disposed image.
+    private void PruneHistoryThumbnails()
+    {
+        var liveIds = history.Select(entry => entry.Id).ToHashSet();
+        foreach (var staleId in historyThumbnails.Keys.Where(id => !liveIds.Contains(id)).ToList())
+        {
+            historyThumbnails[staleId].Dispose();
+            historyThumbnails.Remove(staleId);
+        }
+    }
+
+    private Image? HistoryThumbnail(ClipboardHistoryEntry entry)
+    {
+        if (entry.Content.Kind != "image" || entry.Content.Image is null)
+        {
+            return null;
+        }
+        if (historyThumbnails.TryGetValue(entry.Id, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            var bytes = Convert.FromBase64String(entry.Content.Image.DataBase64);
+            using var stream = new MemoryStream(bytes);
+            using var source = Image.FromStream(stream);
+            const int maxSide = 40;
+            var scale = Math.Min(1.0, Math.Min((double)maxSide / source.Width, (double)maxSide / source.Height));
+            var width = Math.Max(1, (int)Math.Round(source.Width * scale));
+            var height = Math.Max(1, (int)Math.Round(source.Height * scale));
+            var thumbnail = new Bitmap(width, height);
+            using (var graphics = Graphics.FromImage(thumbnail))
+            {
+                graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                graphics.DrawImage(source, new Rectangle(0, 0, width, height));
+            }
+            historyThumbnails[entry.Id] = thumbnail;
+            return thumbnail;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private void RefreshHistoryMenu()
@@ -1788,6 +1852,11 @@ internal sealed class TrayAppContext : ApplicationContext
             {
                 Tag = entry.Id
             };
+            if (HistoryThumbnail(entry) is { } thumbnail)
+            {
+                item.Image = thumbnail;
+                item.ImageScaling = ToolStripItemImageScaling.None;
+            }
             item.Click += (_, _) => UseHistoryItem(entry.Id);
             historyItem.DropDownItems.Add(item);
         }
@@ -1797,6 +1866,7 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             history.Clear();
             RefreshHistoryMenu();
+            PruneHistoryThumbnails();
         }));
     }
 

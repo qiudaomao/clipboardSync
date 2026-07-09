@@ -42,6 +42,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var historyMenu = NSMenu(title: AppText.text("menu.clipboardHistory"))
     private var historyMenuItem = NSMenuItem(title: AppText.text("menu.clipboardHistory"), action: nil, keyEquivalent: "")
     private var history: [ClipboardHistoryEntry] = []
+    private var historyThumbnails: [UUID: NSImage] = [:]
     private lazy var settingsWindowController: SettingsWindowController = {
         let controller = SettingsWindowController()
         controller.onSave = { [weak self] nextConfig in
@@ -323,6 +324,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let menu = NSMenu()
         menu.delegate = self
+        // Manual enablement: auto-enablement decides from action/submenu wiring and does not
+        // reliably re-validate when refreshSendFilesMenu toggles state from menuWillOpen, leaving
+        // the Send Files item stuck gray. Every other top-level item is either a deliberately
+        // disabled placeholder or has an explicit target, so isEnabled is authoritative here.
+        menu.autoenablesItems = false
         statusMenuItem = NSMenuItem(title: AppText.format("status.prefix", AppText.text("status.stopped")), action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
@@ -434,9 +440,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// One entry per online peer: files go to exactly the device the user picks, never to every
-    /// peer at once.
+    /// peer at once. The parent item is grayed out while the clipboard holds no sendable files,
+    /// and names the copied file otherwise.
     private func refreshSendFilesMenu() {
         sendFilesMenu.removeAllItems()
+
+        guard let fileNames = clipboard.peekFileNamesForManualSend() else {
+            sendFilesMenuItem.title = AppText.text("menu.sendFilesNoFile")
+            sendFilesMenuItem.isEnabled = false
+            return
+        }
+        let summary = fileNames.count > 1
+            ? "\(fileNames[0]) +\(fileNames.count - 1)"
+            : fileNames[0]
+        sendFilesMenuItem.title = AppText.format("menu.sendFilesWithName", summary)
+        sendFilesMenuItem.isEnabled = true
+
         let peers = inputDevices.values
             .filter { $0.id != deviceId }
             .sorted { $0.baseTitle.localizedCaseInsensitiveCompare($1.baseTitle) == .orderedAscending }
@@ -1610,7 +1629,34 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if history.count > ClipboardLimits.historyLimit {
             history.removeLast(history.count - ClipboardLimits.historyLimit)
         }
+        let liveIds = Set(history.map(\.id))
+        historyThumbnails = historyThumbnails.filter { liveIds.contains($0.key) }
         refreshHistoryMenu()
+    }
+
+    private func historyThumbnail(for entry: ClipboardHistoryEntry) -> NSImage? {
+        guard case .image(let payload) = entry.content else {
+            return nil
+        }
+        if let cached = historyThumbnails[entry.id] {
+            return cached
+        }
+        guard
+            let data = Data(base64Encoded: payload.dataBase64),
+            let image = NSImage(data: data),
+            image.size.width > 0, image.size.height > 0
+        else {
+            return nil
+        }
+        let maxSide: CGFloat = 40
+        let scale = min(maxSide / image.size.width, maxSide / image.size.height, 1)
+        let target = NSSize(width: max(1, image.size.width * scale), height: max(1, image.size.height * scale))
+        let thumbnail = NSImage(size: target)
+        thumbnail.lockFocus()
+        image.draw(in: NSRect(origin: .zero, size: target), from: .zero, operation: .copy, fraction: 1)
+        thumbnail.unlockFocus()
+        historyThumbnails[entry.id] = thumbnail
+        return thumbnail
     }
 
     private func refreshHistoryMenu() {
@@ -1624,6 +1670,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         for entry in history {
             let item = NSMenuItem(title: entry.content.historyTitle, action: #selector(useHistoryItem), keyEquivalent: "")
+            item.image = historyThumbnail(for: entry)
             item.target = self
             item.representedObject = entry.id.uuidString
             historyMenu.addItem(item)
@@ -1655,6 +1702,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func clearHistory() {
         history.removeAll()
+        historyThumbnails.removeAll()
         refreshHistoryMenu()
     }
 }

@@ -64,6 +64,31 @@ internal sealed class ClipboardMonitor : IDisposable
         }
     }
 
+    /// Names of the files currently on the clipboard, for menu display only. Mirrors
+    /// ReadFilePathsForManualSend (null for folders or an empty clipboard) but never surfaces a
+    /// skip status.
+    public List<string>? PeekFileNamesForManualSend()
+    {
+        try
+        {
+            if (!Clipboard.ContainsFileDropList())
+            {
+                return null;
+            }
+
+            var paths = Clipboard.GetFileDropList().Cast<string>().ToList();
+            if (paths.Count == 0 || paths.Any(path => !File.Exists(path)))
+            {
+                return null;
+            }
+            return paths.Select(path => Path.GetFileName(path)).ToList();
+        }
+        catch (ExternalException)
+        {
+            return null;
+        }
+    }
+
     /// Puts files a completed transfer already wrote to disk onto the clipboard as a file-drop list.
     public bool ApplyReceivedFilePaths(List<string> paths)
     {
