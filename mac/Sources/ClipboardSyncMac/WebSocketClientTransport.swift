@@ -2,7 +2,7 @@ import Foundation
 
 final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     var onStatus: ((String) -> Void)?
-    var onMessage: ((String) -> Void)?
+    var onMessage: ((String, Bool) -> Void)?
     var onPeerCount: ((Int) -> Void)?
 
     private let host: String
@@ -15,6 +15,16 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
     private var keepAliveTimer: DispatchSourceTimer?
     private var pingInFlight = false
 
+    /// Optional second connection dedicated to input frames, so they never queue behind bulk
+    /// clipboard/file/tunnel frames on the data connection's TCP stream. Established only when
+    /// the server echoes the input subprotocol; an old server fails the negotiation and
+    /// `inputChannelUnsupported` stops further attempts until the next transport start.
+    private var inputSession: URLSession?
+    private var inputTask: URLSessionWebSocketTask?
+    private var inputChannelReady = false
+    private var inputChannelUnsupported = false
+    private var inputReconnectScheduled = false
+
     init(host: String, port: Int) {
         self.host = host
         self.port = port
@@ -23,6 +33,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
 
     func start() {
         shouldRun = true
+        inputChannelUnsupported = false
         connect()
     }
 
@@ -34,14 +45,16 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         session?.invalidateAndCancel()
         task = nil
         session = nil
+        closeInputChannel()
         onPeerCount?(0)
         onStatus?(AppText.text("status.stopped"))
     }
 
-    func send(_ message: String, to deviceId: String?) {
-        // A client has a single connection to its server; the server relays targeted messages
-        // using the routing hint inside the envelope itself.
-        task?.send(.string(message)) { [weak self] error in
+    func send(_ message: String, to deviceId: String?, realtime: Bool) {
+        // A client has a single connection per channel to its server; the server relays targeted
+        // messages using the routing hint inside the envelope itself.
+        let channelTask = realtime && inputChannelReady ? inputTask : task
+        channelTask?.send(.string(message)) { [weak self] error in
             if let error {
                 self?.onStatus?(AppText.format("status.sendFailed", error.localizedDescription))
             }
@@ -66,6 +79,53 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         receiveLoop()
     }
 
+    private func connectInputChannel() {
+        guard
+            shouldRun,
+            !inputChannelUnsupported,
+            inputTask == nil,
+            task != nil,
+            let url = URL(string: "ws://\(host):\(port)/")
+        else {
+            return
+        }
+
+        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        let task = session.webSocketTask(with: url, protocols: [TransportChannels.inputSubprotocol])
+        task.maximumMessageSize = ClipboardLimits.maxWebSocketMessageBytes
+        inputSession = session
+        inputTask = task
+        task.resume()
+        inputReceiveLoop()
+    }
+
+    private func closeInputChannel() {
+        inputChannelReady = false
+        inputReconnectScheduled = false
+        inputTask?.cancel(with: .goingAway, reason: nil)
+        inputSession?.invalidateAndCancel()
+        inputTask = nil
+        inputSession = nil
+    }
+
+    /// The input channel is an optimization, never a requirement: any failure just drops back to
+    /// the data connection and retries later (unless the server already told us it doesn't speak
+    /// the subprotocol, in which case retrying is pointless spam).
+    private func scheduleInputChannelReconnect() {
+        closeInputChannel()
+        guard shouldRun, !inputChannelUnsupported, !inputReconnectScheduled else {
+            return
+        }
+        inputReconnectScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, self.shouldRun else {
+                return
+            }
+            self.inputReconnectScheduled = false
+            self.connectInputChannel()
+        }
+    }
+
     private func receiveLoop() {
         guard let activeTask = task else {
             return
@@ -78,7 +138,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
 
             switch result {
             case .success(.string(let text)):
-                self.onMessage?(text)
+                self.onMessage?(text, false)
                 if self.shouldRun {
                     self.receiveLoop()
                 }
@@ -100,6 +160,38 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         }
     }
 
+    private func inputReceiveLoop() {
+        guard let activeTask = inputTask else {
+            return
+        }
+
+        activeTask.receive { [weak self, weak activeTask] result in
+            guard let self, self.inputTask === activeTask else {
+                return
+            }
+
+            switch result {
+            case .success(.string(let text)):
+                self.onMessage?(text, true)
+                if self.shouldRun {
+                    self.inputReceiveLoop()
+                }
+            case .success(.data):
+                if self.shouldRun {
+                    self.inputReceiveLoop()
+                }
+            case .failure:
+                if self.shouldRun {
+                    self.scheduleInputChannelReconnect()
+                }
+            @unknown default:
+                if self.shouldRun {
+                    self.inputReceiveLoop()
+                }
+            }
+        }
+    }
+
     private func scheduleReconnect() {
         guard shouldRun, !reconnectScheduled else {
             return
@@ -111,6 +203,7 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         session?.invalidateAndCancel()
         task = nil
         session = nil
+        closeInputChannel()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self, self.shouldRun else {
@@ -174,12 +267,27 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         webSocketTask: URLSessionWebSocketTask,
         didOpenWithProtocol protocol: String?
     ) {
+        if inputTask === webSocketTask {
+            guard shouldRun else {
+                return
+            }
+            if `protocol` == TransportChannels.inputSubprotocol {
+                inputChannelReady = true
+            } else {
+                // The server accepted the socket but didn't echo the subprotocol: it predates the
+                // input channel. Close and don't retry — the data connection carries everything.
+                inputChannelUnsupported = true
+                closeInputChannel()
+            }
+            return
+        }
         guard shouldRun, task === webSocketTask else {
             return
         }
         onPeerCount?(1)
         onStatus?(AppText.format("status.connected", host, port))
         startKeepAlive()
+        connectInputChannel()
     }
 
     func urlSession(
@@ -188,6 +296,12 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
+        if inputTask === webSocketTask {
+            if shouldRun {
+                scheduleInputChannelReconnect()
+            }
+            return
+        }
         guard task === webSocketTask else {
             return
         }

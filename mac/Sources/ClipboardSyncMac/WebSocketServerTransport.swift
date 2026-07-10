@@ -4,7 +4,7 @@ import Network
 
 final class WebSocketServerTransport: Transport {
     var onStatus: ((String) -> Void)?
-    var onMessage: ((String) -> Void)?
+    var onMessage: ((String, Bool) -> Void)?
     var onPeerCount: ((Int) -> Void)?
 
     private let port: Int
@@ -64,9 +64,9 @@ final class WebSocketServerTransport: Transport {
         }
     }
 
-    func send(_ message: String, to deviceId: String?) {
+    func send(_ message: String, to deviceId: String?, realtime: Bool) {
         queue.async {
-            self.deliver(message, to: deviceId, excluding: nil)
+            self.deliver(message, to: deviceId, preferInput: realtime, excluding: nil)
         }
     }
 
@@ -85,8 +85,11 @@ final class WebSocketServerTransport: Transport {
             if let from = routing?.from, !from.isEmpty {
                 peer?.deviceId = from
             }
-            self.onMessage?(text)
-            self.deliver(text, to: routing?.to, excluding: peer)
+            let viaInputChannel = peer?.isInputChannel == true
+            self.onMessage?(text, viaInputChannel)
+            // Relay on the same class of channel the message arrived on, so one peer's input
+            // frames reach the next peer's input connection instead of its bulk stream.
+            self.deliver(text, to: routing?.to, preferInput: viaInputChannel, excluding: peer)
         }
         peer.onReady = { [weak self] in
             self?.pushStatus()
@@ -106,26 +109,33 @@ final class WebSocketServerTransport: Transport {
     /// Sends `message` to the one ready peer registered under the `to` device id, or to every
     /// ready peer (except `excluding`) when the target is absent or not (yet) known — a peer that
     /// hasn't sent anything since connecting has no registered device id, and the receiver-side
-    /// target filter makes the broadcast fallback harmless.
-    private func deliver(_ message: String, to deviceId: String?, excluding excluded: ServerPeer?) {
+    /// target filter makes the broadcast fallback harmless. Targeted delivery prefers the
+    /// device's connection matching the message's channel (input vs data), falling back to
+    /// whichever it has; broadcasts go to data connections only, since every device has exactly
+    /// one and duplicates on the auxiliary input channel would double-deliver.
+    private func deliver(_ message: String, to deviceId: String?, preferInput: Bool, excluding excluded: ServerPeer?) {
         if let deviceId, !deviceId.isEmpty {
             if deviceId == localDeviceId {
                 return
             }
-            if let target = peers.values.first(where: { $0.deviceId == deviceId && $0.isReady }) {
-                if target !== excluded {
-                    target.sendText(message)
-                }
+            let candidates = peers.values.filter { $0.deviceId == deviceId && $0.isReady && $0 !== excluded }
+            if let target = candidates.first(where: { $0.isInputChannel == preferInput }) ?? candidates.first {
+                target.sendText(message)
+                return
+            }
+            if peers.values.contains(where: { $0.deviceId == deviceId && $0.isReady }) {
+                // The only matching connection is the excluded source itself; don't broadcast.
                 return
             }
         }
-        for peer in peers.values where peer !== excluded && peer.isReady {
+        for peer in peers.values where peer !== excluded && peer.isReady && !peer.isInputChannel {
             peer.sendText(message)
         }
     }
 
     private func pushStatus() {
-        let readyPeerCount = peers.values.filter(\.isReady).count
+        // Input-channel connections are auxiliary; a device's presence is its data connection.
+        let readyPeerCount = peers.values.filter { $0.isReady && !$0.isInputChannel }.count
         onPeerCount?(readyPeerCount)
         onStatus?(AppText.format("status.serverPeers", NetworkAddress.serverAddress(port: port), readyPeerCount))
     }
@@ -138,6 +148,8 @@ private final class ServerPeer {
     /// The device id this connection last announced via an envelope's `from` hint, once known.
     var deviceId: String?
     private(set) var isReady = false
+    /// True when the client negotiated the dedicated input subprotocol during the handshake.
+    private(set) var isInputChannel = false
 
     private let connection: NWConnection
     private let queue: DispatchQueue
@@ -211,14 +223,24 @@ private final class ServerPeer {
                 return
             }
 
-            let response = [
+            // Echo the input subprotocol when the client requests it: that both marks this
+            // connection as the low-latency input channel and tells the client the server
+            // understands the split (an old server's response omits it, and the client falls
+            // back to the single data connection).
+            var responseLines = [
                 "HTTP/1.1 101 Switching Protocols",
                 "Upgrade: websocket",
                 "Connection: Upgrade",
-                "Sec-WebSocket-Accept: \(Self.acceptKey(for: key))",
-                "",
-                ""
-            ].joined(separator: "\r\n")
+                "Sec-WebSocket-Accept: \(Self.acceptKey(for: key))"
+            ]
+            if let requested = Self.headerValue("Sec-WebSocket-Protocol", in: header),
+               requested.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }).contains(TransportChannels.inputSubprotocol) {
+                self.isInputChannel = true
+                responseLines.append("Sec-WebSocket-Protocol: \(TransportChannels.inputSubprotocol)")
+            }
+            responseLines.append("")
+            responseLines.append("")
+            let response = responseLines.joined(separator: "\r\n")
 
             self.connection.send(content: Data(response.utf8), completion: .contentProcessed { [weak self] error in
                 guard let self else {
