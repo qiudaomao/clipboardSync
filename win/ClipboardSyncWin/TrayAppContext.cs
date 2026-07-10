@@ -110,6 +110,7 @@ internal sealed class TrayAppContext : ApplicationContext
         uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         initialSetupPending = !ConfigStore.HasSavedConfiguration;
         config = ConfigStore.Load();
+        RepairLaunchAtLoginPath();
 
         statusItem = new ToolStripMenuItem(AppText.Format("status.prefix", status)) { Enabled = false };
         statusActionItem = new ToolStripMenuItem(AppText.Text("menu.completeSetup"), null, (_, _) => HandleStatusAction());
@@ -1407,6 +1408,29 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private const string RunRegistryKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunRegistryValueName = "ClipboardSync";
+
+    /// An existing launch-at-login entry keeps working across updates only while the executable
+    /// path is stable; the rename from ClipboardSyncWin.exe to ClipboardSync.exe broke that once,
+    /// so rewrite a stale entry to wherever this process actually runs from.
+    private static void RepairLaunchAtLoginPath()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunRegistryKeyPath, writable: true);
+            if (key?.GetValue(RunRegistryValueName) is string current)
+            {
+                var expected = $"\"{Application.ExecutablePath}\"";
+                if (!string.Equals(current, expected, StringComparison.OrdinalIgnoreCase))
+                {
+                    key.SetValue(RunRegistryValueName, expected);
+                }
+            }
+        }
+        catch
+        {
+            // Best effort; the menu toggle can still rewrite the entry.
+        }
+    }
 
     private static bool IsLaunchAtLoginEnabled()
     {

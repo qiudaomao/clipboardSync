@@ -55,7 +55,7 @@ To build the older larger self-contained package instead, pass `-SelfContained`.
 The installer is written to:
 
 ```text
-artifacts/windows/ClipboardSyncWinSetup-v0.1.10.exe
+artifacts/windows/ClipboardSyncSetup-v0.1.10.exe
 ```
 
 ## 4. Upload the installer
@@ -63,7 +63,7 @@ artifacts/windows/ClipboardSyncWinSetup-v0.1.10.exe
 Create a GitHub Release in `clipboardSyncRelease` and attach the installer:
 
 ```powershell
-gh release create v0.1.10 artifacts/windows/ClipboardSyncWinSetup-v0.1.10.exe `
+gh release create v0.1.10 artifacts/windows/ClipboardSyncSetup-v0.1.10.exe `
   --repo qiudaomao/clipboardSyncRelease `
   --title "v0.1.10" `
   --notes "release notes here"
@@ -72,7 +72,7 @@ gh release create v0.1.10 artifacts/windows/ClipboardSyncWinSetup-v0.1.10.exe `
 This gives the public download URL:
 
 ```text
-https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.10/ClipboardSyncWinSetup-v0.1.10.exe
+https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.10/ClipboardSyncSetup-v0.1.10.exe
 ```
 
 ## 5. Generate and publish the appcast
@@ -108,3 +108,23 @@ netsparkle-generate-appcast --generate-signature win-appcast.xml
 Save the printed signature as `win-appcast.xml.signature` beside `win-appcast.xml`.
 
 Commit and push `win-appcast.xml` and `win-appcast.xml.signature` to `main` in `clipboardSyncRelease`. Since the Windows app points at `raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/win-appcast.xml`, pushing those files makes the update live.
+
+## Mirror note
+
+The app falls back to `win-appcast-mirror.xml` served via jsDelivr when GitHub is unreachable
+(see `WinUpdateController.cs`). After publishing, update the newest `<item>` in
+`win-appcast-mirror.xml` in `clipboardSyncRelease` to match `win-appcast.xml`, with the
+enclosure URL routed through the GitHub download proxy (jsDelivr refuses `.exe` files):
+
+```
+https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v<version>/ClipboardSyncSetup-v<version>.exe
+```
+
+Then purge the feed cache:
+
+```powershell
+curl.exe -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/win-appcast-mirror.xml"
+```
+
+The proxy host can be swapped in that file at any time without an app update; the Ed25519
+signature check protects the download no matter which host serves it.

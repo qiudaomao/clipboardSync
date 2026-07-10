@@ -11,6 +11,10 @@ namespace ClipboardSyncWin;
 internal sealed class WinUpdateController : IDisposable
 {
     private const string AppCastUrl = "https://raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/win-appcast.xml";
+    /// jsDelivr mirror of the same release repo, for networks where GitHub is unreachable. Its
+    /// enclosure URLs point back at jsDelivr too, so the installer download works from the same
+    /// source that served the feed.
+    private const string MirrorAppCastUrl = "https://cdn.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/win-appcast-mirror.xml";
     private const string PublicKey = "k7ZwP3uSV9hMzqL9PRWagywMtMiXWibcz6QyrFKprtI=";
 
     private readonly SparkleUpdater? updater;
@@ -66,7 +70,40 @@ internal sealed class WinUpdateController : IDisposable
         };
         updater.CloseApplication += () => closeApplication();
 
-        updater.StartLoop(doInitialCheck: true);
+        _ = StartAfterResolvingFeedAsync(updater);
+    }
+
+    /// Probes the feeds in preference order (GitHub, then the jsDelivr mirror) and starts the
+    /// update loop with the first reachable one. Runs off the UI thread so a blocked network's
+    /// timeouts never delay startup; until it finishes, a manual check uses the primary feed.
+    private async Task StartAfterResolvingFeedAsync(SparkleUpdater sparkle)
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            foreach (var candidate in new[] { AppCastUrl, MirrorAppCastUrl })
+            {
+                try
+                {
+                    using var request = new HttpRequestMessage(HttpMethod.Head, candidate);
+                    using var response = await http.SendAsync(request).ConfigureAwait(false);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        sparkle.AppCastUrl = candidate;
+                        break;
+                    }
+                }
+                catch
+                {
+                    // Unreachable; try the next candidate.
+                }
+            }
+        }
+        catch
+        {
+            // Keep the primary feed on any unexpected failure.
+        }
+        uiContext.Post(_ => sparkle.StartLoop(doInitialCheck: true), null);
     }
 
     public bool IsConfigured => PublicKey != "REPLACE_WITH_NETSPARKLE_ED25519_PUBLIC_KEY";

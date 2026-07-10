@@ -1,5 +1,5 @@
 #define MyAppName "Clipboard Sync"
-#define MyAppExeName "ClipboardSyncWin.exe"
+#define MyAppExeName "ClipboardSync.exe"
 #define MyAppPublisher "qiudaomao"
 #define MyAppVersion GetEnv("CLIPBOARD_SYNC_VERSION")
 #if MyAppVersion == ""
@@ -18,7 +18,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\Clipboard Sync
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputBaseFilename=ClipboardSyncWinSetup-{#MyReleaseVersion}
+OutputBaseFilename=ClipboardSyncSetup-{#MyReleaseVersion}
 OutputDir=..\..\artifacts\windows
 Compression=lzma2
 SolidCompression=yes
@@ -30,6 +30,15 @@ SetupIconFile=..\ClipboardSyncWin\Assets\clipboard-sync-icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 CloseApplications=yes
 RestartApplications=no
+
+[InstallDelete]
+; The executable was renamed from ClipboardSyncWin to ClipboardSync; sweep the old-name files
+; so an upgraded install doesn't keep a stale second copy of the app.
+Type: files; Name: "{app}\ClipboardSyncWin.exe"
+Type: files; Name: "{app}\ClipboardSyncWin.dll"
+Type: files; Name: "{app}\ClipboardSyncWin.pdb"
+Type: files; Name: "{app}\ClipboardSyncWin.deps.json"
+Type: files; Name: "{app}\ClipboardSyncWin.runtimeconfig.json"
 
 [Files]
 Source: "..\ClipboardSyncWin\bin\Release\net8.0-windows\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

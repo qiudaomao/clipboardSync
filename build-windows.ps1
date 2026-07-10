@@ -31,6 +31,7 @@ $env:LOCALAPPDATA = Join-Path $Root ".localappdata"
 $env:NUGET_PACKAGES = Join-Path $Root ".nuget\packages"
 
 if ($StopRunning) {
+    Get-Process ClipboardSync -ErrorAction SilentlyContinue | Stop-Process -Force
     Get-Process ClipboardSyncWin -ErrorAction SilentlyContinue | Stop-Process -Force
 }
 
@@ -55,7 +56,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-$ExePath = Join-Path $PublishDir "ClipboardSyncWin.exe"
+$ExePath = Join-Path $PublishDir "ClipboardSync.exe"
 
 if (Test-Path $ExePath) {
     $Exe = Get-Item $ExePath

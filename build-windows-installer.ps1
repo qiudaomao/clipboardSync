@@ -53,7 +53,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-$installer = Join-Path $Root "artifacts\windows\ClipboardSyncWinSetup-$ReleaseVersion.exe"
+$installer = Join-Path $Root "artifacts\windows\ClipboardSyncSetup-$ReleaseVersion.exe"
 if (Test-Path $installer) {
     $item = Get-Item $installer
     Write-Host ""
