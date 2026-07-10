@@ -3,12 +3,14 @@ import Sparkle
 
 /// Thin wrapper around Sparkle's standard updater so `AppController` doesn't need to know
 /// about `SPUStandardUpdaterController` lifetime/delegate details directly. Also picks which
-/// update feed to use: GitHub when reachable, otherwise a jsDelivr mirror of the same release
-/// repo for networks where GitHub is blocked. Each feed's enclosure URLs point at the host that
-/// serves the feed itself, so whichever source is reachable can also serve the download.
+/// update feed to use: GitHub when reachable, otherwise the self-hosted mirror published by
+/// push.sh, then a jsDelivr mirror as a last resort, for networks where GitHub is blocked.
+/// Each feed's enclosure URLs point at the host that serves the feed itself, so whichever
+/// source is reachable can also serve the download.
 final class UpdateController: NSObject, SPUUpdaterDelegate {
     private static let feedCandidates = [
         "https://raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/appcast.xml",
+        "https://clipboardsync.fuzhuo.me/downloads/appcast.xml",
         "https://cdn.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/appcast-mirror.xml"
     ]
 

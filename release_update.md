@@ -137,3 +137,10 @@ curl -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/appca
 
 Old zips in `releases/` can be deleted once a newer release is mirrored; the mirror only needs
 the entries the mirror appcast still references.
+
+## 8. Publish the self-hosted mirror
+
+Run `./push.sh`. It downloads the newest mac/win release assets, rewrites `appcast.xml` /
+`win-appcast.xml` so their enclosures point at `https://clipboardsync.fuzhuo.me/downloads/`,
+uploads everything together with the landing page, and verifies each public URL serves with the
+right size — the updaters use this server as their first fallback when GitHub is unreachable.
