@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="color-scheme" content="dark light" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%236f73f6'/%3E%3Cpath d='M23 18h18v6h5v27H18V24h5zm4 0v7h10v-7zm-2 14v4h14v-4zm0 8v4h10v-4z' fill='white'/%3E%3C/svg%3E" />
 <title>Clipboard Sync — Native clipboard sync over LAN</title>
 <script>
   // Apply the saved (or system) theme before first paint to avoid a flash.
@@ -266,17 +267,6 @@
     font-size: 11px;
     color: var(--text);
   }
-  .shots-menus {
-    grid-template-columns: 1fr 1fr;
-    margin-top: 24px;
-  }
-  .shots-menus .shot-card img {
-    width: auto;
-    max-width: 100%;
-    max-height: 460px;
-    margin: 0 auto;
-  }
-
   /* Highlights */
   section.highlights { padding: 20px 0 80px; }
   .highlight-grid {
@@ -405,6 +395,37 @@
   .cta-band h2 { font-size: 28px; margin: 0 0 12px; letter-spacing: -0.02em; }
   .cta-band p { color: var(--muted); margin: 0 0 28px; }
 
+  /* Setup, trust and FAQ */
+  section.how-it-works { padding: 36px 0 72px; }
+  .step-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .step-card {
+    padding: 24px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--panel);
+  }
+  .step-number {
+    display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center;
+    border-radius: 999px; background: rgba(110,168,254,.14); color: var(--accent);
+    font-size: 13px; font-weight: 800; margin-bottom: 14px;
+  }
+  .step-card h3 { margin: 0 0 8px; font-size: 17px; }
+  .step-card p { margin: 0; color: var(--muted); line-height: 1.65; font-size: 14px; }
+  .trust-band {
+    margin: 20px auto 84px; padding: 34px; border-radius: 18px;
+    border: 1px solid var(--border); background: linear-gradient(135deg, rgba(52,224,176,.10), rgba(110,168,254,.08));
+  }
+  .trust-band h2 { margin: 0 0 10px; font-size: 25px; }
+  .trust-band > p { color: var(--muted); line-height: 1.65; margin: 0 0 20px; }
+  .trust-points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .trust-point { font-size: 14px; font-weight: 600; }
+  section.faq { padding: 18px 0 80px; }
+  .faq-list { max-width: 780px; margin: 0 auto; }
+  .faq-list details { border-bottom: 1px solid var(--border); padding: 18px 0; }
+  .faq-list summary { cursor: pointer; font-weight: 700; }
+  .faq-list p { color: var(--muted); line-height: 1.65; margin: 12px 0 0; }
+  .mobile-break { display: none; }
+
   footer {
     border-top: 1px solid var(--border);
     padding: 32px 0;
@@ -425,6 +446,7 @@
     .shots { grid-template-columns: 1fr; }
     .feature-grid { grid-template-columns: 1fr 1fr; }
     .spotlight-grid { grid-template-columns: 1fr; gap: 26px; }
+    .step-grid, .trust-points { grid-template-columns: 1fr; }
   }
   @media (max-width: 560px) {
     .highlight-grid { grid-template-columns: 1fr; }
@@ -436,7 +458,11 @@
     .wrap { padding: 0 18px; }
     .nav-inner { padding: 14px 18px; }
     .brand { font-size: 15px; }
+    .brand { white-space: nowrap; }
     .brand-mark { width: 24px; height: 24px; font-size: 12px; }
+    .beta-tag, .gh-btn, .theme-btn { display: none; }
+    .nav-actions { gap: 6px; }
+    .nav-actions .btn { white-space: nowrap; padding: 8px 10px; }
     .btn { padding: 9px 14px; font-size: 13px; }
     .subtitle { font-size: 16px; margin-bottom: 28px; }
     .eyebrow { font-size: 12px; margin-bottom: 20px; }
@@ -449,6 +475,11 @@
     .feature-card { padding: 20px; }
     .cta-band { padding: 36px 22px; border-radius: 16px; margin: 20px 0 64px; }
     .cta-band h2 { font-size: 23px; }
+    section.how-it-works { padding: 22px 0 54px; }
+    .step-card { padding: 20px; }
+    .trust-band { padding: 26px 20px; margin-bottom: 58px; }
+    section.faq { padding-bottom: 58px; }
+    .mobile-break { display: inline; }
   }
   @media (max-width: 380px) {
     h1 { font-size: 32px; }
@@ -466,6 +497,7 @@
       <span class="beta-tag">Beta</span>
     </div>
     <nav class="links">
+      <a href="#setup" data-i18n="nav.setup">How it works</a>
       <a href="#showcase" data-i18n="nav.preview">Preview</a>
       <a href="#portforward" data-i18n="nav.portforward">Port Forward</a>
       <a href="#features" data-i18n="nav.features">Features</a>
@@ -505,6 +537,18 @@
   </div>
 </section>
 
+<section class="how-it-works wrap" id="setup">
+  <div class="section-head">
+    <h2 data-i18n="setup.head">Connected in three steps</h2>
+    <p data-i18n="setup.sub">No account and no cloud dashboard — just your devices and a shared password.</p>
+  </div>
+  <div class="step-grid">
+    <div class="step-card"><span class="step-number">1</span><h3 data-i18n="setup.s1t">Install on both devices</h3><p data-i18n="setup.s1p">Requires macOS 13 or later, or 64-bit Windows 10/11.</p></div>
+    <div class="step-card"><span class="step-number">2</span><h3 data-i18n="setup.s2t">Set server and child device</h3><p data-i18n="setup.s2p">Choose Server on one device, then configure the others as Child Devices using the shown LAN address and the same password.</p></div>
+    <div class="step-card"><span class="step-number">3</span><h3 data-i18n="setup.s3t">Copy and paste</h3><p data-i18n="setup.s3p">Text and images sync automatically. To send files, copy them first and choose “Send Files from Clipboard.”</p></div>
+  </div>
+</section>
+
 <section class="showcase wrap" id="showcase">
   <div class="shots">
     <div class="shot-card">
@@ -516,15 +560,15 @@
       <div class="shot-label"><span data-i18n="shot.winApp">Native tray app on Windows</span> <span class="badge">Windows</span></div>
     </div>
   </div>
-  <div class="shots shots-menus">
-    <div class="shot-card">
-      <img src="assets/mac-menu.png" alt="Clipboard Sync menubar menu on macOS" />
-      <div class="shot-label"><span data-i18n="shot.macMenu">Menubar menu on macOS</span> <span class="badge">macOS</span></div>
-    </div>
-    <div class="shot-card">
-      <img src="assets/win-menu.png" alt="Clipboard Sync tray menu on Windows" />
-      <div class="shot-label"><span data-i18n="shot.winMenu">Tray menu on Windows</span> <span class="badge">Windows</span></div>
-    </div>
+</section>
+
+<section class="trust-band wrap">
+  <h2 data-i18n="trust.head">Private by design</h2>
+  <p data-i18n="trust.sub">Clipboard payloads are protected with your shared password and travel only across connections you configure. Clipboard Sync does not require an account or a hosted cloud dashboard.</p>
+  <div class="trust-points">
+    <div class="trust-point" data-i18n="trust.p1">✓ Password-protected payloads</div>
+    <div class="trust-point" data-i18n="trust.p2">✓ No account required</div>
+    <div class="trust-point" data-i18n="trust.p3">✓ Native automatic updates</div>
   </div>
 </section>
 
@@ -558,12 +602,22 @@
   </div>
 </section>
 
+<section class="faq wrap" id="faq">
+  <div class="section-head"><h2 data-i18n="faq.head">Before you install</h2></div>
+  <div class="faq-list">
+    <details><summary data-i18n="faq.q1">What systems are supported?</summary><p data-i18n="faq.a1">macOS 13 or later and 64-bit Windows 10/11.</p></details>
+    <details><summary data-i18n="faq.q2">What if the devices are not on the same subnet?</summary><p data-i18n="faq.a2">Direct LAN setup is simplest. Advanced users can connect across routed networks or a proxy they control; only use endpoints you trust.</p></details>
+    <details><summary data-i18n="faq.q3">Where do received files go?</summary><p data-i18n="faq.a3">Received files are placed on your clipboard. Paste them into the folder where you want to keep them.</p></details>
+    <details><summary data-i18n="faq.q4">Why does macOS ask for permissions?</summary><p data-i18n="faq.a4">Accessibility and Input Monitoring are only needed for mouse and keyboard sharing. Clipboard sync works independently.</p></details>
+  </div>
+</section>
+
 <section class="spotlight wrap" id="portforward">
   <div class="spotlight-grid">
     <div class="spotlight-copy">
       <div class="eyebrow"><span class="dot"></span> <span data-i18n="pf.eyebrow">New</span></div>
       <h2 data-i18n="pf.t">Port forwarding, built in</h2>
-      <p data-i18n="pf.p">Reach a service on any of your devices — SSH, a remote desktop, a dev server, a router's admin page — as if it were local. Connections tunnel over the same encrypted sync link, so there's nothing extra to expose or configure.</p>
+      <p data-i18n="pf.p">Open More Features → Port Forward to reach a service on any of your devices — SSH, a remote desktop, a dev server, or a router's admin page — as if it were local.</p>
       <ul class="spotlight-list">
         <li><span class="check">✓</span> <span data-i18n="pf.b1">Map In (a device + port) to Out (another device + host + port), with a note per rule.</span></li>
         <li><span class="check">✓</span> <span data-i18n="pf.b2">Listen on loopback only, or open a port to your whole LAN with one toggle.</span></li>
@@ -624,7 +678,7 @@
 <section class="wrap">
   <div class="cta-band">
     <h2 data-i18n="cta.t">Sync your clipboard in minutes</h2>
-    <p data-i18n="cta.p">Install on macOS and Windows, pair your devices, and start copying across your network.</p>
+    <p data-i18n="cta.p">Set one device as the server, connect the others as child devices, and start copying across your network.</p>
     <div class="cta-row">
       <a class="btn btn-primary dl-mac" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncMac.zip">
         <span class="btn-icon"></span> <span data-i18n="dl.mac">Download for macOS</span>
@@ -676,6 +730,7 @@
       en: {
         "page.title": "Clipboard Sync — Native clipboard sync over LAN",
         "nav.preview": "Preview",
+        "nav.setup": "How it works",
         "nav.portforward": "Port Forward",
         "nav.features": "Features",
         "nav.download": "Download",
@@ -686,17 +741,37 @@
         "hero.subtitle": "A lightweight menubar app that syncs text, images, and files across your Mac and PC, and lets you share one mouse and keyboard between them — over WebSocket, instantly, encrypted, and without the cloud.",
         "dl.mac": "Download for macOS",
         "dl.win": "Download for Windows",
-        "hero.note": "Free during beta · No account required · Your data stays on your network",
+        "hero.note": "Free during beta · No account required · Password-protected connections",
+        "setup.head": "Connected in three steps",
+        "setup.sub": "No account and no cloud dashboard — just your devices and a shared password.",
+        "setup.s1t": "Install on both devices",
+        "setup.s1p": "Requires macOS 13 or later, or 64-bit Windows 10/11.",
+        "setup.s2t": "Set server and child device",
+        "setup.s2p": "Choose Server on one device, then configure the others as Child Devices using the shown LAN address and the same password.",
+        "setup.s3t": "Copy and paste",
+        "setup.s3p": "Text and images sync automatically. To send files, copy them first and choose “Send Files from Clipboard.”",
         "shot.macApp": "Menubar app on macOS",
         "shot.winApp": "Native tray app on Windows",
-        "shot.macMenu": "Menubar menu on macOS",
-        "shot.winMenu": "Tray menu on Windows",
         "hl1.t": "Free & instant device switching",
         "hl1.p": "Swap which machine is in control at any moment — no re-pairing, no delay, just a quick switch between control and target device.",
         "hl2.t": "Drag-based screen layout",
         "hl2.p": "Arrange your devices exactly how they sit on your desk — just drag screens into place and the cursor flows naturally between them.",
-        "hl3.t": "No subnet requirement",
-        "hl3.p": "Works even when devices aren't on the same subnet — sync happily over a proxy, no special network setup required.",
+        "hl3.t": "Works across routed networks",
+        "hl3.p": "Direct LAN setup is simplest; advanced users can also connect through a routed network or proxy they control.",
+        "trust.head": "Private by design",
+        "trust.sub": "Clipboard payloads are protected with your shared password and travel only across connections you configure. Clipboard Sync does not require an account or a hosted cloud dashboard.",
+        "trust.p1": "✓ Password-protected payloads",
+        "trust.p2": "✓ No account required",
+        "trust.p3": "✓ Native automatic updates",
+        "faq.head": "Before you install",
+        "faq.q1": "What systems are supported?",
+        "faq.a1": "macOS 13 or later and 64-bit Windows 10/11.",
+        "faq.q2": "What if the devices are not on the same subnet?",
+        "faq.a2": "Direct LAN setup is simplest. Advanced users can connect across routed networks or a proxy they control; only use endpoints you trust.",
+        "faq.q3": "Where do received files go?",
+        "faq.a3": "Received files are placed on your clipboard. Paste them into the folder where you want to keep them.",
+        "faq.q4": "Why does macOS ask for permissions?",
+        "faq.a4": "Accessibility and Input Monitoring are only needed for mouse and keyboard sharing. Clipboard sync works independently.",
         "hl4.t": "Automatic updates",
         "hl4.p": "Built-in auto-update on both macOS and Windows keeps every device on the latest version — no manual downloads, ever.",
         "hl5.t": "Fully native",
@@ -719,40 +794,61 @@
         "f7.p": "Tunnel a TCP port from one device to another over the same encrypted connection — reach SSH, VNC, or a dev server anywhere.",
         "pf.eyebrow": "New",
         "pf.t": "Port forwarding, built in",
-        "pf.p": "Reach a service on any of your devices — SSH, a remote desktop, a dev server, a router's admin page — as if it were local. Connections tunnel over the same encrypted sync link, so there's nothing extra to expose or configure.",
+        "pf.p": "Open More Features → Port Forward to reach a service on any of your devices — SSH, a remote desktop, a dev server, or a router's admin page — as if it were local.",
         "pf.b1": "Map In (a device + port) to Out (another device + host + port), with a note per rule.",
         "pf.b2": "Listen on loopback only, or open a port to your whole LAN with one toggle.",
         "pf.b3": "A live status light shows every forward — listening, failed, or offline — at a glance.",
         "pf.shot": "Port Forward panel",
         "pf.badge": "macOS & Windows",
         "cta.t": "Sync your clipboard in minutes",
-        "cta.p": "Install on macOS and Windows, pair your devices, and start copying across your network.",
+        "cta.p": "Set one device as the server, connect the others as child devices, and start copying across your network.",
         "footer.text": "Clipboard Sync — native clipboard sync over WebSocket."
       },
       zh: {
         "page.title": "剪贴板同步 — 局域网原生剪贴板同步",
         "nav.preview": "预览",
+        "nav.setup": "使用方式",
         "nav.portforward": "端口转发",
         "nav.features": "功能",
         "nav.download": "下载",
         "nav.reportIssue": "在 GitHub 上报告问题",
         "theme.toggle": "切换主题",
         "hero.eyebrow": "macOS 和 Windows · 公测期免费",
-        "hero.title": '你的剪贴板，<br /><span class="gradient">在局域网中无处不在。</span>',
+        "hero.title": '你的剪贴板，<br /><span class="gradient">在局域网中<span class="mobile-break"><br /></span>无处不在。</span>',
         "hero.subtitle": "一款轻量的菜单栏应用，在 Mac 和 PC 之间即时同步文本、图片和文件，还能让它们共享一套鼠标和键盘 — 基于 WebSocket，即时、加密、无需云端。",
         "dl.mac": "下载 macOS 版",
         "dl.win": "下载 Windows 版",
-        "hero.note": "公测期免费 · 无需账号 · 数据不出你的网络",
+        "hero.note": "公测期免费 · 无需账号 · 密码保护连接",
+        "setup.head": "三步完成连接",
+        "setup.sub": "无需账号和云端控制台，只需要你的设备与一个共享密码。",
+        "setup.s1t": "在两台设备上安装",
+        "setup.s1p": "支持 macOS 13 及以上版本，或 64 位 Windows 10/11。",
+        "setup.s2t": "设置服务端与子设备",
+        "setup.s2p": "在一台设备上选择“服务端”，再让其它设备使用显示的局域网地址和相同密码作为“子设备”连接。",
+        "setup.s3t": "开始复制粘贴",
+        "setup.s3p": "文本和图片会自动同步。发送文件时，先复制文件，再选择“从剪贴板发送文件”。",
         "shot.macApp": "macOS 菜单栏应用",
         "shot.winApp": "Windows 原生托盘应用",
-        "shot.macMenu": "macOS 菜单栏菜单",
-        "shot.winMenu": "Windows 托盘菜单",
         "hl1.t": "自由即时切换控制设备",
         "hl1.p": "随时切换由哪台机器控制 — 无需重新配对、没有延迟，控制端与被控端一键互换。",
         "hl2.t": "拖拽式屏幕布局",
         "hl2.p": "按照设备在桌面上的真实摆放来排列 — 把屏幕拖到相应位置，光标就能自然地在设备间流动。",
-        "hl3.t": "不要求同一子网",
-        "hl3.p": "设备不在同一子网也能工作 — 可以通过代理同步，无需特殊网络配置。",
+        "hl3.t": "支持路由网络",
+        "hl3.p": "局域网直连最简单；高级用户也可以通过自己控制的路由网络或代理建立连接。",
+        "trust.head": "隐私优先的设计",
+        "trust.sub": "剪贴板内容由共享密码保护，并且只通过你配置的连接传输。Clipboard Sync 不需要账号，也不依赖托管的云端控制台。",
+        "trust.p1": "✓ 密码保护传输内容",
+        "trust.p2": "✓ 无需注册账号",
+        "trust.p3": "✓ 原生自动更新",
+        "faq.head": "安装前须知",
+        "faq.q1": "支持哪些系统？",
+        "faq.a1": "macOS 13 及以上版本，以及 64 位 Windows 10/11。",
+        "faq.q2": "设备不在同一子网怎么办？",
+        "faq.a2": "局域网直连最简单。高级用户可以通过自己控制的路由网络或代理连接；请只使用你信任的端点。",
+        "faq.q3": "收到的文件在哪里？",
+        "faq.a3": "收到的文件会进入系统剪贴板，你可以在需要保存它们的文件夹中粘贴。",
+        "faq.q4": "为什么 macOS 会请求权限？",
+        "faq.a4": "只有鼠标键盘共享需要辅助功能和输入监控权限；剪贴板同步可以独立工作。",
         "hl4.t": "自动更新",
         "hl4.p": "macOS 和 Windows 双端内置自动更新，每台设备始终保持最新版本 — 永远无需手动下载。",
         "hl5.t": "完全原生",
@@ -775,14 +871,14 @@
         "f7.p": "通过同一条加密连接，把一台设备的 TCP 端口隧道转发到另一台 — 随时访问任意设备上的 SSH、VNC 或开发服务器。",
         "pf.eyebrow": "全新",
         "pf.t": "内置端口转发",
-        "pf.p": "像访问本地服务一样，访问你任意设备上运行的服务 — SSH、远程桌面、开发服务器、路由器管理页面。连接通过同一条加密同步链路隧道传输，无需额外暴露端口或配置。",
+        "pf.p": "打开“更多功能 → 端口转发”，即可像访问本地服务一样访问任意设备上的 SSH、远程桌面、开发服务器或路由器管理页面。",
         "pf.b1": "将“入口”（设备 + 端口）映射到“出口”（另一台设备 + 主机 + 端口），每条规则可加备注。",
         "pf.b2": "仅监听本机回环，或一键开放端口给整个局域网。",
         "pf.b3": "实时状态灯一眼看清每条转发 — 正在监听、失败或离线。",
         "pf.shot": "端口转发面板",
         "pf.badge": "macOS 和 Windows",
         "cta.t": "几分钟内同步你的剪贴板",
-        "cta.p": "在 macOS 和 Windows 上安装，配对设备，开始跨网络复制粘贴。",
+        "cta.p": "将一台设备设为服务端，其它设备设为子设备，然后开始跨设备复制粘贴。",
         "footer.text": "剪贴板同步 — 基于 WebSocket 的原生剪贴板同步。"
       }
     };

@@ -21,16 +21,16 @@ internal sealed class TrayAppContext : ApplicationContext
     };
 
     private readonly NotifyIcon notifyIcon;
+    private bool initialSetupPending;
     private readonly ContextMenuStrip trayMenu;
     private readonly ToolStripMenuItem statusItem;
+    private readonly ToolStripMenuItem statusActionItem;
     private readonly ToolStripMenuItem historyItem;
     private readonly ToolStripMenuItem inputStatusItem;
     private readonly ToolStripMenuItem inputSharingItem;
     private readonly ToolStripMenuItem controlDeviceItem;
     private readonly ToolStripMenuItem checkForUpdatesItem;
     private readonly Dictionary<string, InputDeviceMenuDevice> inputDevices = [];
-    private readonly ToolStripMenuItem clientModeItem;
-    private readonly ToolStripMenuItem serverModeItem;
     private readonly ToolStripMenuItem startStopItem;
     private readonly ToolStripMenuItem launchAtLoginItem;
     private readonly ToolStripMenuItem sendFilesItem;
@@ -56,6 +56,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private AppConfig config;
     private ISyncTransport? transport;
+    private bool isSyncPaused;
     private int peerCount;
     private bool pendingInputConfigSync;
     private string status = AppText.Text("status.stopped");
@@ -107,16 +108,16 @@ internal sealed class TrayAppContext : ApplicationContext
     public TrayAppContext()
     {
         uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+        initialSetupPending = !ConfigStore.HasSavedConfiguration;
         config = ConfigStore.Load();
 
         statusItem = new ToolStripMenuItem(AppText.Format("status.prefix", status)) { Enabled = false };
+        statusActionItem = new ToolStripMenuItem(AppText.Text("menu.completeSetup"), null, (_, _) => HandleStatusAction());
         historyItem = new ToolStripMenuItem(AppText.Text("menu.clipboardHistory"));
         inputStatusItem = new ToolStripMenuItem(AppText.Text("input.off")) { Enabled = false };
         inputSharingItem = new ToolStripMenuItem(AppText.Text("menu.enableInputSharing"), null, (_, _) => ToggleInputSharing());
         controlDeviceItem = new ToolStripMenuItem(AppText.Text("menu.controlDevice"));
-        clientModeItem = new ToolStripMenuItem(AppText.Text("menu.clientMode"), null, (_, _) => SetMode(SyncMode.Client));
-        serverModeItem = new ToolStripMenuItem(AppText.Text("menu.serverMode"), null, (_, _) => SetMode(SyncMode.Server));
-        startStopItem = new ToolStripMenuItem(AppText.Text("menu.start"), null, (_, _) => ToggleTransport());
+        startStopItem = new ToolStripMenuItem(AppText.Text("menu.resumeSync"), null, (_, _) => ToggleTransport());
         launchAtLoginItem = new ToolStripMenuItem(AppText.Text("menu.launchAtLogin"), null, (_, _) => ToggleLaunchAtLogin());
         sendFilesItem = new ToolStripMenuItem(AppText.Text("menu.sendFiles"));
         trayIcon = LoadTrayIcon();
@@ -170,7 +171,7 @@ internal sealed class TrayAppContext : ApplicationContext
             clipboardMonitor.ApplyReceivedFilePaths(paths);
             status = AppText.Text("status.filesReceived");
             UpdateMenu();
-            notifyIcon.ShowBalloonTip(3000, AppText.Text("app.name"), AppText.Text("status.filesReceived"), ToolTipIcon.Info);
+            notifyIcon.ShowBalloonTip(5000, AppText.Text("app.name"), AppText.Text("status.filesReceivedPasteHint"), ToolTipIcon.Info);
         });
 
         // Periodically re-broadcasts our own hello (so peers keep our LastSeen fresh even when we
@@ -199,7 +200,22 @@ internal sealed class TrayAppContext : ApplicationContext
             UpdateInputCoordinator();
             RestartTransport();
             presenceTimer.Start();
+            if (initialSetupPending)
+            {
+                Application.Idle += ShowInitialSetupWhenIdle;
+            }
         }
+    }
+
+    private void ShowInitialSetupWhenIdle(object? sender, EventArgs e)
+    {
+        Application.Idle -= ShowInitialSetupWhenIdle;
+        if (!initialSetupPending)
+        {
+            return;
+        }
+        initialSetupPending = false;
+        ShowConfiguration(firstRun: true);
     }
 
     protected override void Dispose(bool disposing)
@@ -341,6 +357,7 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add(statusItem);
+        menu.Items.Add(statusActionItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(historyItem);
         menu.Items.Add(new ToolStripSeparator());
@@ -350,19 +367,18 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(inputSharingItem);
         menu.Items.Add(controlDeviceItem);
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.screenLayout"), null, (_, _) => ShowScreenLayout()));
-        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.portForward"), null, (_, _) => ShowPortForward()));
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(clientModeItem);
-        menu.Items.Add(serverModeItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.configure"), null, (_, _) => ShowConfiguration()));
+
+        var moreFeaturesItem = new ToolStripMenuItem(AppText.Text("menu.moreFeatures"));
+        moreFeaturesItem.DropDownItems.Add(new ToolStripMenuItem(AppText.Text("menu.portForward"), null, (_, _) => ShowPortForward()));
+        moreFeaturesItem.DropDownItems.Add(launchAtLoginItem);
+        menu.Items.Add(moreFeaturesItem);
         menu.Items.Add(checkForUpdatesItem);
+        menu.Items.Add(startStopItem);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.about"), null, (_, _) => ShowAbout()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.homepage"), null, (_, _) => OpenProjectHomepage()));
-        menu.Items.Add(startStopItem);
-        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.restart"), null, (_, _) => RestartTransport()));
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(launchAtLoginItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.exit"), null, (_, _) => ExitThread()));
         return menu;
@@ -370,7 +386,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void OnNotifyIconMouseUp(object? sender, MouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Right)
+        if (e.Button is not (MouseButtons.Left or MouseButtons.Right))
         {
             return;
         }
@@ -417,15 +433,29 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void UpdateMenu()
     {
-        statusItem.Text = AppText.Format("status.prefix", status);
-        clientModeItem.Checked = config.Mode == SyncMode.Client;
-        serverModeItem.Checked = config.Mode == SyncMode.Server;
+        var needsSetup = !CanStartTransport(config);
+        var statusSymbol = needsSetup ? "⚠" : peerCount > 0 ? "●" : transport is null ? "○" : "◌";
+        statusItem.Text = $"{statusSymbol} {AppText.Format("status.prefix", status)}";
+        var tooltip = $"{AppText.Text("app.name")}: {status}";
+        notifyIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..63];
+        statusActionItem.Visible = !isSyncPaused && (needsSetup || transport is null);
+        statusActionItem.Text = AppText.Text(needsSetup ? "menu.completeSetup" : "menu.reconnect");
         inputSharingItem.Checked = config.InputSharingEnabled;
-        startStopItem.Text = AppText.Text(transport is null ? "menu.start" : "menu.stop");
+        startStopItem.Text = AppText.Text(isSyncPaused || transport is null ? "menu.resumeSync" : "menu.pauseSync");
         launchAtLoginItem.Checked = IsLaunchAtLoginEnabled();
         RefreshControlDeviceMenu();
         RefreshSendFilesMenu();
         RefreshHistoryMenu();
+    }
+
+    private void HandleStatusAction()
+    {
+        if (!CanStartTransport(config))
+        {
+            ShowConfiguration(firstRun: true);
+            return;
+        }
+        RestartTransport();
     }
 
     /// One entry per online peer: files go to exactly the device the user picks, never to every
@@ -1179,13 +1209,6 @@ internal sealed class TrayAppContext : ApplicationContext
         UpdateInputCoordinator();
     }
 
-    private void SetMode(SyncMode mode)
-    {
-        config.Mode = mode;
-        ConfigStore.Save(config);
-        RestartTransport();
-    }
-
     private void ToggleInputSharing()
     {
         config.InputSharingEnabled = !config.InputSharingEnabled;
@@ -1202,9 +1225,9 @@ internal sealed class TrayAppContext : ApplicationContext
         SyncInputConfig();
     }
 
-    private void ShowConfiguration()
+    private void ShowConfiguration(bool firstRun = false)
     {
-        using var form = new ConfigForm(config);
+        using var form = new ConfigForm(config, firstRun);
         if (form.ShowDialog() != DialogResult.OK)
         {
             return;
@@ -1276,6 +1299,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void RestartTransport()
     {
+        isSyncPaused = false;
         transport?.Dispose();
         peerCount = 0;
         fileTransferCoordinator.CancelAll();
@@ -1361,7 +1385,7 @@ internal sealed class TrayAppContext : ApplicationContext
         layoutWatchers.Clear();
         UpdateCursorReporting();
         UpdateInputCoordinator();
-        status = AppText.Text("status.stopped");
+        status = AppText.Text(isSyncPaused ? "status.syncPaused" : "status.stopped");
         UpdateMenu();
     }
 
@@ -1369,10 +1393,12 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         if (transport is null)
         {
+            isSyncPaused = false;
             RestartTransport();
         }
         else
         {
+            isSyncPaused = true;
             StopTransport();
         }
     }
@@ -1413,6 +1439,13 @@ internal sealed class TrayAppContext : ApplicationContext
         if (paths is null)
         {
             status = AppText.Text("status.copyFilesFirst");
+            UpdateMenu();
+            return;
+        }
+
+        if (isSyncPaused)
+        {
+            status = AppText.Text("status.syncPaused");
             UpdateMenu();
             return;
         }
@@ -1555,7 +1588,7 @@ internal sealed class TrayAppContext : ApplicationContext
             {
                 status = AppText.Text("status.filesReceived");
                 UpdateMenu();
-                notifyIcon.ShowBalloonTip(3000, AppText.Text("app.name"), AppText.Text("status.filesReceived"), ToolTipIcon.Info);
+                notifyIcon.ShowBalloonTip(5000, AppText.Text("app.name"), AppText.Text("status.filesReceivedPasteHint"), ToolTipIcon.Info);
             }
         }
     }
@@ -1848,7 +1881,8 @@ internal sealed class TrayAppContext : ApplicationContext
 
         foreach (var entry in history)
         {
-            var item = new ToolStripMenuItem(entry.Content.HistoryTitle)
+            var time = entry.CreatedAt.ToLocalTime().ToString("t");
+            var item = new ToolStripMenuItem($"{entry.Content.HistoryTitle} · {time}")
             {
                 Tag = entry.Id
             };

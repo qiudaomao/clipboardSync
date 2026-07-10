@@ -9,6 +9,7 @@ internal sealed class ConfigForm : Form
 {
     private readonly ComboBox modeBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox hostBox = new();
+    private readonly Button copyHostButton = new() { AutoSize = true };
     private readonly Label hostHint = new()
     {
         AutoSize = true,
@@ -21,6 +22,7 @@ internal sealed class ConfigForm : Form
         Value = 8787
     };
     private readonly TextBox passwordBox = new() { UseSystemPasswordChar = true };
+    private readonly Button copyPasswordButton = new() { AutoSize = true };
     private readonly CheckBox inputSharingBox = new() { AutoSize = true };
     private readonly CheckBox reverseScrollBox = new() { AutoSize = true };
     private readonly ComboBox shiftModifierBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -31,7 +33,7 @@ internal sealed class ConfigForm : Form
 
     public AppConfig Config { get; private set; }
 
-    public ConfigForm(AppConfig config)
+    public ConfigForm(AppConfig config, bool firstRun = false)
     {
         Config = config.Clone();
 
@@ -41,14 +43,48 @@ internal sealed class ConfigForm : Form
         MinimizeBox = false;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(450, 500);
-        MinimumSize = new Size(450, 500);
+        ClientSize = new Size(500, 580);
+        MinimumSize = new Size(500, 580);
+
+        var header = new Label
+        {
+            Text = AppText.Text(firstRun ? "settings.firstRunHeader" : "settings.title"),
+            AutoSize = true,
+            Font = new Font(SystemFonts.MessageBoxFont.FontFamily, 13f, FontStyle.Bold),
+            Margin = new Padding(12, 12, 12, 2)
+        };
+        var subtitle = new Label
+        {
+            Text = AppText.Text(firstRun ? "settings.firstRunSubtitle" : "settings.sectionConnection"),
+            AutoSize = false,
+            Dock = DockStyle.Top,
+            Height = firstRun ? 48 : 28,
+            ForeColor = SystemColors.GrayText,
+            Padding = new Padding(12, 0, 12, 0)
+        };
 
         inputSharingBox.Text = AppText.Text("settings.enableInputSharing");
         reverseScrollBox.Text = AppText.Text("settings.reverseVerticalScroll");
+        copyHostButton.Text = AppText.Text("settings.copyAddress");
+        copyPasswordButton.Text = AppText.Text("settings.copyPassword");
+        copyHostButton.Click += (_, _) =>
+        {
+            var address = hostBox.Text.Trim();
+            if (!string.IsNullOrEmpty(address))
+            {
+                Clipboard.SetText(address);
+            }
+        };
+        copyPasswordButton.Click += (_, _) =>
+        {
+            if (!string.IsNullOrEmpty(passwordBox.Text))
+            {
+                Clipboard.SetText(passwordBox.Text);
+            }
+        };
 
-        modeBox.Items.AddRange(new object[] { AppText.Text("settings.client"), AppText.Text("settings.server") });
-        modeBox.SelectedIndex = Config.Mode == SyncMode.Client ? 0 : 1;
+        modeBox.Items.AddRange(new object[] { AppText.Text("settings.server"), AppText.Text("settings.client") });
+        modeBox.SelectedIndex = Config.Mode == SyncMode.Server ? 0 : 1;
         clientHostDraft = NetworkAddress.IsLoopbackHost(Config.Host) ? "" : Config.Host;
         hostBox.Text = clientHostDraft;
         portBox.Value = Math.Clamp(Config.Port, 1, 65_535);
@@ -62,7 +98,7 @@ internal sealed class ConfigForm : Form
         inputSharingBox.CheckedChanged += (_, _) => UpdateInputSharingState();
         hostBox.TextChanged += (_, _) =>
         {
-            if (modeBox.SelectedIndex != 1)
+            if (modeBox.SelectedIndex == 1)
             {
                 clientHostDraft = hostBox.Text;
             }
@@ -92,7 +128,7 @@ internal sealed class ConfigForm : Form
         AddRow(layout, 0, AppText.Text("settings.mode"), modeBox);
         AddRow(layout, 1, AppText.Text("settings.host"), BuildHostControl());
         AddRow(layout, 2, AppText.Text("settings.port"), portBox);
-        AddRow(layout, 3, AppText.Text("settings.password"), passwordBox);
+        AddRow(layout, 3, AppText.Text("settings.password"), BuildPasswordControl());
         AddRow(layout, 4, AppText.Text("settings.input"), inputSharingBox);
         AddRow(layout, 5, AppText.Text("settings.scroll"), reverseScrollBox);
         AddRow(layout, 6, AppText.Text("settings.modifierKeys"), BuildModifierMapControl());
@@ -114,13 +150,17 @@ internal sealed class ConfigForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3
+            RowCount = 5
         };
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
-        root.Controls.Add(layout, 0, 0);
-        root.Controls.Add(buttons, 0, 2);
+        root.Controls.Add(header, 0, 0);
+        root.Controls.Add(subtitle, 0, 1);
+        root.Controls.Add(layout, 0, 2);
+        root.Controls.Add(buttons, 0, 4);
 
         AcceptButton = okButton;
         CancelButton = cancelButton;
@@ -192,22 +232,43 @@ internal sealed class ConfigForm : Form
         var panel = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            ColumnCount = 1,
+            ColumnCount = 2,
             RowCount = 2,
             Margin = Padding.Empty
         };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 26));
         panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
         hostBox.Dock = DockStyle.Fill;
         hostHint.Dock = DockStyle.Fill;
         panel.Controls.Add(hostBox, 0, 0);
+        panel.Controls.Add(copyHostButton, 1, 0);
         panel.Controls.Add(hostHint, 0, 1);
+        panel.SetColumnSpan(hostHint, 2);
+        return panel;
+    }
+
+    private Control BuildPasswordControl()
+    {
+        var panel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = Padding.Empty
+        };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        passwordBox.Dock = DockStyle.Fill;
+        panel.Controls.Add(passwordBox, 0, 0);
+        panel.Controls.Add(copyPasswordButton, 1, 0);
         return panel;
     }
 
     private void UpdateModeState()
     {
-        var isClient = modeBox.SelectedIndex != 1;
+        var isClient = modeBox.SelectedIndex == 1;
         if (isClient)
         {
             hostBox.ReadOnly = false;
@@ -218,10 +279,16 @@ internal sealed class ConfigForm : Form
             clientHostDraft = hostBox.ReadOnly ? clientHostDraft : hostBox.Text.Trim();
             hostBox.ReadOnly = true;
             hostBox.Text = NetworkAddress.HostAddress();
+            if (string.IsNullOrEmpty(passwordBox.Text))
+            {
+                passwordBox.Text = Guid.NewGuid().ToString("N")[..20];
+            }
         }
         hostHint.Text = isClient
             ? AppText.Text("settings.hostClientHint")
             : AppText.Text("settings.hostServerHint");
+        copyHostButton.Visible = !isClient;
+        copyPasswordButton.Visible = !isClient;
     }
 
     private void UpdateInputSharingState()
@@ -235,7 +302,7 @@ internal sealed class ConfigForm : Form
 
     private void Save()
     {
-        Config.Mode = modeBox.SelectedIndex == 1 ? SyncMode.Server : SyncMode.Client;
+        Config.Mode = modeBox.SelectedIndex == 0 ? SyncMode.Server : SyncMode.Client;
         var host = Config.Mode == SyncMode.Client ? hostBox.Text.Trim() : Config.Host;
         var password = passwordBox.Text;
 

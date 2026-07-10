@@ -11,6 +11,7 @@ internal sealed class ScreenLayoutForm : Form
 {
     private readonly ScreenLayoutCanvas canvas = new();
     private readonly Button doneButton;
+    private readonly Label savedLabel;
 
     public event Action<List<ScreenLayoutEntry>>? LayoutChanged;
     public event Action<string>? ForgetDevice;
@@ -51,8 +52,31 @@ internal sealed class ScreenLayoutForm : Form
 
         canvas.Dock = DockStyle.Fill;
         canvas.BorderStyle = BorderStyle.FixedSingle;
-        canvas.LayoutChanged += entries => LayoutChanged?.Invoke(entries);
-        canvas.ForgetDevice += id => ForgetDevice?.Invoke(id);
+        savedLabel = new Label
+        {
+            Text = "",
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+            Padding = new Padding(8, 6, 8, 0)
+        };
+        canvas.LayoutChanged += entries =>
+        {
+            savedLabel.Text = AppText.Text("layout.saved");
+            LayoutChanged?.Invoke(entries);
+        };
+        canvas.ForgetDevice += id =>
+        {
+            var result = MessageBox.Show(
+                this,
+                AppText.Text("layout.forgetConfirm"),
+                AppText.Text("layout.forgetDevice"),
+                MessageBoxButtons.OKCancel,
+                MessageBoxIcon.Warning);
+            if (result == DialogResult.OK)
+            {
+                ForgetDevice?.Invoke(id);
+            }
+        };
 
         doneButton = new Button
         {
@@ -61,6 +85,12 @@ internal sealed class ScreenLayoutForm : Form
             Size = new Size(88, 28)
         };
         doneButton.Click += (_, _) => Close();
+        var autoArrangeButton = new Button
+        {
+            Text = AppText.Text("layout.autoArrange"),
+            AutoSize = true
+        };
+        autoArrangeButton.Click += (_, _) => canvas.AutoArrange();
 
         var buttonPanel = new FlowLayoutPanel
         {
@@ -70,6 +100,8 @@ internal sealed class ScreenLayoutForm : Form
             Padding = new Padding(0, 8, 0, 0)
         };
         buttonPanel.Controls.Add(doneButton);
+        buttonPanel.Controls.Add(savedLabel);
+        buttonPanel.Controls.Add(autoArrangeButton);
 
         var root = new TableLayoutPanel
         {
@@ -96,6 +128,7 @@ internal sealed class ScreenLayoutForm : Form
         canvas.OnlineDeviceIds = onlineDeviceIds;
         canvas.DeviceEnabledMap = deviceEnabledMap;
         canvas.Entries = entries;
+        savedLabel.Text = "";
     }
 
     /// Called by TrayAppContext with this device's own live cursor position, already resolved to a
@@ -170,6 +203,33 @@ internal sealed class ScreenLayoutCanvas : Panel
         DoubleBuffered = true;
         ResizeRedraw = true;
         BackColor = SystemColors.ControlLightLight;
+    }
+
+    public void AutoArrange()
+    {
+        var deviceIds = entries.Select(item => item.DeviceId).Distinct().OrderBy(id => id == LocalDeviceId ? 0 : 1)
+            .ThenBy(id => DeviceNames.TryGetValue(id, out var name) ? name : id, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+        var nextX = 0d;
+        foreach (var deviceId in deviceIds)
+        {
+            var group = entries.Where(item => item.DeviceId == deviceId).ToList();
+            if (group.Count == 0)
+            {
+                continue;
+            }
+            var minX = group.Min(item => item.X);
+            var minY = group.Min(item => item.Y);
+            var maxX = group.Max(item => item.X + item.Width);
+            foreach (var entry in group)
+            {
+                entry.X = nextX + entry.X - minX;
+                entry.Y -= minY;
+            }
+            nextX += maxX - minX;
+        }
+        Invalidate();
+        LayoutChanged?.Invoke(entries.Select(item => item.Clone()).ToList());
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -346,7 +406,13 @@ internal sealed class ScreenLayoutCanvas : Panel
 
     private string ScreenLabel(ScreenLayoutEntry entry)
     {
-        var name = DeviceNames.TryGetValue(entry.DeviceId, out var deviceName) ? deviceName : entry.DeviceId;
+        var suffix = entry.DeviceId.Length <= 4 ? entry.DeviceId.ToUpperInvariant() : entry.DeviceId[^4..].ToUpperInvariant();
+        var resolvedName = DeviceNames.TryGetValue(entry.DeviceId, out var deviceName)
+            ? deviceName
+            : AppText.Format("device.unknownWithSuffix", suffix);
+        var name = entry.DeviceId == LocalDeviceId
+            ? $"{resolvedName} · {AppText.Text("layout.thisDevice")}"
+            : resolvedName;
         if (entries.Count(item => item.DeviceId == entry.DeviceId) <= 1)
         {
             return name;

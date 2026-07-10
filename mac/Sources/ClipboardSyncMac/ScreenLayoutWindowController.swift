@@ -7,6 +7,7 @@ final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
 
     private let canvasView = ScreenLayoutCanvasView()
     private let doneButton = NSButton(title: AppText.text("layout.done"), target: nil, action: nil)
+    private let savedLabel = NSTextField(labelWithString: "")
 
     init() {
         let window = NSWindow(
@@ -34,6 +35,7 @@ final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
         canvasView.onlineDeviceIds = onlineDeviceIds
         canvasView.deviceEnabledMap = deviceEnabledMap
         canvasView.entries = entries
+        savedLabel.stringValue = ""
 
         NSApp.activate(ignoringOtherApps: true)
         if window?.isVisible == false {
@@ -90,10 +92,11 @@ final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
         canvasView.layer?.borderWidth = 1
         canvasView.layer?.borderColor = NSColor.separatorColor.cgColor
         canvasView.onLayoutChanged = { [weak self] entries in
+            self?.savedLabel.stringValue = AppText.text("layout.saved")
             self?.onLayoutChanged?(entries)
         }
         canvasView.onForgetDevice = { [weak self] id in
-            self?.onForgetDevice?(id)
+            self?.confirmForgetDevice(id)
         }
         canvasView.translatesAutoresizingMaskIntoConstraints = false
         canvasView.heightAnchor.constraint(greaterThanOrEqualToConstant: 260).isActive = true
@@ -104,7 +107,14 @@ final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
         doneButton.bezelStyle = .rounded
         doneButton.controlSize = .large
 
-        let buttonStack = NSStackView(views: [NSView(), doneButton])
+        let autoArrangeButton = NSButton(title: AppText.text("layout.autoArrange"), target: self, action: #selector(autoArrange))
+        autoArrangeButton.bezelStyle = .rounded
+        autoArrangeButton.controlSize = .large
+
+        savedLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        savedLabel.textColor = .secondaryLabelColor
+
+        let buttonStack = NSStackView(views: [autoArrangeButton, NSView(), savedLabel, doneButton])
         buttonStack.orientation = .horizontal
         buttonStack.distribution = .fill
 
@@ -128,6 +138,22 @@ final class ScreenLayoutWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func done() {
         close()
+    }
+
+    @objc private func autoArrange() {
+        canvasView.autoArrange()
+    }
+
+    private func confirmForgetDevice(_ id: String) {
+        let alert = NSAlert()
+        alert.messageText = AppText.text("layout.forgetDevice")
+        alert.informativeText = AppText.text("layout.forgetConfirm")
+        alert.addButton(withTitle: AppText.text("layout.forgetDevice"))
+        alert.addButton(withTitle: AppText.text("settings.cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+        onForgetDevice?(id)
     }
 }
 
@@ -165,6 +191,31 @@ final class ScreenLayoutCanvasView: NSView {
     private var localCursorPosition: CGPoint?
     private var remoteCursorPositions: [String: (canvasPoint: CGPoint, lastUpdated: Date)] = [:]
     private static let remoteCursorTimeout: TimeInterval = 3.0
+
+    func autoArrange() {
+        let deviceIds = Set(entries.map(\.deviceId)).sorted { left, right in
+            if left == localDeviceId { return true }
+            if right == localDeviceId { return false }
+            let leftName = deviceNames[left] ?? left
+            let rightName = deviceNames[right] ?? right
+            return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
+        }
+        var nextX = 0.0
+        for deviceId in deviceIds {
+            let indices = entries.indices.filter { entries[$0].deviceId == deviceId }
+            guard !indices.isEmpty else { continue }
+            let minX = indices.map { entries[$0].x }.min() ?? 0
+            let minY = indices.map { entries[$0].y }.min() ?? 0
+            let maxX = indices.map { entries[$0].x + entries[$0].width }.max() ?? minX
+            for index in indices {
+                entries[index].x = nextX + entries[index].x - minX
+                entries[index].y = entries[index].y - minY
+            }
+            nextX += maxX - minX
+        }
+        needsDisplay = true
+        onLayoutChanged?(entries)
+    }
 
     override var isFlipped: Bool {
         true
@@ -300,7 +351,11 @@ final class ScreenLayoutCanvasView: NSView {
     }
 
     private func screenLabel(for entry: ScreenLayoutEntry) -> String {
-        let name = deviceNames[entry.deviceId] ?? entry.deviceId
+        let suffix = String(entry.deviceId.suffix(4)).uppercased()
+        let resolvedName = deviceNames[entry.deviceId] ?? AppText.format("device.unknownWithSuffix", suffix)
+        let name = entry.deviceId == localDeviceId
+            ? "\(resolvedName) · \(AppText.text("layout.thisDevice"))"
+            : resolvedName
         let siblingCount = entries.filter { $0.deviceId == entry.deviceId }.count
         guard siblingCount > 1, let index = Self.screenIndex(entry.screenId) else {
             return name
