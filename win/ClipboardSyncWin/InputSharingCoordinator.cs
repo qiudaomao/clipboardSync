@@ -1407,8 +1407,27 @@ internal sealed class InputSharingCoordinator : IDisposable
         };
     }
 
+    /// Keys whose hardware scan codes carry the E0 prefix. Injecting them without
+    /// KEYEVENTF_EXTENDEDKEY makes Windows treat e.g. VK_LEFT as the numpad arrow, and with
+    /// NumLock on the system wraps it in fake Shift events that terminals can't tell from a real
+    /// Shift — an arrow key then reaches a console as Shift+Arrow (VT "ESC[1;2D"), which shells
+    /// like adb's print as stray "2D"/"2C" instead of moving the cursor.
+    private static readonly HashSet<Keys> ExtendedKeys =
+    [
+        Keys.Left, Keys.Right, Keys.Up, Keys.Down,
+        Keys.Home, Keys.End, Keys.PageUp, Keys.PageDown,
+        Keys.Insert, Keys.Delete, Keys.LWin, Keys.RWin
+    ];
+
     private static void SendKeyboardInput(ushort virtualKey, bool keyUp)
     {
+        // Include the layout's scan code alongside the virtual key so injected presses look like
+        // physical ones to consumers that read scan codes (consoles, games, RDP).
+        var flags = keyUp ? KeyboardFlags.KeyUp : 0;
+        if (ExtendedKeys.Contains((Keys)virtualKey))
+        {
+            flags |= KeyboardFlags.ExtendedKey;
+        }
         var input = new INPUT
         {
             type = InputType.Keyboard,
@@ -1417,7 +1436,8 @@ internal sealed class InputSharingCoordinator : IDisposable
                 ki = new KEYBDINPUT
                 {
                     wVk = virtualKey,
-                    dwFlags = keyUp ? KeyboardFlags.KeyUp : 0
+                    wScan = (ushort)MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC),
+                    dwFlags = flags
                 }
             }
         };
@@ -1488,6 +1508,11 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
+
+    private const uint MAPVK_VK_TO_VSC = 0;
+
+    [DllImport("user32.dll")]
+    private static extern uint MapVirtualKey(uint uCode, uint uMapType);
 
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int nIndex);
@@ -1576,6 +1601,7 @@ internal sealed class InputSharingCoordinator : IDisposable
     [Flags]
     private enum KeyboardFlags : uint
     {
+        ExtendedKey = 0x0001,
         KeyUp = 0x0002
     }
 
