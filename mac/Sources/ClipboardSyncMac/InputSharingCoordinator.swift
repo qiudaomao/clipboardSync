@@ -44,6 +44,7 @@ final class InputSharingCoordinator {
     private var didRequestInputMonitoring = false
     private var localCursorHidden = false
     private var didAllowBackgroundCursorHide = false
+    private var localCursorDetached = false
 
     init(deviceId: String, layoutStore: ScreenLayoutStore) {
         self.deviceId = deviceId
@@ -58,6 +59,7 @@ final class InputSharingCoordinator {
         sendPressedModifierKeyUps()
         removeEventTap()
         showLocalCursor()
+        reattachLocalMouseToCursor()
         activeScreenId = nil
         activeTargetDeviceId = nil
         receivingRemote = false
@@ -435,6 +437,7 @@ final class InputSharingCoordinator {
         activeTargetDeviceId = target.deviceId
         lastCrossedEdge = edge
         hideLocalCursor()
+        detachLocalMouseFromCursor()
         sendCapture(action: "start", targetDeviceId: target.deviceId, screenId: target.screenId, edge: edge, entry: target)
         sendMouseMoveNow()
         updateStatus()
@@ -495,6 +498,10 @@ final class InputSharingCoordinator {
         if let returnToScreenId {
             warpLocalCursorToReturnPoint(screenId: returnToScreenId)
         }
+        // Re-associate AFTER the warp: besides unfreezing the cursor, this also cancels the
+        // window server's post-warp hardware-event suppression interval (~0.25s by default),
+        // which otherwise leaves the cursor dead at the edge on every hand-back.
+        reattachLocalMouseToCursor()
         updateStatus()
     }
 
@@ -1038,6 +1045,28 @@ final class InputSharingCoordinator {
         }
         localCursorHidden = false
         CGDisplayShowCursor(CGMainDisplayID())
+    }
+
+    /// While relaying input to a peer, freeze the local (hidden) cursor in place instead of
+    /// letting it wander and pin against this machine's physical screen edges. A pinned cursor
+    /// rubs against macOS edge behaviors — menu-bar/notch barriers, rounded-corner containment,
+    /// Dock-reveal pressure — which absorb or distort pointer motion, felt on the peer as
+    /// stutter, sticking, and jumps whenever its cursor is near a screen edge. Mouse-moved
+    /// events keep delivering delta values while disassociated, so relaying is unaffected.
+    private func detachLocalMouseFromCursor() {
+        guard !localCursorDetached else {
+            return
+        }
+        localCursorDetached = true
+        CGAssociateMouseAndMouseCursorPosition(0)
+    }
+
+    private func reattachLocalMouseToCursor() {
+        guard localCursorDetached else {
+            return
+        }
+        localCursorDetached = false
+        CGAssociateMouseAndMouseCursorPosition(1)
     }
 
     private func allowBackgroundCursorHideIfNeeded() {
