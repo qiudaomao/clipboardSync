@@ -14,10 +14,24 @@ using System.Threading.Tasks;
 
 namespace ClipboardSyncWin;
 
+/// Names the WebSocket subprotocol that marks a connection as the dedicated low-latency input
+/// channel. Both sides speak the same wire format on either connection; the split only exists so
+/// small input frames never queue behind multi-megabyte clipboard/file/tunnel frames on one TCP
+/// stream (head-of-line blocking felt as mouse stutter). Negotiated per RFC 6455: a client that
+/// wants the channel requests this subprotocol, and only a server that understands it echoes it
+/// back — an old peer fails the negotiation and everything transparently rides the one data
+/// connection as before.
+internal static class TransportChannels
+{
+    public const string InputSubprotocol = "clipboardsync-input";
+}
+
 internal interface ISyncTransport : IDisposable
 {
     event Action<string>? StatusChanged;
-    event Action<string>? MessageReceived;
+    /// Delivers a received payload; the flag is true when it arrived on the dedicated input
+    /// channel, letting the app process it on a path that never waits on bulk work.
+    event Action<string, bool>? MessageReceived;
     event Action<int>? PeerCountChanged;
 
     void Start();
@@ -25,8 +39,9 @@ internal interface ISyncTransport : IDisposable
     /// <c>to</c> is an optional routing hint naming the intended receiver's device id. A server
     /// transport delivers the message to just that peer's connection when it knows which one that
     /// is (falling back to broadcast); a client transport ignores it — its server relays by the
-    /// same hint carried inside the message envelope.
-    Task SendAsync(string message, string? to = null);
+    /// same hint carried inside the message envelope. <c>realtime</c> prefers the dedicated input
+    /// channel when one is established, falling back to the data connection when it isn't.
+    Task SendAsync(string message, string? to = null, bool realtime = false);
 }
 
 internal sealed class ClientTransport : ISyncTransport
@@ -36,11 +51,17 @@ internal sealed class ClientTransport : ISyncTransport
     private readonly string host;
     private readonly int port;
     private readonly SemaphoreSlim sendLock = new(1, 1);
+    private readonly SemaphoreSlim inputSendLock = new(1, 1);
     private CancellationTokenSource? cts;
     private ClientWebSocket? socket;
+    /// Optional second connection dedicated to input frames, so they never queue behind bulk
+    /// clipboard/file/tunnel frames on the data connection's TCP stream. Established only when
+    /// the server echoes the input subprotocol; an old server fails the negotiation and the
+    /// data connection carries everything, exactly as before.
+    private ClientWebSocket? inputSocket;
 
     public event Action<string>? StatusChanged;
-    public event Action<string>? MessageReceived;
+    public event Action<string, bool>? MessageReceived;
     public event Action<int>? PeerCountChanged;
 
     public ClientTransport(string host, int port)
@@ -62,22 +83,28 @@ internal sealed class ClientTransport : ISyncTransport
         socket?.Abort();
         socket?.Dispose();
         socket = null;
+        inputSocket?.Abort();
+        inputSocket?.Dispose();
+        inputSocket = null;
         PeerCountChanged?.Invoke(0);
         StatusChanged?.Invoke(AppText.Text("status.stopped"));
     }
 
-    public async Task SendAsync(string message, string? to = null)
+    public async Task SendAsync(string message, string? to = null, bool realtime = false)
     {
-        // A client has a single connection to its server; the server relays targeted messages
-        // using the routing hint inside the envelope itself.
-        var activeSocket = socket;
+        // A client has a single connection per channel to its server; the server relays targeted
+        // messages using the routing hint inside the envelope itself.
+        var input = inputSocket;
+        var useInput = realtime && input?.State == WebSocketState.Open;
+        var activeSocket = useInput ? input : socket;
         if (activeSocket?.State != WebSocketState.Open)
         {
             return;
         }
 
         var bytes = Encoding.UTF8.GetBytes(message);
-        await sendLock.WaitAsync().ConfigureAwait(false);
+        var activeLock = useInput ? inputSendLock : sendLock;
+        await activeLock.WaitAsync().ConfigureAwait(false);
         try
         {
             await activeSocket.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);
@@ -88,7 +115,7 @@ internal sealed class ClientTransport : ISyncTransport
         }
         finally
         {
-            sendLock.Release();
+            activeLock.Release();
         }
     }
 
@@ -96,6 +123,7 @@ internal sealed class ClientTransport : ISyncTransport
     {
         Stop();
         sendLock.Dispose();
+        inputSendLock.Dispose();
         cts?.Dispose();
     }
 
@@ -112,7 +140,24 @@ internal sealed class ClientTransport : ISyncTransport
                 await ws.ConnectAsync(new Uri($"ws://{host}:{port}/"), token).ConfigureAwait(false);
                 PeerCountChanged?.Invoke(1);
                 StatusChanged?.Invoke(AppText.Format("status.connected", host, port));
-                await ReceiveLoopAsync(ws, token).ConfigureAwait(false);
+                using var inputChannelCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                var inputChannelTask = RunInputChannelAsync(ws, inputChannelCts.Token);
+                try
+                {
+                    await ReceiveLoopAsync(ws, token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    inputChannelCts.Cancel();
+                    try
+                    {
+                        await inputChannelTask.ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Input channel teardown failures are irrelevant; it's an optimization.
+                    }
+                }
                 if (!token.IsCancellationRequested)
                 {
                     PeerCountChanged?.Invoke(0);
@@ -157,7 +202,62 @@ internal sealed class ClientTransport : ISyncTransport
         }
     }
 
-    private async Task ReceiveLoopAsync(ClientWebSocket ws, CancellationToken token)
+    /// Maintains the auxiliary input-channel connection while the given data connection is open.
+    /// If the server doesn't echo the subprotocol it predates the channel split — give up until
+    /// the next data connection; transient failures retry, and input rides the data connection
+    /// in the meantime.
+    private async Task RunInputChannelAsync(ClientWebSocket dataSocket, CancellationToken token)
+    {
+        while (!token.IsCancellationRequested && dataSocket.State == WebSocketState.Open)
+        {
+            try
+            {
+                using var ws = new ClientWebSocket();
+                ConfigureKeepAlive(ws);
+                ws.Options.AddSubProtocol(TransportChannels.InputSubprotocol);
+                await ws.ConnectAsync(new Uri($"ws://{host}:{port}/"), token).ConfigureAwait(false);
+                if (ws.SubProtocol != TransportChannels.InputSubprotocol)
+                {
+                    ws.Abort();
+                    return;
+                }
+                inputSocket = ws;
+                try
+                {
+                    await ReceiveLoopAsync(ws, token, viaInputChannel: true).ConfigureAwait(false);
+                }
+                finally
+                {
+                    inputSocket = null;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (WebSocketException)
+            {
+                // Servers predating the split reject or mishandle the subprotocol request;
+                // treat it as unsupported rather than hammering them with retries.
+                return;
+            }
+            catch
+            {
+                // Transient failure; fall through to the retry delay.
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
+    private async Task ReceiveLoopAsync(ClientWebSocket ws, CancellationToken token, bool viaInputChannel = false)
     {
         var buffer = new byte[8192];
         while (ws.State == WebSocketState.Open && !token.IsCancellationRequested)
@@ -182,7 +282,7 @@ internal sealed class ClientTransport : ISyncTransport
             {
                 try
                 {
-                    MessageReceived?.Invoke(Encoding.UTF8.GetString(message.ToArray()));
+                    MessageReceived?.Invoke(Encoding.UTF8.GetString(message.ToArray()), viaInputChannel);
                 }
                 catch
                 {
@@ -211,7 +311,7 @@ internal sealed class ServerTransport : ISyncTransport
     public string? LocalDeviceId { get; set; }
 
     public event Action<string>? StatusChanged;
-    public event Action<string>? MessageReceived;
+    public event Action<string, bool>? MessageReceived;
     public event Action<int>? PeerCountChanged;
 
     public ServerTransport(int port)
@@ -250,9 +350,9 @@ internal sealed class ServerTransport : ISyncTransport
         StatusChanged?.Invoke(AppText.Text("status.stopped"));
     }
 
-    public Task SendAsync(string message, string? to = null)
+    public Task SendAsync(string message, string? to = null, bool realtime = false)
     {
-        return DeliverAsync(message, to, excludedPeer: null);
+        return DeliverAsync(message, to, excludedPeer: null, preferInput: realtime);
     }
 
     public void Dispose()
@@ -285,13 +385,15 @@ internal sealed class ServerTransport : ISyncTransport
                     }
                     try
                     {
-                        MessageReceived?.Invoke(text);
+                        MessageReceived?.Invoke(text, peer.IsInputChannel);
                     }
                     catch
                     {
                         StatusChanged?.Invoke(AppText.Text("status.messageHandlerFailed"));
                     }
-                    await DeliverAsync(text, routing?.To, id).ConfigureAwait(false);
+                    // Relay on the same class of channel the message arrived on, so one peer's
+                    // input frames reach the next peer's input connection, not its bulk stream.
+                    await DeliverAsync(text, routing?.To, id, preferInput: peer.IsInputChannel).ConfigureAwait(false);
                 };
                 peer.Ready += PushStatus;
                 peer.Closed += () =>
@@ -328,8 +430,11 @@ internal sealed class ServerTransport : ISyncTransport
     /// Sends the message to the one ready peer registered under the <c>to</c> device id, or to
     /// every ready peer (except <c>excludedPeer</c>) when the target is absent or not (yet)
     /// known — a peer that hasn't sent anything since connecting has no registered device id, and
-    /// the receiver-side target filter makes the broadcast fallback harmless.
-    private async Task DeliverAsync(string message, string? to, Guid? excludedPeer)
+    /// the receiver-side target filter makes the broadcast fallback harmless. Targeted delivery
+    /// prefers the device's connection matching the message's channel (input vs data), falling
+    /// back to whichever it has; broadcasts go to data connections only, since every device has
+    /// exactly one and duplicates on the auxiliary input channel would double-deliver.
+    private async Task DeliverAsync(string message, string? to, Guid? excludedPeer, bool preferInput = false)
     {
         if (!string.IsNullOrEmpty(to))
         {
@@ -337,21 +442,26 @@ internal sealed class ServerTransport : ISyncTransport
             {
                 return;
             }
-            var target = peers.FirstOrDefault(item => item.Value.DeviceId == to && item.Value.IsReady);
-            if (target.Value is not null)
+            var candidates = peers
+                .Where(item => item.Value.DeviceId == to && item.Value.IsReady && !(excludedPeer.HasValue && item.Key == excludedPeer.Value))
+                .Select(item => item.Value)
+                .ToList();
+            var target = candidates.FirstOrDefault(peer => peer.IsInputChannel == preferInput) ?? candidates.FirstOrDefault();
+            if (target is not null)
             {
-                if (excludedPeer.HasValue && target.Key == excludedPeer.Value)
-                {
-                    return;
-                }
                 try
                 {
-                    await target.Value.SendTextAsync(message).ConfigureAwait(false);
+                    await target.SendTextAsync(message).ConfigureAwait(false);
                 }
                 catch
                 {
-                    target.Value.Close();
+                    target.Close();
                 }
+                return;
+            }
+            if (peers.Any(item => item.Value.DeviceId == to && item.Value.IsReady))
+            {
+                // The only matching connection is the excluded source itself; don't broadcast.
                 return;
             }
         }
@@ -368,7 +478,7 @@ internal sealed class ServerTransport : ISyncTransport
                 continue;
             }
 
-            if (!item.Value.IsReady)
+            if (!item.Value.IsReady || item.Value.IsInputChannel)
             {
                 continue;
             }
@@ -386,7 +496,8 @@ internal sealed class ServerTransport : ISyncTransport
 
     private void PushStatus()
     {
-        var readyPeerCount = peers.Count(item => item.Value.IsReady);
+        // Input-channel connections are auxiliary; a device's presence is its data connection.
+        var readyPeerCount = peers.Count(item => item.Value.IsReady && !item.Value.IsInputChannel);
         PeerCountChanged?.Invoke(readyPeerCount);
         StatusChanged?.Invoke(AppText.Format("status.serverPeers", NetworkAddress.ServerAddress(port), readyPeerCount));
     }
@@ -405,6 +516,8 @@ internal sealed class ServerPeer
     private MemoryStream? fragmentBuffer;
 
     public bool IsReady { get; private set; }
+    /// True when the client negotiated the dedicated input subprotocol during the handshake.
+    public bool IsInputChannel { get; private set; }
     /// The device id this connection last announced via an envelope's From hint, once known.
     public string? DeviceId { get; set; }
     public event Action? Ready;
@@ -498,11 +611,24 @@ internal sealed class ServerPeer
             return false;
         }
 
+        // Echo the input subprotocol when the client requests it: that both marks this
+        // connection as the low-latency input channel and tells the client the server
+        // understands the split (an old server's response omits it, and the client falls back
+        // to the single data connection).
+        var protocolHeader = "";
+        var requestedProtocols = GetHeaderValue(header, "Sec-WebSocket-Protocol");
+        if (requestedProtocols?.Split(',').Select(item => item.Trim()).Contains(TransportChannels.InputSubprotocol) == true)
+        {
+            IsInputChannel = true;
+            protocolHeader = $"Sec-WebSocket-Protocol: {TransportChannels.InputSubprotocol}\r\n";
+        }
+
         var response =
             "HTTP/1.1 101 Switching Protocols\r\n" +
             "Upgrade: websocket\r\n" +
             "Connection: Upgrade\r\n" +
             $"Sec-WebSocket-Accept: {AcceptKey(key)}\r\n" +
+            protocolHeader +
             "\r\n";
 
         var responseBytes = Encoding.UTF8.GetBytes(response);

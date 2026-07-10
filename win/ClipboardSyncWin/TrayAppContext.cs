@@ -1340,7 +1340,9 @@ internal sealed class TrayAppContext : ApplicationContext
             status = text;
             UpdateMenu();
         });
-        transport.MessageReceived += HandleMessage;
+        // Each connection reads on its own task, so input frames arriving on the dedicated
+        // channel are decrypted in parallel with (never behind) bulk clipboard/file frames.
+        transport.MessageReceived += (payload, _) => HandleMessage(payload);
         transport.PeerCountChanged += count => OnUi(() =>
         {
             var previousCount = peerCount;
@@ -1481,10 +1483,10 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void PublishInput(InputMessage message)
     {
-        _ = SendEncrypted(message, realtime: true, routedTo: message.Target);
+        _ = SendEncrypted(message, realtime: true, routedTo: message.Target, viaInputChannel: true);
     }
 
-    private bool SendEncrypted<T>(T message, bool realtime = false, string? routedTo = null)
+    private bool SendEncrypted<T>(T message, bool realtime = false, string? routedTo = null, bool viaInputChannel = false)
     {
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(message, MessageJsonOptions);
         EncryptedEnvelope envelope;
@@ -1519,7 +1521,7 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         var payload = System.Text.Encoding.UTF8.GetString(envelopeBytes);
-        _ = transport?.SendAsync(payload, routedTo);
+        _ = transport?.SendAsync(payload, routedTo, viaInputChannel);
         return true;
     }
 

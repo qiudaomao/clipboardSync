@@ -1435,7 +1435,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         [Keys.Y] = "KeyY", [Keys.Z] = "KeyZ", [Keys.D0] = "Digit0", [Keys.D1] = "Digit1",
         [Keys.D2] = "Digit2", [Keys.D3] = "Digit3", [Keys.D4] = "Digit4", [Keys.D5] = "Digit5",
         [Keys.D6] = "Digit6", [Keys.D7] = "Digit7", [Keys.D8] = "Digit8", [Keys.D9] = "Digit9",
-        [Keys.Space] = "Space", [Keys.Enter] = "Enter",
+        [Keys.Space] = "Space", [Keys.Enter] = "Enter", [Keys.CapsLock] = "CapsLock",
         [Keys.Tab] = "Tab", [Keys.Escape] = "Escape", [Keys.Back] = "Backspace",
         [Keys.Delete] = "Delete", [Keys.Left] = "ArrowLeft", [Keys.Right] = "ArrowRight",
         [Keys.Up] = "ArrowUp", [Keys.Down] = "ArrowDown", [Keys.Home] = "Home",

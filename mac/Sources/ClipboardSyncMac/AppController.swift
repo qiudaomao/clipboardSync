@@ -16,6 +16,32 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let shouldShowInitialSetup = !AppConfig.hasSavedConfiguration
     private var config = AppConfig.load()
     private var transport: Transport?
+
+    /// The input event tap runs on the main run loop, so multi-megabyte base64/AES work on the
+    /// main thread freezes the relayed mouse for its whole duration. Bulk payloads (clipboard
+    /// images, file chunks, tunnel data) are therefore encrypted on `wireQueue` and decrypted on
+    /// `bulkReceiveQueue`; frames arriving on the dedicated input channel decrypt on their own
+    /// queue so they never wait behind a bulk decrypt either. Both receive queues are serial —
+    /// file-transfer chunks rely on arrival order.
+    private let wireQueue = DispatchQueue(label: "ClipboardSyncMac.wire.send")
+    private let bulkReceiveQueue = DispatchQueue(label: "ClipboardSyncMac.wire.receive")
+    private let inputReceiveQueue = DispatchQueue(label: "ClipboardSyncMac.wire.receiveInput")
+    /// Snapshot of `config.password` readable from the wire queues; `config` itself is
+    /// main-thread state.
+    private let wirePasswordLock = NSLock()
+    private var _wirePassword = ""
+    private var wirePassword: String {
+        get {
+            wirePasswordLock.lock()
+            defer { wirePasswordLock.unlock() }
+            return _wirePassword
+        }
+        set {
+            wirePasswordLock.lock()
+            defer { wirePasswordLock.unlock() }
+            _wirePassword = newValue
+        }
+    }
     private var isSyncPaused = false
     private var peerCount = 0
     private var presenceTimer: Timer?
@@ -67,9 +93,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let coordinator = FileTransferCoordinator()
         coordinator.configure(deviceId: deviceId)
         coordinator.onSend = { [weak self] message in
-            DispatchQueue.main.async {
-                _ = self?.sendEncryptedRealtime(message, routedTo: message.target)
-            }
+            self?.sendBulk(message, routedTo: message.target)
         }
         coordinator.onStatus = { [weak self] status in
             DispatchQueue.main.async {
@@ -91,9 +115,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var portForwardCoordinator: PortForwardCoordinator = {
         let coordinator = PortForwardCoordinator()
         coordinator.onSend = { [weak self] message in
-            DispatchQueue.main.async {
-                self?.publishTunnel(message)
-            }
+            self?.publishTunnel(message)
         }
         coordinator.onStatus = { [weak self] status in
             DispatchQueue.main.async {
@@ -850,7 +872,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func publishTunnel(_ message: TunnelMessage) {
-        _ = sendEncryptedRealtime(message, routedTo: message.target)
+        sendBulk(message, routedTo: message.target)
     }
 
     private func handleTunnelMessage(_ data: Data) {
@@ -1213,6 +1235,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         config = nextConfig
         config.save()
+        wirePassword = config.password
         if shouldRestartTransport {
             pendingInputConfigSync = true
             restartTransport()
@@ -1260,6 +1283,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func restartTransport() {
         isSyncPaused = false
+        wirePassword = config.password
         transport?.stop()
         peerCount = 0
         fileTransferCoordinator.cancelAll()
@@ -1298,9 +1322,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.statusText = status
             }
         }
-        nextTransport.onMessage = { [weak self] message in
-            DispatchQueue.main.async {
-                self?.handleMessage(message)
+        nextTransport.onMessage = { [weak self] message, viaInputChannel in
+            guard let self else {
+                return
+            }
+            // Serial per-lane processing: input frames never wait behind a multi-megabyte
+            // clipboard/file decrypt, and file chunks keep their arrival order within the bulk lane.
+            let lane = viaInputChannel ? self.inputReceiveQueue : self.bulkReceiveQueue
+            lane.async {
+                self.handleMessage(message)
             }
         }
         nextTransport.onPeerCount = { [weak self] count in
@@ -1342,11 +1372,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @discardableResult
     private func publish(_ content: ClipboardContent, recordHistory: Bool = true) -> Bool {
         let message = content.makeMessage(origin: deviceId)
-
-        guard sendEncrypted(message) else {
-            return false
-        }
-
+        sendBulk(message, routedTo: nil)
         if recordHistory {
             addHistory(content)
         }
@@ -1391,6 +1417,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sendEncryptedRealtime(message, routedTo: message.target)
     }
 
+    /// Synchronous send for small, latency-critical input frames: cached-key AES on a tiny
+    /// payload, shipped over the dedicated input channel when the peer supports it.
     @discardableResult
     private func sendEncryptedRealtime<T: Encodable>(_ message: T, routedTo: String? = nil) -> Bool {
         guard
@@ -1416,16 +1444,60 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return false
         }
 
-        transport?.send(payload, to: routedTo)
+        transport?.send(payload, to: routedTo, realtime: true)
         return true
     }
 
+    /// Asynchronous send for bulk payloads (clipboard content, file chunks, tunnel data):
+    /// encode + encrypt run on the wire queue so megabytes of base64/AES never stall the main
+    /// thread, and the frame ships on the data connection so it can't delay input frames.
+    /// Callable from any thread. Uses the cached-key realtime envelope (v2) — every peer since
+    /// the chunked-transfer release decrypts it, and it skips a per-message PBKDF2 that used to
+    /// cost tens of milliseconds per clipboard publish.
+    private func sendBulk<T: Encodable>(_ message: T, routedTo: String?) {
+        wireQueue.async { [weak self] in
+            guard let self else {
+                return
+            }
+            let encoder = JSONEncoder()
+            guard
+                let data = try? encoder.encode(message),
+                var envelope = try? CryptoBox.encryptRealtime(data, password: self.wirePassword)
+            else {
+                DispatchQueue.main.async { self.statusText = AppText.text("status.encryptionFailed") }
+                return
+            }
+            envelope.from = self.deviceId
+            envelope.to = routedTo
+
+            guard
+                let envelopeData = try? encoder.encode(envelope),
+                let payload = String(data: envelopeData, encoding: .utf8)
+            else {
+                DispatchQueue.main.async { self.statusText = AppText.text("status.encryptionFailed") }
+                return
+            }
+
+            guard envelopeData.count <= ClipboardLimits.maxWebSocketMessageBytes else {
+                DispatchQueue.main.async { self.statusText = AppText.text("status.clipboardPayloadTooLarge") }
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.transport?.send(payload, to: routedTo, realtime: false)
+            }
+        }
+    }
+
+    /// Runs on `bulkReceiveQueue` or `inputReceiveQueue` — never on the main thread. Decrypt and
+    /// heavy decode happen here; only state application hops to main.
     private func handleMessage(_ payload: String) {
+        let decoder = JSONDecoder()
         guard
             let envelopeData = payload.data(using: .utf8),
-            let envelope = try? jsonDecoder.decode(EncryptedEnvelope.self, from: envelopeData),
-            let data = try? CryptoBox.decrypt(envelope, password: config.password),
-            let header = try? jsonDecoder.decode(MessageHeader.self, from: data)
+            let envelope = try? decoder.decode(EncryptedEnvelope.self, from: envelopeData),
+            let data = try? CryptoBox.decrypt(envelope, password: wirePassword),
+            let header = try? decoder.decode(MessageHeader.self, from: data)
         else {
             return
         }
@@ -1434,9 +1506,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "clipboard":
             handleClipboardMessage(data)
         case "input":
-            handleInputMessage(data)
+            DispatchQueue.main.async { [weak self] in
+                self?.handleInputMessage(data)
+            }
         case "tunnel":
-            handleTunnelMessage(data)
+            DispatchQueue.main.async { [weak self] in
+                self?.handleTunnelMessage(data)
+            }
         case "file":
             handleFileMessage(data)
         default:
@@ -1446,7 +1522,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func handleFileMessage(_ data: Data) {
         guard
-            let message = try? jsonDecoder.decode(FileTransferMessage.self, from: data),
+            let message = try? JSONDecoder().decode(FileTransferMessage.self, from: data),
             message.type == "file",
             message.origin != deviceId,
             message.target == deviceId
@@ -1458,18 +1534,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func handleClipboardMessage(_ data: Data) {
         guard
-            let message = try? jsonDecoder.decode(SyncMessage.self, from: data),
+            let message = try? JSONDecoder().decode(SyncMessage.self, from: data),
             message.type == "clipboard",
             message.origin != deviceId,
             let content = message.clipboardContent()
         else {
             return
         }
-        if clipboard.applyContent(content) {
-            addHistory(content)
-            if content.kind == "files" {
-                statusText = AppText.text("status.filesReceived")
-                postFilesReceivedNotification()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                return
+            }
+            if self.clipboard.applyContent(content) {
+                self.addHistory(content)
+                if content.kind == "files" {
+                    self.statusText = AppText.text("status.filesReceived")
+                    self.postFilesReceivedNotification()
+                }
             }
         }
     }

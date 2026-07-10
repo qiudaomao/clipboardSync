@@ -2,6 +2,7 @@ import ApplicationServices
 import AppKit
 import CoreGraphics
 import Foundation
+import IOKit
 
 /// Private CoreGraphics SPI. `CGDisplayHideCursor` is a no-op for a background
 /// (`.accessory`) app that never owns the foreground — which is exactly our case while
@@ -36,6 +37,7 @@ final class InputSharingCoordinator {
     private var eventTap: CFMachPort?
     private var eventSource: CFRunLoopSource?
     private var lastModifierKeys: Set<String> = []
+    private var lastCapsLockOn = false
     private let mouseMoveSendInterval: TimeInterval = 1.0 / 60.0
     private var lastMouseMoveSentAt = Date.distantPast
     private var pendingMouseMoveTimer: DispatchSourceTimer?
@@ -44,6 +46,19 @@ final class InputSharingCoordinator {
     private var didRequestInputMonitoring = false
     private var localCursorHidden = false
     private var didAllowBackgroundCursorHide = false
+    private var localCursorDetached = false
+
+    /// Source for repositioning our own cursor at hand-back. `CGWarpMouseCursorPosition` makes
+    /// the window server suppress hardware mouse events for ~0.25s afterwards (and
+    /// `CGAssociateMouseAndMouseCursorPosition(1)` does not reliably lift it), which left the
+    /// cursor dead at the edge every time it crossed back from a peer. Posting a synthetic
+    /// mouse-move from a source whose suppression interval is zero moves the cursor through the
+    /// normal event path with no suppression at all.
+    private let returnMoveEventSource: CGEventSource? = {
+        let source = CGEventSource(stateID: .hidSystemState)
+        source?.localEventsSuppressionInterval = 0
+        return source
+    }()
 
     init(deviceId: String, layoutStore: ScreenLayoutStore) {
         self.deviceId = deviceId
@@ -58,6 +73,7 @@ final class InputSharingCoordinator {
         sendPressedModifierKeyUps()
         removeEventTap()
         showLocalCursor()
+        reattachLocalMouseToCursor()
         activeScreenId = nil
         activeTargetDeviceId = nil
         receivingRemote = false
@@ -430,11 +446,15 @@ final class InputSharingCoordinator {
     }
 
     private func startRemoteCapture(target: ScreenLayoutEntry, canvasPoint: CGPoint, edge: ScreenEdge) {
+        // Baseline the caps-lock state so a session that starts with caps already on doesn't
+        // read the first flagsChanged as a toggle.
+        lastCapsLockOn = CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
         virtualCursor = clamp(canvasPoint, to: target.rect)
         activeScreenId = target.screenId
         activeTargetDeviceId = target.deviceId
         lastCrossedEdge = edge
         hideLocalCursor()
+        detachLocalMouseFromCursor()
         sendCapture(action: "start", targetDeviceId: target.deviceId, screenId: target.screenId, edge: edge, entry: target)
         sendMouseMoveNow()
         updateStatus()
@@ -492,6 +512,11 @@ final class InputSharingCoordinator {
         sendCapture(action: "end", targetDeviceId: currentTargetDeviceId, screenId: currentScreenId, edge: lastCrossedEdge, entry: layoutStore.entries[currentScreenId])
         activeScreenId = nil
         activeTargetDeviceId = nil
+        // Unfreeze BEFORE the warp so the warp runs on an associated cursor; the warp itself
+        // then re-calls associate to release the window server's post-warp hardware-event
+        // suppression (the SDL/deskflow recipe — the release only works reliably when the call
+        // isn't also flipping the association state).
+        reattachLocalMouseToCursor()
         if let returnToScreenId {
             warpLocalCursorToReturnPoint(screenId: returnToScreenId)
         }
@@ -509,8 +534,17 @@ final class InputSharingCoordinator {
         )
         let clampedX = min(max(raw.x, realRect.minX), max(realRect.maxX - 2, realRect.minX))
         let clampedY = min(max(raw.y, realRect.minY), max(realRect.maxY - 2, realRect.minY))
-        CGWarpMouseCursorPosition(CGPoint(x: clampedX, y: clampedY))
+        let point = CGPoint(x: clampedX, y: clampedY)
+        // Set the tap-suppression window BEFORE posting: the return point sits inside the
+        // crossing threshold band, so our own injected move would otherwise instantly
+        // re-trigger crossingNeighbor and bounce capture straight back to the peer.
         suppressUntil = Date().addingTimeInterval(0.08)
+        if let event = CGEvent(mouseEventSource: returnMoveEventSource, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left) {
+            event.post(tap: .cghidEventTap)
+        } else {
+            CGWarpMouseCursorPosition(point)
+            CGAssociateMouseAndMouseCursorPosition(1)
+        }
     }
 
     private func sendCapture(action: String, targetDeviceId: String, screenId: String, edge: ScreenEdge, entry: ScreenLayoutEntry?) {
@@ -704,6 +738,17 @@ final class InputSharingCoordinator {
     }
 
     private func sendModifierChanges(_ event: CGEvent) {
+        // Caps lock never arrives as keyDown/keyUp — only as a flagsChanged with the alphaShift
+        // flag reflecting the new LOCK STATE (and a second, identical-flags event on key
+        // release). Diffing the flag sends exactly one tap per toggle, and sending it as a
+        // down+up pair matters because the receiver's OS toggles its caps state on key-down.
+        let capsLockOn = event.flags.contains(.maskAlphaShift)
+        if capsLockOn != lastCapsLockOn {
+            lastCapsLockOn = capsLockOn
+            sendKeyPayload(key: "CapsLock", action: "down", modifiers: [])
+            sendKeyPayload(key: "CapsLock", action: "up", modifiers: [])
+        }
+
         let next = Set(Self.modifiers(from: event.flags))
         for key in next.subtracting(lastModifierKeys) {
             sendKeyPayload(key: key, action: "down", modifiers: Array(next).sorted())
@@ -875,6 +920,16 @@ final class InputSharingCoordinator {
             return
         }
 
+        if key.key == "CapsLock" {
+            // A synthetic keycode-57 event doesn't flip macOS's caps-lock state; only the
+            // IOKit modifier-lock API does. The sender emits a down+up pair per toggle, so
+            // act on the down and swallow the up.
+            if key.action == "down" {
+                toggleLocalCapsLock()
+            }
+            return
+        }
+
         guard let keyCode = Self.canonicalToMacKey[key.key] else {
             return
         }
@@ -884,6 +939,24 @@ final class InputSharingCoordinator {
         let modifiers = mappedModifiers(remotePressedSourceModifierKeys.union(key.modifiers))
         event.flags = Self.flags(from: Array(modifiers))
         post(event)
+    }
+
+    private func toggleLocalCapsLock() {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"))
+        guard service != 0 else {
+            return
+        }
+        defer { IOObjectRelease(service) }
+        var connect: io_connect_t = 0
+        guard IOServiceOpen(service, mach_task_self_, UInt32(kIOHIDParamConnectType), &connect) == KERN_SUCCESS else {
+            return
+        }
+        defer { IOServiceClose(connect) }
+        var on = false
+        guard IOHIDGetModifierLockState(connect, Int32(kIOHIDCapsLockState), &on) == KERN_SUCCESS else {
+            return
+        }
+        IOHIDSetModifierLockState(connect, Int32(kIOHIDCapsLockState), !on)
     }
 
     private func reconcileRemoteModifierState() {
@@ -1038,6 +1111,28 @@ final class InputSharingCoordinator {
         }
         localCursorHidden = false
         CGDisplayShowCursor(CGMainDisplayID())
+    }
+
+    /// While relaying input to a peer, freeze the local (hidden) cursor in place instead of
+    /// letting it wander and pin against this machine's physical screen edges. A pinned cursor
+    /// rubs against macOS edge behaviors — menu-bar/notch barriers, rounded-corner containment,
+    /// Dock-reveal pressure — which absorb or distort pointer motion, felt on the peer as
+    /// stutter, sticking, and jumps whenever its cursor is near a screen edge. Mouse-moved
+    /// events keep delivering delta values while disassociated, so relaying is unaffected.
+    private func detachLocalMouseFromCursor() {
+        guard !localCursorDetached else {
+            return
+        }
+        localCursorDetached = true
+        CGAssociateMouseAndMouseCursorPosition(0)
+    }
+
+    private func reattachLocalMouseToCursor() {
+        guard localCursorDetached else {
+            return
+        }
+        localCursorDetached = false
+        CGAssociateMouseAndMouseCursorPosition(1)
     }
 
     private func allowBackgroundCursorHideIfNeeded() {
