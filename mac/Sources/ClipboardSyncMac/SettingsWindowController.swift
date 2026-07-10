@@ -1,22 +1,29 @@
 import AppKit
+import ApplicationServices
 
 final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     var onSave: ((AppConfig) -> Void)?
 
-    private let modeControl = NSSegmentedControl(labels: [AppText.text("settings.client"), AppText.text("settings.server")], trackingMode: .selectOne, target: nil, action: nil)
+    private let modeControl = NSSegmentedControl(labels: [AppText.text("settings.server"), AppText.text("settings.client")], trackingMode: .selectOne, target: nil, action: nil)
     private let hostField = NSTextField()
     private let portField = NSTextField()
     private let passwordField = NSSecureTextField()
+    private let copyPasswordButton = NSButton(title: AppText.text("settings.copyPassword"), target: nil, action: nil)
     private let inputSharingButton = NSButton(checkboxWithTitle: AppText.text("settings.enableInputSharing"), target: nil, action: nil)
     private let reverseScrollButton = NSButton(checkboxWithTitle: AppText.text("settings.reverseVerticalScroll"), target: nil, action: nil)
+    private let permissionLabel = NSTextField(wrappingLabelWithString: "")
+    private let openPrivacyButton = NSButton(title: AppText.text("settings.openPrivacySettings"), target: nil, action: nil)
     private let shiftModifierPopup = NSPopUpButton()
     private let controlModifierPopup = NSPopUpButton()
     private let altModifierPopup = NSPopUpButton()
     private let metaModifierPopup = NSPopUpButton()
     private let hostHintLabel = NSTextField(labelWithString: AppText.text("settings.hostDefaultHint"))
+    private let copyHostButton = NSButton(title: AppText.text("settings.copyAddress"), target: nil, action: nil)
     private let validationLabel = NSTextField(labelWithString: "")
     private let saveButton = NSButton(title: AppText.text("settings.save"), target: nil, action: nil)
     private let cancelButton = NSButton(title: AppText.text("settings.cancel"), target: nil, action: nil)
+    private let headerLabel = NSTextField(labelWithString: AppText.text("settings.header"))
+    private let subtitleLabel = NSTextField(wrappingLabelWithString: AppText.text("settings.subtitle"))
 
     private var currentConfig = AppConfig.defaults
     private var clientHostDraft = ""
@@ -41,10 +48,12 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func show(config: AppConfig) {
+    func show(config: AppConfig, firstRun: Bool = false) {
         currentConfig = config
+        headerLabel.stringValue = AppText.text(firstRun ? "settings.firstRunHeader" : "settings.header")
+        subtitleLabel.stringValue = AppText.text(firstRun ? "settings.firstRunSubtitle" : "settings.subtitle")
         clientHostDraft = NetworkAddress.isLoopbackHost(config.host) ? "" : config.host
-        modeControl.selectedSegment = config.mode == .client ? 0 : 1
+        modeControl.selectedSegment = config.mode == .server ? 0 : 1
         hostField.stringValue = clientHostDraft
         portField.stringValue = String(config.port)
         passwordField.stringValue = config.password
@@ -57,6 +66,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         validationLabel.stringValue = ""
         validationLabel.isHidden = true
         updateModeState()
+        updatePermissionState()
 
         NSApp.activate(ignoringOtherApps: true)
         if window?.isVisible == false {
@@ -92,6 +102,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         passwordField.placeholderString = AppText.text("settings.passwordPlaceholder")
         passwordField.controlSize = .large
         passwordField.font = .systemFont(ofSize: NSFont.systemFontSize)
+        copyPasswordButton.target = self
+        copyPasswordButton.action = #selector(copyPassword)
+        copyPasswordButton.bezelStyle = .rounded
+        copyPasswordButton.controlSize = .small
 
         inputSharingButton.target = self
         inputSharingButton.action = #selector(inputSharingChanged)
@@ -99,12 +113,28 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         reverseScrollButton.target = self
         reverseScrollButton.action = #selector(inputSharingChanged)
 
+        permissionLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        permissionLabel.textColor = .secondaryLabelColor
+        openPrivacyButton.target = self
+        openPrivacyButton.action = #selector(openPrivacySettings)
+        openPrivacyButton.bezelStyle = .rounded
+
+        let permissionStack = NSStackView(views: [permissionLabel, openPrivacyButton])
+        permissionStack.orientation = .vertical
+        permissionStack.alignment = .leading
+        permissionStack.spacing = 6
+
         for popup in modifierPopups {
             configureModifierPopup(popup)
         }
 
         hostHintLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         hostHintLabel.textColor = .secondaryLabelColor
+
+        copyHostButton.target = self
+        copyHostButton.action = #selector(copyHostAddress)
+        copyHostButton.bezelStyle = .rounded
+        copyHostButton.controlSize = .small
 
         validationLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         validationLabel.textColor = .systemRed
@@ -122,19 +152,21 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         cancelButton.bezelStyle = .rounded
         cancelButton.controlSize = .large
 
-        let titleLabel = NSTextField(labelWithString: AppText.text("settings.header"))
-        titleLabel.font = .boldSystemFont(ofSize: 17)
-
-        let subtitleLabel = NSTextField(wrappingLabelWithString: AppText.text("settings.subtitle"))
+        headerLabel.font = .boldSystemFont(ofSize: 17)
         subtitleLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         subtitleLabel.textColor = .secondaryLabelColor
 
-        let headerStack = NSStackView(views: [titleLabel, subtitleLabel])
+        let headerStack = NSStackView(views: [headerLabel, subtitleLabel])
         headerStack.orientation = .vertical
         headerStack.alignment = .leading
         headerStack.spacing = 4
 
-        let hostStack = NSStackView(views: [hostField, hostHintLabel])
+        let hostFieldRow = NSStackView(views: [hostField, copyHostButton])
+        hostFieldRow.orientation = .horizontal
+        hostFieldRow.alignment = .centerY
+        hostFieldRow.spacing = 8
+
+        let hostStack = NSStackView(views: [hostFieldRow, hostHintLabel])
         hostStack.orientation = .vertical
         hostStack.alignment = .leading
         hostStack.spacing = 4
@@ -142,19 +174,41 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         hostHintLabel.widthAnchor.constraint(equalTo: hostField.widthAnchor).isActive = true
 
         let modifierMapStack = makeModifierMapStack()
+        let passwordStack = NSStackView(views: [passwordField, copyPasswordButton])
+        passwordStack.orientation = .horizontal
+        passwordStack.alignment = .centerY
+        passwordStack.spacing = 8
 
-        let formStack = NSStackView(views: [
+        let connectionStack = NSStackView(views: [
             formRow(label: AppText.text("settings.mode"), control: modeControl),
             formRow(label: AppText.text("settings.host"), control: hostStack),
             formRow(label: AppText.text("settings.port"), control: portField),
-            formRow(label: AppText.text("settings.password"), control: passwordField),
+            formRow(label: AppText.text("settings.password"), control: passwordStack)
+        ])
+        connectionStack.orientation = .vertical
+        connectionStack.alignment = .leading
+        connectionStack.spacing = 12
+
+        let inputStack = NSStackView(views: [
             formRow(label: AppText.text("settings.input"), control: inputSharingButton),
+            formRow(label: AppText.text("settings.permissions"), control: permissionStack),
             formRow(label: AppText.text("settings.scroll"), control: reverseScrollButton),
             formRow(label: AppText.text("settings.modifierKeys"), control: modifierMapStack)
         ])
+        inputStack.orientation = .vertical
+        inputStack.alignment = .leading
+        inputStack.spacing = 12
+
+        let formStack = NSStackView(views: [
+            sectionLabel(AppText.text("settings.sectionConnection")),
+            connectionStack,
+            sectionLabel(AppText.text("settings.sectionInput")),
+            inputStack
+        ])
         formStack.orientation = .vertical
         formStack.alignment = .leading
-        formStack.spacing = 12
+        formStack.spacing = 10
+        formStack.setCustomSpacing(18, after: connectionStack)
 
         let buttonStack = NSStackView(views: [NSView(), cancelButton, saveButton])
         buttonStack.orientation = .horizontal
@@ -214,16 +268,24 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         return row
     }
 
+    private func sectionLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        return label
+    }
+
     @objc private func modeChanged() {
         updateModeState()
     }
 
     @objc private func inputSharingChanged() {
         updateInputSharingState()
+        updatePermissionState()
     }
 
     private func updateModeState() {
-        let isClient = modeControl.selectedSegment == 0
+        let isClient = modeControl.selectedSegment == 1
         if isClient {
             hostField.isEnabled = true
             hostField.isEditable = true
@@ -231,6 +293,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             hostField.stringValue = clientHostDraft
             hostField.placeholderString = "192.168.1.10"
             hostHintLabel.stringValue = AppText.text("settings.hostClientHint")
+            copyHostButton.isHidden = true
         } else {
             if hostField.isEnabled {
                 clientHostDraft = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -240,8 +303,33 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             hostField.isSelectable = true
             hostField.stringValue = NetworkAddress.hostAddress()
             hostHintLabel.stringValue = AppText.text("settings.hostServerHint")
+            copyHostButton.isHidden = false
+            if passwordField.stringValue.isEmpty {
+                passwordField.stringValue = Self.generatedPassword()
+            }
         }
+        copyPasswordButton.isHidden = isClient
         updateInputSharingState()
+    }
+
+    @objc private func copyHostAddress() {
+        let address = hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty else {
+            return
+        }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(address, forType: .string)
+    }
+
+    @objc private func copyPassword() {
+        let password = passwordField.stringValue
+        guard !password.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(password, forType: .string)
+    }
+
+    private static func generatedPassword() -> String {
+        String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(20))
     }
 
     private func updateInputSharingState() {
@@ -252,8 +340,22 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         }
     }
 
+    private func updatePermissionState() {
+        let ready = AXIsProcessTrusted() && CGPreflightListenEventAccess()
+        permissionLabel.stringValue = AppText.text(ready ? "settings.permissionReady" : "settings.permissionNeeded")
+        permissionLabel.textColor = ready ? .systemGreen : .secondaryLabelColor
+        openPrivacyButton.isHidden = ready || inputSharingButton.state != .on
+    }
+
+    @objc private func openPrivacySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
     @objc private func save() {
-        let mode: SyncMode = modeControl.selectedSegment == 1 ? .server : .client
+        let mode: SyncMode = modeControl.selectedSegment == 0 ? .server : .client
         let host = mode == .client ? hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : currentConfig.host
         let portText = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = passwordField.stringValue
@@ -314,7 +416,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     }
 
     func controlTextDidChange(_ notification: Notification) {
-        if notification.object as? NSTextField === portField, modeControl.selectedSegment == 1 {
+        if notification.object as? NSTextField === portField, modeControl.selectedSegment == 0 {
             hostField.stringValue = NetworkAddress.hostAddress()
         }
     }

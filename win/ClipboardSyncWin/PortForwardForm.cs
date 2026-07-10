@@ -9,8 +9,7 @@ namespace ClipboardSyncWin;
 /// The "Port Forward" dialog: a table of forward rules, each mapping In (a device + listen port) to
 /// Out (another device + host + port), with an optional note. Each row shows a live status light
 /// (green listening / red failed with the reason on hover / gray disabled or offline) and an
-/// enable/disable toggle. Structural edits are drafts committed on Save; the enable toggle applies
-/// immediately (via RulesApplied) so its status light updates without closing. Modeless, like
+/// enable/disable toggle. All edits are drafts committed together on Save. Modeless, like
 /// ScreenLayoutForm, so the tray context can push live status while it stays open.
 internal sealed class PortForwardForm : Form
 {
@@ -26,8 +25,7 @@ internal sealed class PortForwardForm : Form
     /// A rule's display status, computed by the tray context and handed to the dialog to render.
     public readonly record struct RuleStatus(StatusLight Light, string Tooltip);
 
-    /// Raised when the rule table should be applied. Save also closes; the enable toggle keeps the
-    /// dialog open so its status light can update in place.
+    /// Raised when the rule table should be applied after Save.
     public event Action<List<PortForwardRule>>? RulesApplied;
 
     private List<DeviceOption> devices;
@@ -35,6 +33,8 @@ internal sealed class PortForwardForm : Form
     private readonly Label emptyLabel;
     private readonly List<RuleRow> rows = [];
     private Dictionary<string, RuleStatus> statuses = [];
+    private bool hasDraftChanges;
+    private bool remoteChangePending;
 
     public PortForwardForm(List<PortForwardRule> rules, List<DeviceOption> devices)
     {
@@ -139,13 +139,21 @@ internal sealed class PortForwardForm : Form
         }
     }
 
-    /// Rebuilds the rule rows from an updated table (e.g. a peer added or removed a rule) while the
-    /// dialog stays open. Replaces the shown rows wholesale with the authoritative table, so any
-    /// unsaved local edits are discarded in favor of it.
+    /// Rebuilds only when there is no local draft. Remote changes never silently discard editing.
     public void SetRules(List<PortForwardRule> rules, List<DeviceOption> deviceOptions, Dictionary<string, RuleStatus> next)
     {
+        if (hasDraftChanges)
+        {
+            if (!remoteChangePending)
+            {
+                remoteChangePending = true;
+                MessageBox.Show(this, AppText.Text("forward.remoteConflict"), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            return;
+        }
         devices = deviceOptions;
         statuses = next;
+        remoteChangePending = false;
         foreach (var row in rows.ToList())
         {
             rowsPanel.Controls.Remove(row);
@@ -206,6 +214,7 @@ internal sealed class PortForwardForm : Form
             Note = "",
             Enabled = true
         });
+        hasDraftChanges = true;
         UpdateEmptyState();
     }
 
@@ -217,17 +226,10 @@ internal sealed class PortForwardForm : Form
             rowsPanel.Controls.Remove(row);
             rows.Remove(row);
             row.Dispose();
+            hasDraftChanges = true;
             UpdateEmptyState();
         };
-        // The enable/disable toggle applies immediately (so its status light updates) instead of
-        // waiting for Save; a failed apply (some row invalid) rolls the toggle back.
-        row.Toggled += () =>
-        {
-            if (!ApplyRules(close: false))
-            {
-                row.RevertToggle();
-            }
-        };
+        row.DraftChanged += () => hasDraftChanges = true;
         row.ApplyStatus(statuses.TryGetValue(rule.Id, out var status) ? status : null);
         rows.Add(row);
         rowsPanel.Controls.Add(row);
@@ -284,6 +286,8 @@ internal sealed class PortForwardForm : Form
             result.Add(rule);
         }
 
+        hasDraftChanges = false;
+        remoteChangePending = false;
         RulesApplied?.Invoke(result);
         return true;
     }
@@ -303,11 +307,12 @@ internal sealed class PortForwardForm : Form
         public const int CellSpacing = 6;
 
         public event Action? Removed;
-        public event Action? Toggled;
+        public event Action? DraftChanged;
 
         public string RuleId { get; }
 
         private readonly Label statusDot;
+        private readonly Label statusTextLabel;
         private readonly CheckBox enabledToggle;
         private readonly ComboBox inDeviceBox;
         private readonly NumericUpDown inPortBox;
@@ -321,7 +326,7 @@ internal sealed class PortForwardForm : Form
         public RuleRow(PortForwardRule rule, List<DeviceOption> devices)
         {
             RuleId = rule.Id;
-            Height = 40;
+            Height = 60;
             Margin = new Padding(0, 0, 0, 6);
             AutoSize = false;
             Width = DotWidth + ToggleWidth + DeviceWidth + PortWidth + LanWidth + ArrowWidth + DeviceWidth + HostWidth + PortWidth + NoteWidth + 40 + CellSpacing * 10;
@@ -334,6 +339,15 @@ internal sealed class PortForwardForm : Form
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font(SystemFonts.DefaultFont.FontFamily, 11),
                 ForeColor = SystemColors.ControlDark
+            };
+            statusTextLabel = new Label
+            {
+                Text = "",
+                Dock = DockStyle.Bottom,
+                Height = 18,
+                AutoEllipsis = true,
+                ForeColor = SystemColors.GrayText,
+                Padding = new Padding(4, 0, 4, 0)
             };
             enabledToggle = new CheckBox
             {
@@ -392,7 +406,8 @@ internal sealed class PortForwardForm : Form
 
             var flow = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
+                Height = 40,
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 Padding = new Padding(0, 6, 0, 0)
@@ -402,7 +417,16 @@ internal sealed class PortForwardForm : Form
                 control.Margin = new Padding(0, 0, CellSpacing, 0);
                 flow.Controls.Add(control);
             }
+            Controls.Add(statusTextLabel);
             Controls.Add(flow);
+
+            inDeviceBox.SelectedIndexChanged += (_, _) => DraftChanged?.Invoke();
+            inPortBox.ValueChanged += (_, _) => DraftChanged?.Invoke();
+            lanBox.CheckedChanged += (_, _) => DraftChanged?.Invoke();
+            outDeviceBox.SelectedIndexChanged += (_, _) => DraftChanged?.Invoke();
+            outHostBox.TextChanged += (_, _) => DraftChanged?.Invoke();
+            outPortBox.ValueChanged += (_, _) => DraftChanged?.Invoke();
+            noteBox.TextChanged += (_, _) => DraftChanged?.Invoke();
         }
 
         /// Recolors the status light and updates its hover tooltip. A null status (rule not applied
@@ -413,6 +437,7 @@ internal sealed class PortForwardForm : Form
             {
                 statusDot.ForeColor = SystemColors.ControlDark;
                 toolTip.SetToolTip(statusDot, null);
+                statusTextLabel.Text = "";
                 return;
             }
             statusDot.ForeColor = value.Light switch
@@ -422,22 +447,13 @@ internal sealed class PortForwardForm : Form
                 _ => SystemColors.ControlDark
             };
             toolTip.SetToolTip(statusDot, value.Tooltip);
-        }
-
-        /// Flips the enable toggle back after an apply that failed validation. Suppresses the
-        /// CheckedChanged re-entry so it does not re-trigger an apply.
-        public void RevertToggle()
-        {
-            enabledToggle.CheckedChanged -= OnToggleChanged;
-            enabledToggle.Checked = !enabledToggle.Checked;
-            UpdateToggleText();
-            enabledToggle.CheckedChanged += OnToggleChanged;
+            statusTextLabel.Text = value.Tooltip;
         }
 
         private void OnToggleChanged(object? sender, EventArgs e)
         {
             UpdateToggleText();
-            Toggled?.Invoke();
+            DraftChanged?.Invoke();
         }
 
         private void UpdateToggleText()

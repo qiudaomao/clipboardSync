@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import ServiceManagement
+import UserNotifications
 
 final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -12,8 +13,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var inputCoordinator = InputSharingCoordinator(deviceId: deviceId, layoutStore: screenLayoutStore)
     private let updateController = UpdateController()
 
+    private let shouldShowInitialSetup = !AppConfig.hasSavedConfiguration
     private var config = AppConfig.load()
     private var transport: Transport?
+    private var isSyncPaused = false
     private var peerCount = 0
     private var presenceTimer: Timer?
     private static let presenceHeartbeatInterval: TimeInterval = 5
@@ -30,8 +33,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var statusMenuItem = NSMenuItem()
-    private var serverModeItem = NSMenuItem()
-    private var clientModeItem = NSMenuItem()
+    private var statusActionMenuItem = NSMenuItem()
     private var startStopItem = NSMenuItem()
     private var launchAtLoginItem = NSMenuItem()
     private var inputStatusMenuItem = NSMenuItem()
@@ -196,6 +198,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateInputCoordinator()
         restartTransport()
         startPresenceHeartbeat()
+        if shouldShowInitialSetup {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.settingsWindowController.show(config: self.config, firstRun: true)
+            }
+        }
     }
 
     private func presentBetaExpiredAlert() {
@@ -332,6 +340,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusMenuItem = NSMenuItem(title: AppText.format("status.prefix", AppText.text("status.stopped")), action: nil, keyEquivalent: "")
         statusMenuItem.isEnabled = false
         menu.addItem(statusMenuItem)
+        statusActionMenuItem = NSMenuItem(title: AppText.text("menu.completeSetup"), action: #selector(handleStatusAction), keyEquivalent: "")
+        statusActionMenuItem.target = self
+        menu.addItem(statusActionMenuItem)
         menu.addItem(NSMenuItem.separator())
 
         historyMenuItem.submenu = historyMenu
@@ -357,42 +368,32 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         screenLayoutItem.target = self
         menu.addItem(screenLayoutItem)
 
-        let portForwardItem = NSMenuItem(title: AppText.text("menu.portForward"), action: #selector(showPortForward), keyEquivalent: "")
-        portForwardItem.target = self
-        menu.addItem(portForwardItem)
-        menu.addItem(NSMenuItem.separator())
-
-        clientModeItem = NSMenuItem(title: AppText.text("menu.clientMode"), action: #selector(setClientMode), keyEquivalent: "")
-        clientModeItem.target = self
-        menu.addItem(clientModeItem)
-
-        serverModeItem = NSMenuItem(title: AppText.text("menu.serverMode"), action: #selector(setServerMode), keyEquivalent: "")
-        serverModeItem.target = self
-        menu.addItem(serverModeItem)
-
         menu.addItem(NSMenuItem.separator())
 
         let configureItem = NSMenuItem(title: AppText.text("menu.settings"), action: #selector(showConfiguration), keyEquivalent: ",")
         configureItem.target = self
         menu.addItem(configureItem)
 
+        let moreFeaturesMenu = NSMenu(title: AppText.text("menu.moreFeatures"))
+        let moreFeaturesItem = NSMenuItem(title: AppText.text("menu.moreFeatures"), action: nil, keyEquivalent: "")
+        moreFeaturesItem.submenu = moreFeaturesMenu
+
+        let portForwardItem = NSMenuItem(title: AppText.text("menu.portForward"), action: #selector(showPortForward), keyEquivalent: "")
+        portForwardItem.target = self
+        moreFeaturesMenu.addItem(portForwardItem)
+
+        launchAtLoginItem = NSMenuItem(title: AppText.text("menu.launchAtLogin"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchAtLoginItem.target = self
+        moreFeaturesMenu.addItem(launchAtLoginItem)
+        menu.addItem(moreFeaturesItem)
+
         let checkForUpdatesItem = NSMenuItem(title: AppText.text("menu.checkForUpdates"), action: #selector(checkForUpdates), keyEquivalent: "")
         checkForUpdatesItem.target = self
         menu.addItem(checkForUpdatesItem)
 
-        startStopItem = NSMenuItem(title: AppText.text("menu.start"), action: #selector(toggleTransport), keyEquivalent: "")
+        startStopItem = NSMenuItem(title: AppText.text("menu.resumeSync"), action: #selector(toggleTransport), keyEquivalent: "")
         startStopItem.target = self
         menu.addItem(startStopItem)
-
-        let restartItem = NSMenuItem(title: AppText.text("menu.restart"), action: #selector(restartTransportFromMenu), keyEquivalent: "")
-        restartItem.target = self
-        menu.addItem(restartItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        launchAtLoginItem = NSMenuItem(title: AppText.text("menu.launchAtLogin"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
-        launchAtLoginItem.target = self
-        menu.addItem(launchAtLoginItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -428,15 +429,26 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateMenu() {
-        statusMenuItem.title = AppText.format("status.prefix", statusText)
-        clientModeItem.state = config.mode == .client ? .on : .off
-        serverModeItem.state = config.mode == .server ? .on : .off
+        let needsSetup = !canStartTransport(config)
+        let statusSymbol = needsSetup ? "⚠" : (peerCount > 0 ? "●" : (transport == nil ? "○" : "◌"))
+        statusMenuItem.title = "\(statusSymbol) \(AppText.format("status.prefix", statusText))"
+        statusItem.button?.toolTip = "\(AppText.text("app.name")) — \(statusText)"
+        statusActionMenuItem.isHidden = isSyncPaused || (!needsSetup && transport != nil)
+        statusActionMenuItem.title = AppText.text(needsSetup ? "menu.completeSetup" : "menu.reconnect")
         inputSharingItem.state = config.inputSharingEnabled ? .on : .off
-        startStopItem.title = AppText.text(transport == nil ? "menu.start" : "menu.stop")
+        startStopItem.title = AppText.text(isSyncPaused || transport == nil ? "menu.resumeSync" : "menu.pauseSync")
         launchAtLoginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         refreshControlDeviceMenu()
         refreshSendFilesMenu()
         refreshHistoryMenu()
+    }
+
+    @objc private func handleStatusAction() {
+        if !canStartTransport(config) {
+            settingsWindowController.show(config: config, firstRun: true)
+        } else {
+            restartTransport()
+        }
     }
 
     /// One entry per online peer: files go to exactly the device the user picks, never to every
@@ -1094,28 +1106,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateInputCoordinator()
     }
 
-    @objc private func setClientMode() {
-        config.mode = .client
-        config.save()
-        restartTransport()
-    }
-
-    @objc private func setServerMode() {
-        config.mode = .server
-        config.save()
-        restartTransport()
-    }
-
     @objc private func toggleTransport() {
         if transport == nil {
+            isSyncPaused = false
             restartTransport()
         } else {
+            isSyncPaused = true
             stopTransport()
         }
-    }
-
-    @objc private func restartTransportFromMenu() {
-        restartTransport()
     }
 
     @objc private func stopTransport() {
@@ -1125,7 +1123,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         layoutWatchers.removeAll()
         updateCursorReporting()
         updateInputCoordinator()
-        statusText = AppText.text("status.stopped")
+        statusText = AppText.text(isSyncPaused ? "status.syncPaused" : "status.stopped")
     }
 
     @objc private func toggleLaunchAtLogin() {
@@ -1188,6 +1186,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         guard let urls = clipboard.readFileURLsForManualSend() else {
             statusText = AppText.text("status.copyFilesFirst")
+            return
+        }
+
+        guard !isSyncPaused else {
+            statusText = AppText.text("status.syncPaused")
             return
         }
 
@@ -1256,6 +1259,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func restartTransport() {
+        isSyncPaused = false
         transport?.stop()
         peerCount = 0
         fileTransferCoordinator.cancelAll()
@@ -1471,10 +1475,44 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func postFilesReceivedNotification() {
-        let notification = NSUserNotification()
-        notification.title = AppText.text("app.name")
-        notification.informativeText = AppText.text("status.filesReceived")
-        NSUserNotificationCenter.default.deliver(notification)
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { [weak self] settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional:
+                self?.deliverFilesReceivedNotification(using: center)
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+                    if let error {
+                        NSLog("Notification authorization failed: \(error.localizedDescription)")
+                        return
+                    }
+                    if granted {
+                        self?.deliverFilesReceivedNotification(using: center)
+                    }
+                }
+            case .denied, .ephemeral:
+                break
+            @unknown default:
+                NSLog("Unknown notification authorization status: \(settings.authorizationStatus.rawValue)")
+            }
+        }
+    }
+
+    private func deliverFilesReceivedNotification(using center: UNUserNotificationCenter) {
+        let content = UNMutableNotificationContent()
+        content.title = AppText.text("app.name")
+        content.body = AppText.text("status.filesReceivedPasteHint")
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "files-received-\(UUID().uuidString)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
+        )
+        center.add(request) { error in
+            if let error {
+                NSLog("Failed to deliver files received notification: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func handleInputMessage(_ data: Data) {
@@ -1669,7 +1707,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         for entry in history {
-            let item = NSMenuItem(title: entry.content.historyTitle, action: #selector(useHistoryItem), keyEquivalent: "")
+            let time = DateFormatter.localizedString(from: entry.createdAt, dateStyle: .none, timeStyle: .short)
+            let item = NSMenuItem(title: "\(entry.content.historyTitle) · \(time)", action: #selector(useHistoryItem), keyEquivalent: "")
             item.image = historyThumbnail(for: entry)
             item.target = self
             item.representedObject = entry.id.uuidString

@@ -3,8 +3,7 @@ import AppKit
 /// The "Port Forward" panel: a table of forward rules, each mapping In (a device + listen port)
 /// to Out (another device + host + port), with an optional note. Each row shows a live status
 /// light (green listening / red failed with the reason on hover / gray disabled or offline) and an
-/// enable/disable toggle. Structural edits are drafts committed on Save; the enable toggle applies
-/// immediately (via `onSave`) so its status light updates without closing the panel.
+/// enable/disable toggle. All edits are drafts committed together on Save.
 final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
     var onSave: (([PortForwardRule]) -> Void)?
     var onWindowClosed: (() -> Void)?
@@ -30,6 +29,7 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
     private var devices: [DeviceOption] = []
     private var rowViews: [RuleRowView] = []
     private var statuses: [String: RuleStatus] = [:]
+    private var hasDraftChanges = false
 
     private let rowsStack = NSStackView()
     private let emptyLabel = NSTextField(labelWithString: AppText.text("forward.empty"))
@@ -73,6 +73,7 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
         }
         validationLabel.stringValue = ""
         validationLabel.isHidden = true
+        hasDraftChanges = false
         updateEmptyState()
 
         NSApp.activate(ignoringOtherApps: true)
@@ -90,10 +91,13 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
-    /// Rebuilds the rule rows from an updated table (e.g. a peer added or removed a rule) while the
-    /// panel stays open, without stealing focus or recentering. Replaces the shown rows wholesale
-    /// with the authoritative table, so any unsaved local edits are discarded in favor of it.
+    /// Rebuilds from the authoritative table only when there is no local draft. If a peer changes
+    /// rules during editing, preserve the draft and explain how to load the remote update.
     func refresh(rules: [PortForwardRule], devices: [DeviceOption], statuses: [String: RuleStatus]) {
+        if hasDraftChanges {
+            showValidation(AppText.text("forward.remoteConflict"))
+            return
+        }
         self.devices = devices
         self.statuses = statuses
         rowViews.forEach { $0.removeFromSuperview() }
@@ -231,17 +235,11 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
             }
             row.removeFromSuperview()
             self.rowViews.removeAll { $0 === row }
+            self.hasDraftChanges = true
             self.updateEmptyState()
         }
-        // The enable/disable toggle applies immediately (so its status light updates) instead of
-        // waiting for Save; a failed apply (some row invalid) rolls the toggle back.
-        row.onToggle = { [weak self, weak row] in
-            guard let self, let row else {
-                return
-            }
-            if !self.applyRules(close: false) {
-                row.revertToggle()
-            }
+        row.onDraftChanged = { [weak self] in
+            self?.hasDraftChanges = true
         }
         row.applyStatus(statuses[rule.id])
         rowViews.append(row)
@@ -265,6 +263,7 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
             note: "",
             enabled: true
         ))
+        hasDraftChanges = true
         updateEmptyState()
         window?.makeFirstResponder(rowViews.last?.inPortField)
     }
@@ -297,6 +296,7 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
         }
 
         validationLabel.isHidden = true
+        hasDraftChanges = false
         onSave?(rules)
         if closeWindow {
             close()
@@ -328,19 +328,19 @@ private final class FlippedStackView: NSStackView {
 
 /// One editable rule row: [status] [enable toggle] In device popup + port + LAN → Out device popup
 /// + host + port, note, remove. An NSBox so the rounded card background tracks light/dark changes.
-private final class RuleRowView: NSBox {
+private final class RuleRowView: NSBox, NSTextFieldDelegate {
     static let statusDotWidth: CGFloat = 16
     static let toggleWidth: CGFloat = 38
 
     var onRemove: (() -> Void)?
-    /// Fired when the enable/disable toggle is flipped, so the panel can apply the change live.
-    var onToggle: (() -> Void)?
+    var onDraftChanged: (() -> Void)?
 
     let ruleId: String
     let inPortField = NSTextField()
     let outPortField = NSTextField()
 
     private let statusDot = NSImageView()
+    private let statusTextLabel = NSTextField(labelWithString: "")
     private let enabledSwitch = NSSwitch()
     private let inDevicePopup = NSPopUpButton()
     private let lanCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
@@ -362,20 +362,31 @@ private final class RuleRowView: NSBox {
         statusDot.image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: nil)
         statusDot.imageScaling = .scaleProportionallyDown
         statusDot.contentTintColor = .tertiaryLabelColor
+        statusTextLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        statusTextLabel.textColor = .secondaryLabelColor
+        statusTextLabel.lineBreakMode = .byTruncatingTail
 
         enabledSwitch.state = rule.enabled ? .on : .off
         enabledSwitch.target = self
-        enabledSwitch.action = #selector(toggleTapped)
+        enabledSwitch.action = #selector(draftControlChanged)
         enabledSwitch.controlSize = .mini
         enabledSwitch.toolTip = AppText.text("forward.enabledTooltip")
 
         configureDevicePopup(inDevicePopup, devices: devices, selectedId: rule.inDeviceId)
         configureDevicePopup(outDevicePopup, devices: devices, selectedId: rule.outDeviceId)
+        inDevicePopup.target = self
+        inDevicePopup.action = #selector(draftControlChanged)
+        outDevicePopup.target = self
+        outDevicePopup.action = #selector(draftControlChanged)
 
         configurePortField(inPortField, port: rule.inPort)
         configurePortField(outPortField, port: rule.outPort)
+        inPortField.delegate = self
+        outPortField.delegate = self
 
         lanCheckbox.state = rule.inAllowLan ? .on : .off
+        lanCheckbox.target = self
+        lanCheckbox.action = #selector(draftControlChanged)
         lanCheckbox.toolTip = AppText.text("forward.lanTooltip")
 
         outHostField.stringValue = rule.outHost
@@ -383,11 +394,13 @@ private final class RuleRowView: NSBox {
         outHostField.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         outHostField.toolTip = AppText.text("forward.hostTooltip")
         outHostField.lineBreakMode = .byTruncatingTail
+        outHostField.delegate = self
 
         noteField.stringValue = rule.note
         noteField.placeholderString = AppText.text("forward.notePlaceholder")
         noteField.font = .systemFont(ofSize: NSFont.systemFontSize)
         noteField.lineBreakMode = .byTruncatingTail
+        noteField.delegate = self
 
         let arrowLabel = NSTextField(labelWithString: "→")
         arrowLabel.font = .systemFont(ofSize: 15, weight: .semibold)
@@ -417,14 +430,22 @@ private final class RuleRowView: NSBox {
         stack.spacing = 8
         stack.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
         stack.translatesAutoresizingMaskIntoConstraints = false
+        let contentStack = NSStackView(views: [stack, statusTextLabel])
+        contentStack.orientation = .vertical
+        contentStack.alignment = .leading
+        contentStack.spacing = 0
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
         let host = contentView ?? self
-        host.addSubview(stack)
+        host.addSubview(contentStack)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: host.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            contentStack.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            contentStack.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            contentStack.topAnchor.constraint(equalTo: host.topAnchor),
+            contentStack.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: -5),
+            stack.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+            statusTextLabel.leadingAnchor.constraint(equalTo: contentStack.leadingAnchor, constant: 10),
+            statusTextLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentStack.trailingAnchor, constant: -10),
             statusDot.widthAnchor.constraint(equalToConstant: Self.statusDotWidth),
             statusDot.heightAnchor.constraint(equalToConstant: Self.statusDotWidth),
             enabledSwitch.widthAnchor.constraint(equalToConstant: Self.toggleWidth),
@@ -443,12 +464,21 @@ private final class RuleRowView: NSBox {
         fatalError("init(coder:) has not been implemented")
     }
 
+    @objc private func draftControlChanged() {
+        onDraftChanged?()
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        onDraftChanged?()
+    }
+
     /// Recolors the status light and updates its hover tooltip. A nil status (rule not applied yet)
     /// reads as a neutral gray.
     func applyStatus(_ status: PortForwardWindowController.RuleStatus?) {
         guard let status else {
             statusDot.contentTintColor = .tertiaryLabelColor
             statusDot.toolTip = nil
+            statusTextLabel.stringValue = ""
             return
         }
         switch status.light {
@@ -460,15 +490,7 @@ private final class RuleRowView: NSBox {
             statusDot.contentTintColor = .tertiaryLabelColor
         }
         statusDot.toolTip = status.tooltip
-    }
-
-    /// Flips the enable toggle back after an apply that failed validation.
-    func revertToggle() {
-        enabledSwitch.state = enabledSwitch.state == .on ? .off : .on
-    }
-
-    @objc private func toggleTapped() {
-        onToggle?()
+        statusTextLabel.stringValue = status.tooltip
     }
 
     /// Reads the row back into a rule; nil when either port is not a valid TCP port number.

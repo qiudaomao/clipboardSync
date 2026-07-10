@@ -777,6 +777,8 @@ internal static class ConfigStore
         }
     }
 
+    public static bool HasSavedConfiguration => File.Exists(ConfigPath);
+
     public static AppConfig Load()
     {
         try
@@ -788,9 +790,9 @@ internal static class ConfigStore
                 return config;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Fall through to defaults.
+            throw new InvalidDataException($"Failed to load Clipboard Sync configuration from {ConfigPath}.", ex);
         }
 
         var defaults = new AppConfig();
