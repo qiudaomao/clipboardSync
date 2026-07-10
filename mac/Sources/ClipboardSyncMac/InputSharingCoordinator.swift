@@ -46,6 +46,18 @@ final class InputSharingCoordinator {
     private var didAllowBackgroundCursorHide = false
     private var localCursorDetached = false
 
+    /// Source for repositioning our own cursor at hand-back. `CGWarpMouseCursorPosition` makes
+    /// the window server suppress hardware mouse events for ~0.25s afterwards (and
+    /// `CGAssociateMouseAndMouseCursorPosition(1)` does not reliably lift it), which left the
+    /// cursor dead at the edge every time it crossed back from a peer. Posting a synthetic
+    /// mouse-move from a source whose suppression interval is zero moves the cursor through the
+    /// normal event path with no suppression at all.
+    private let returnMoveEventSource: CGEventSource? = {
+        let source = CGEventSource(stateID: .hidSystemState)
+        source?.localEventsSuppressionInterval = 0
+        return source
+    }()
+
     init(deviceId: String, layoutStore: ScreenLayoutStore) {
         self.deviceId = deviceId
         self.layoutStore = layoutStore
@@ -495,13 +507,14 @@ final class InputSharingCoordinator {
         sendCapture(action: "end", targetDeviceId: currentTargetDeviceId, screenId: currentScreenId, edge: lastCrossedEdge, entry: layoutStore.entries[currentScreenId])
         activeScreenId = nil
         activeTargetDeviceId = nil
+        // Unfreeze BEFORE the warp so the warp runs on an associated cursor; the warp itself
+        // then re-calls associate to release the window server's post-warp hardware-event
+        // suppression (the SDL/deskflow recipe — the release only works reliably when the call
+        // isn't also flipping the association state).
+        reattachLocalMouseToCursor()
         if let returnToScreenId {
             warpLocalCursorToReturnPoint(screenId: returnToScreenId)
         }
-        // Re-associate AFTER the warp: besides unfreezing the cursor, this also cancels the
-        // window server's post-warp hardware-event suppression interval (~0.25s by default),
-        // which otherwise leaves the cursor dead at the edge on every hand-back.
-        reattachLocalMouseToCursor()
         updateStatus()
     }
 
@@ -516,8 +529,17 @@ final class InputSharingCoordinator {
         )
         let clampedX = min(max(raw.x, realRect.minX), max(realRect.maxX - 2, realRect.minX))
         let clampedY = min(max(raw.y, realRect.minY), max(realRect.maxY - 2, realRect.minY))
-        CGWarpMouseCursorPosition(CGPoint(x: clampedX, y: clampedY))
+        let point = CGPoint(x: clampedX, y: clampedY)
+        // Set the tap-suppression window BEFORE posting: the return point sits inside the
+        // crossing threshold band, so our own injected move would otherwise instantly
+        // re-trigger crossingNeighbor and bounce capture straight back to the peer.
         suppressUntil = Date().addingTimeInterval(0.08)
+        if let event = CGEvent(mouseEventSource: returnMoveEventSource, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left) {
+            event.post(tap: .cghidEventTap)
+        } else {
+            CGWarpMouseCursorPosition(point)
+            CGAssociateMouseAndMouseCursorPosition(1)
+        }
     }
 
     private func sendCapture(action: String, targetDeviceId: String, screenId: String, edge: ScreenEdge, entry: ScreenLayoutEntry?) {
