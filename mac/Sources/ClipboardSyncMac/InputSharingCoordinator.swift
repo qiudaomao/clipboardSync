@@ -2,6 +2,7 @@ import ApplicationServices
 import AppKit
 import CoreGraphics
 import Foundation
+import IOKit
 
 /// Private CoreGraphics SPI. `CGDisplayHideCursor` is a no-op for a background
 /// (`.accessory`) app that never owns the foreground — which is exactly our case while
@@ -36,6 +37,7 @@ final class InputSharingCoordinator {
     private var eventTap: CFMachPort?
     private var eventSource: CFRunLoopSource?
     private var lastModifierKeys: Set<String> = []
+    private var lastCapsLockOn = false
     private let mouseMoveSendInterval: TimeInterval = 1.0 / 60.0
     private var lastMouseMoveSentAt = Date.distantPast
     private var pendingMouseMoveTimer: DispatchSourceTimer?
@@ -444,6 +446,9 @@ final class InputSharingCoordinator {
     }
 
     private func startRemoteCapture(target: ScreenLayoutEntry, canvasPoint: CGPoint, edge: ScreenEdge) {
+        // Baseline the caps-lock state so a session that starts with caps already on doesn't
+        // read the first flagsChanged as a toggle.
+        lastCapsLockOn = CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift)
         virtualCursor = clamp(canvasPoint, to: target.rect)
         activeScreenId = target.screenId
         activeTargetDeviceId = target.deviceId
@@ -733,6 +738,17 @@ final class InputSharingCoordinator {
     }
 
     private func sendModifierChanges(_ event: CGEvent) {
+        // Caps lock never arrives as keyDown/keyUp — only as a flagsChanged with the alphaShift
+        // flag reflecting the new LOCK STATE (and a second, identical-flags event on key
+        // release). Diffing the flag sends exactly one tap per toggle, and sending it as a
+        // down+up pair matters because the receiver's OS toggles its caps state on key-down.
+        let capsLockOn = event.flags.contains(.maskAlphaShift)
+        if capsLockOn != lastCapsLockOn {
+            lastCapsLockOn = capsLockOn
+            sendKeyPayload(key: "CapsLock", action: "down", modifiers: [])
+            sendKeyPayload(key: "CapsLock", action: "up", modifiers: [])
+        }
+
         let next = Set(Self.modifiers(from: event.flags))
         for key in next.subtracting(lastModifierKeys) {
             sendKeyPayload(key: key, action: "down", modifiers: Array(next).sorted())
@@ -904,6 +920,16 @@ final class InputSharingCoordinator {
             return
         }
 
+        if key.key == "CapsLock" {
+            // A synthetic keycode-57 event doesn't flip macOS's caps-lock state; only the
+            // IOKit modifier-lock API does. The sender emits a down+up pair per toggle, so
+            // act on the down and swallow the up.
+            if key.action == "down" {
+                toggleLocalCapsLock()
+            }
+            return
+        }
+
         guard let keyCode = Self.canonicalToMacKey[key.key] else {
             return
         }
@@ -913,6 +939,24 @@ final class InputSharingCoordinator {
         let modifiers = mappedModifiers(remotePressedSourceModifierKeys.union(key.modifiers))
         event.flags = Self.flags(from: Array(modifiers))
         post(event)
+    }
+
+    private func toggleLocalCapsLock() {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"))
+        guard service != 0 else {
+            return
+        }
+        defer { IOObjectRelease(service) }
+        var connect: io_connect_t = 0
+        guard IOServiceOpen(service, mach_task_self_, UInt32(kIOHIDParamConnectType), &connect) == KERN_SUCCESS else {
+            return
+        }
+        defer { IOServiceClose(connect) }
+        var on = false
+        guard IOHIDGetModifierLockState(connect, Int32(kIOHIDCapsLockState), &on) == KERN_SUCCESS else {
+            return
+        }
+        IOHIDSetModifierLockState(connect, Int32(kIOHIDCapsLockState), !on)
     }
 
     private func reconcileRemoteModifierState() {
