@@ -12,6 +12,7 @@ enum CryptoBox {
     private static let keyBytes = 32
     private static let pbkdf2Rounds = 100_000
     private static let realtimeSalt = Data("ClipboardSync realtime input v1".utf8)
+    private static let signedSalt = Data("ClipboardSync signed transport v1".utf8)
     private static let keyCacheQueue = DispatchQueue(label: "ClipboardSyncMac.crypto.keyCache")
     private static var cachedKeys: [String: SymmetricKey] = [:]
 
@@ -46,6 +47,39 @@ enum CryptoBox {
             ciphertext: sealedBox.ciphertext.base64EncodedString(),
             tag: sealedBox.tag.base64EncodedString()
         )
+    }
+
+    /// Authenticated-plaintext transport: the payload travels unencrypted but
+    /// carries an HMAC-SHA256 keyed by a password-derived key, so the password
+    /// still authenticates every message when transport encryption is off.
+    static func sign(_ plaintext: Data, password: String) throws -> SignedEnvelope {
+        let key = try cachedKey(password: password, salt: signedSalt)
+        let mac = HMAC<SHA256>.authenticationCode(for: plaintext, using: key)
+        return SignedEnvelope(
+            type: "signed",
+            version: 1,
+            payload: plaintext.base64EncodedString(),
+            mac: Data(mac).base64EncodedString(),
+            from: nil,
+            to: nil
+        )
+    }
+
+    static func verify(_ envelope: SignedEnvelope, password: String) throws -> Data {
+        guard envelope.type == "signed", envelope.version == 1 else {
+            throw CryptoError.unsupportedEnvelope
+        }
+        guard
+            let plaintext = Data(base64Encoded: envelope.payload),
+            let mac = Data(base64Encoded: envelope.mac)
+        else {
+            throw CryptoError.invalidEnvelope
+        }
+        let key = try cachedKey(password: password, salt: signedSalt)
+        guard HMAC<SHA256>.isValidAuthenticationCode(mac, authenticating: plaintext, using: key) else {
+            throw CryptoError.invalidEnvelope
+        }
+        return plaintext
     }
 
     static func decrypt(_ envelope: EncryptedEnvelope, password: String) throws -> Data {

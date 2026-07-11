@@ -213,6 +213,10 @@ enum AppText {
             "settings.validationLoopback": "Use the server Mac's LAN IP, not 127.0.0.1.",
             "settings.validationPort": "Port must be a number from 1 to 65535.",
             "settings.validationPassword": "Enter the same sync password on every device.",
+            "settings.confirmNoEncryptionTitle": "Disable transport encryption?",
+            "settings.confirmNoEncryption": "Clipboard and input data will travel unencrypted, authenticated by the sync password. Only do this on a trusted network.",
+            "settings.encryptTransport": "Encrypt transport (uncheck on trusted networks to save CPU)",
+            "settings.confirmNoEncryptionContinue": "Continue",
             "modifier.shift": "Shift",
             "modifier.control": "Control",
             "modifier.alt": "Alt/Option",
@@ -381,6 +385,10 @@ enum AppText {
             "settings.validationLoopback": "请使用服务器 Mac 的局域网 IP，不要用 127.0.0.1。",
             "settings.validationPort": "端口必须是 1 到 65535 之间的数字。",
             "settings.validationPassword": "请在每台设备上输入相同的同步密码。",
+            "settings.confirmNoEncryptionTitle": "禁用传输加密？",
+            "settings.confirmNoEncryption": "剪贴板与输入数据将不加密传输，仅使用同步密码进行认证。请仅在可信网络中使用。",
+            "settings.encryptTransport": "加密传输（可信网络可取消勾选以降低 CPU 占用）",
+            "settings.confirmNoEncryptionContinue": "继续",
             "modifier.shift": "Shift",
             "modifier.control": "Control",
             "modifier.alt": "Alt/Option",
@@ -549,6 +557,10 @@ enum AppText {
             "settings.validationLoopback": "127.0.0.1이 아닌 서버 Mac의 LAN IP를 사용하세요.",
             "settings.validationPort": "포트는 1에서 65535 사이의 숫자여야 합니다.",
             "settings.validationPassword": "모든 장치에 동일한 동기화 암호를 입력하세요.",
+            "settings.confirmNoEncryptionTitle": "전송 암호화를 비활성화할까요?",
+            "settings.confirmNoEncryption": "클립보드와 입력 데이터가 암호화되지 않은 채 전송되며 동기화 암호로만 인증됩니다. 신뢰할 수 있는 네트워크에서만 사용하세요.",
+            "settings.encryptTransport": "전송 암호화 (신뢰할 수 있는 네트워크에서는 해제해 CPU 절약)",
+            "settings.confirmNoEncryptionContinue": "계속",
             "modifier.shift": "Shift",
             "modifier.control": "Control",
             "modifier.alt": "Alt/Option",
@@ -717,6 +729,10 @@ enum AppText {
             "settings.validationLoopback": "127.0.0.1 ではなくサーバー Mac の LAN IP を使用してください。",
             "settings.validationPort": "ポートは 1 から 65535 の数字である必要があります。",
             "settings.validationPassword": "すべてのデバイスで同じ同期パスワードを入力してください。",
+            "settings.confirmNoEncryptionTitle": "転送の暗号化を無効にしますか？",
+            "settings.confirmNoEncryption": "クリップボードと入力データは暗号化されずに送信され、同期パスワードで認証のみ行われます。信頼できるネットワークでのみ使用してください。",
+            "settings.encryptTransport": "転送を暗号化（信頼できるネットワークではオフにして CPU を節約）",
+            "settings.confirmNoEncryptionContinue": "続行",
             "modifier.shift": "Shift",
             "modifier.control": "Control",
             "modifier.alt": "Alt/Option",
@@ -793,6 +809,9 @@ struct AppConfig: Codable {
     var host: String
     var port: Int
     var password: String
+    /// The password always authenticates messages; this only chooses whether
+    /// the transport payload is also encrypted (AES-GCM) or just HMAC-signed.
+    var encryptTransport: Bool
     var inputSharingEnabled: Bool
     var controlDeviceId: String?
     var reverseMouseVerticalScroll: Bool
@@ -803,6 +822,7 @@ struct AppConfig: Codable {
         host: "",
         port: 8787,
         password: "",
+        encryptTransport: true,
         inputSharingEnabled: false,
         controlDeviceId: nil,
         reverseMouseVerticalScroll: false,
@@ -819,6 +839,7 @@ struct AppConfig: Codable {
         host: String,
         port: Int,
         password: String,
+        encryptTransport: Bool = true,
         inputSharingEnabled: Bool,
         controlDeviceId: String?,
         reverseMouseVerticalScroll: Bool,
@@ -828,6 +849,7 @@ struct AppConfig: Codable {
         self.host = host
         self.port = port
         self.password = password
+        self.encryptTransport = encryptTransport
         self.inputSharingEnabled = inputSharingEnabled
         self.controlDeviceId = controlDeviceId
         self.reverseMouseVerticalScroll = reverseMouseVerticalScroll
@@ -840,6 +862,7 @@ struct AppConfig: Codable {
         host = try container.decodeIfPresent(String.self, forKey: .host) ?? Self.defaults.host
         port = try container.decodeIfPresent(Int.self, forKey: .port) ?? Self.defaults.port
         password = try container.decodeIfPresent(String.self, forKey: .password) ?? Self.defaults.password
+        encryptTransport = try container.decodeIfPresent(Bool.self, forKey: .encryptTransport) ?? Self.defaults.encryptTransport
         inputSharingEnabled = try container.decodeIfPresent(Bool.self, forKey: .inputSharingEnabled) ?? Self.defaults.inputSharingEnabled
         controlDeviceId = try container.decodeIfPresent(String.self, forKey: .controlDeviceId) ?? Self.defaults.controlDeviceId
         reverseMouseVerticalScroll = try container.decodeIfPresent(Bool.self, forKey: .reverseMouseVerticalScroll) ?? Self.defaults.reverseMouseVerticalScroll
@@ -872,6 +895,7 @@ struct AppConfig: Codable {
             host: host.trimmingCharacters(in: .whitespacesAndNewlines),
             port: min(max(port, 1), 65_535),
             password: password,
+            encryptTransport: encryptTransport,
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: controlDeviceId?.trimmingCharacters(in: .whitespacesAndNewlines),
             reverseMouseVerticalScroll: reverseMouseVerticalScroll,
@@ -905,6 +929,18 @@ struct EncryptedEnvelope: Codable {
         self.from = from
         self.to = to
     }
+}
+
+/// Authenticated-plaintext wire frame used when transport encryption is off:
+/// the payload is readable, but the HMAC (keyed by a password-derived key)
+/// still proves the sender knows the sync password.
+struct SignedEnvelope: Codable {
+    var type: String = "signed"
+    var version: Int = 1
+    var payload: String = ""
+    var mac: String = ""
+    var from: String?
+    var to: String?
 }
 
 /// Just the routing hints of an encrypted envelope, for relays that must not (and cannot) decrypt.

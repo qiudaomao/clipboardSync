@@ -248,10 +248,14 @@ void AppController::showSettings()
     port.setValue(config_.port);
     QLineEdit password(config_.password);
     password.setEchoMode(QLineEdit::Password);
+    password.setPlaceholderText(QStringLiteral("Required on every device"));
     layout->addRow(QStringLiteral("Mode"), &mode);
     layout->addRow(QStringLiteral("Server address"), &host);
     layout->addRow(QStringLiteral("Port"), &port);
     layout->addRow(QStringLiteral("Sync password"), &password);
+    QCheckBox encryptTransport(QStringLiteral("Encrypt transport (uncheck on trusted networks to save CPU)"));
+    encryptTransport.setChecked(config_.encryptTransport);
+    layout->addRow(&encryptTransport);
 
     QCheckBox reverseScroll(QStringLiteral("Reverse mouse vertical scroll"));
     reverseScroll.setChecked(config_.reverseMouseVerticalScroll);
@@ -282,10 +286,17 @@ void AppController::showSettings()
             QMessageBox::warning(&dialog, QStringLiteral("Incomplete settings"), QStringLiteral("Enter a password and, for Child Device mode, a server address."));
             return;
         }
+        if (!encryptTransport.isChecked() && config_.encryptTransport
+            && QMessageBox::question(&dialog, QStringLiteral("Disable transport encryption?"),
+                   QStringLiteral("Clipboard and input data will travel unencrypted, authenticated by the "
+                                  "sync password. Only do this on a trusted network. Continue?"))
+                != QMessageBox::Yes)
+            return;
         config_.mode = mode.currentIndex() == 0 ? AppConfig::Mode::Server : AppConfig::Mode::ChildDevice;
         config_.host = host.text().trimmed();
         config_.port = static_cast<quint16>(port.value());
         config_.password = password.text();
+        config_.encryptTransport = encryptTransport.isChecked();
         config_.paused = false;
         config_.reverseMouseVerticalScroll = reverseScroll.isChecked();
         config_.keyboardModifierMap.shift = modifierBoxes.at(0)->currentText();
@@ -393,12 +404,18 @@ void AppController::publishEncrypted(QJsonObject message, bool realtime, const Q
 {
     if (config_.paused || !config_.isComplete()) return;
     try {
-        QJsonObject envelope = CryptoBox::encrypt(QJsonDocument(message).toJson(QJsonDocument::Compact), config_.password, realtime);
+        // The password always authenticates the message; the checkbox only
+        // chooses between AES-GCM encryption and the cheaper HMAC-signed
+        // plaintext envelope for trusted networks.
+        const QByteArray plaintext = QJsonDocument(message).toJson(QJsonDocument::Compact);
+        QJsonObject envelope = config_.encryptTransport
+            ? CryptoBox::encrypt(plaintext, config_.password, realtime)
+            : CryptoBox::sign(plaintext, config_.password);
         envelope.insert(QStringLiteral("from"), config_.deviceId);
         if (!target.isEmpty()) envelope.insert(QStringLiteral("to"), target);
         transport_->send(QString::fromUtf8(QJsonDocument(envelope).toJson(QJsonDocument::Compact)), target);
     } catch (const std::exception &error) {
-        reportError(QStringLiteral("Could not encrypt outgoing message: %1").arg(QString::fromUtf8(error.what())));
+        reportError(QStringLiteral("Could not encode outgoing message: %1").arg(QString::fromUtf8(error.what())));
     }
 }
 
@@ -496,10 +513,19 @@ void AppController::receiveEnvelope(const QString &payload)
         const QJsonDocument envelopeDocument = QJsonDocument::fromJson(payload.toUtf8(), &error);
         if (error.error != QJsonParseError::NoError || !envelopeDocument.isObject())
             throw std::runtime_error("Malformed WebSocket JSON message");
-        const QByteArray plaintext = CryptoBox::decrypt(envelopeDocument.object(), config_.password);
+        // Both envelope kinds prove knowledge of the sync password, so either
+        // is accepted regardless of this device's own transport setting.
+        const QString envelopeType = envelopeDocument.object().value(QStringLiteral("type")).toString();
+        QByteArray plaintext;
+        if (envelopeType == QStringLiteral("encrypted"))
+            plaintext = CryptoBox::decrypt(envelopeDocument.object(), config_.password);
+        else if (envelopeType == QStringLiteral("signed"))
+            plaintext = CryptoBox::verify(envelopeDocument.object(), config_.password);
+        else
+            throw std::runtime_error("Unauthenticated message rejected");
         const QJsonDocument messageDocument = QJsonDocument::fromJson(plaintext, &error);
         if (error.error != QJsonParseError::NoError || !messageDocument.isObject())
-            throw std::runtime_error("Malformed decrypted JSON message");
+            throw std::runtime_error("Malformed authenticated JSON message");
         const QJsonObject message = messageDocument.object();
         if (message.value(QStringLiteral("origin")).toString() == config_.deviceId)
             return;

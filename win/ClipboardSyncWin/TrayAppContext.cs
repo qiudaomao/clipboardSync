@@ -709,7 +709,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void BroadcastLayout()
     {
-        if (transport is null || string.IsNullOrEmpty(config.Password))
+        if (transport is null)
         {
             return;
         }
@@ -726,7 +726,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void SendLayoutRequest(List<ScreenLayoutEntry> entries)
     {
-        if (transport is null || string.IsNullOrEmpty(config.Password))
+        if (transport is null)
         {
             return;
         }
@@ -745,7 +745,7 @@ internal sealed class TrayAppContext : ApplicationContext
     /// when we're a client - the server applies it locally and rebroadcasts the resulting layout.
     private void SendLayoutForgetRequest(string forgottenId)
     {
-        if (transport is null || string.IsNullOrEmpty(config.Password))
+        if (transport is null)
         {
             return;
         }
@@ -851,7 +851,7 @@ internal sealed class TrayAppContext : ApplicationContext
     /// that listen here. Only this device's local statuses are sent; each device reports its own.
     private void SendForwardStatuses()
     {
-        if (transport is null || string.IsNullOrEmpty(config.Password) || peerCount == 0)
+        if (transport is null || peerCount == 0)
         {
             return;
         }
@@ -959,7 +959,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void SendForwards()
     {
-        if (transport is null || string.IsNullOrEmpty(config.Password))
+        if (transport is null)
         {
             return;
         }
@@ -1021,7 +1021,7 @@ internal sealed class TrayAppContext : ApplicationContext
         portForwardCoordinator.Update(
             config.DeviceId,
             portForwardStore.Snapshot(),
-            transport is not null && !string.IsNullOrEmpty(config.Password),
+            transport is not null,
             new HashSet<string>(inputDevices.Keys));
         // Presence and transport changes flow through here; refresh the dialog's lights so remote
         // rules flip to "offline"/back live.
@@ -1076,7 +1076,7 @@ internal sealed class TrayAppContext : ApplicationContext
     /// only whichever device already has its window open would ever show up moving.
     private void BroadcastLayoutWatch(bool enabled)
     {
-        if (transport is null || string.IsNullOrEmpty(config.Password) || peerCount == 0)
+        if (transport is null || peerCount == 0)
         {
             return;
         }
@@ -1141,7 +1141,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void BroadcastCursorPosition(string screenId, double normalizedX, double normalizedY)
     {
-        if (transport is null || string.IsNullOrEmpty(config.Password) || peerCount == 0)
+        if (transport is null || peerCount == 0)
         {
             return;
         }
@@ -1287,6 +1287,8 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private static bool CanStartTransport(AppConfig item)
     {
+        // The password is always required: it authenticates every message even
+        // when transport encryption is turned off.
         if (string.IsNullOrEmpty(item.Password))
         {
             return false;
@@ -1513,16 +1515,28 @@ internal sealed class TrayAppContext : ApplicationContext
     private bool SendEncrypted<T>(T message, bool realtime = false, string? routedTo = null, bool viaInputChannel = false)
     {
         var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(message, MessageJsonOptions);
-        EncryptedEnvelope envelope;
         byte[] envelopeBytes;
         try
         {
-            envelope = realtime
-                ? CryptoBox.EncryptRealtime(payloadBytes, config.Password)
-                : CryptoBox.Encrypt(payloadBytes, config.Password);
-            envelope.From = config.DeviceId;
-            envelope.To = routedTo;
-            envelopeBytes = JsonSerializer.SerializeToUtf8Bytes(envelope, MessageJsonOptions);
+            // The password always authenticates the message; the setting only
+            // chooses between AES-GCM encryption and the cheaper HMAC-signed
+            // plaintext envelope for trusted networks.
+            if (!config.EncryptTransport)
+            {
+                var envelope = CryptoBox.Sign(payloadBytes, config.Password);
+                envelope.From = config.DeviceId;
+                envelope.To = routedTo;
+                envelopeBytes = JsonSerializer.SerializeToUtf8Bytes(envelope, MessageJsonOptions);
+            }
+            else
+            {
+                var envelope = realtime
+                    ? CryptoBox.EncryptRealtime(payloadBytes, config.Password)
+                    : CryptoBox.Encrypt(payloadBytes, config.Password);
+                envelope.From = config.DeviceId;
+                envelope.To = routedTo;
+                envelopeBytes = JsonSerializer.SerializeToUtf8Bytes(envelope, MessageJsonOptions);
+            }
         }
         catch
         {
@@ -1560,7 +1574,26 @@ internal sealed class TrayAppContext : ApplicationContext
             {
                 return;
             }
-            plaintext = CryptoBox.Decrypt(envelope, config.Password);
+            // Both envelope kinds prove knowledge of the sync password, so
+            // either is accepted regardless of this device's own transport
+            // setting; anything else is unauthenticated and dropped.
+            if (envelope.Type == "encrypted")
+            {
+                plaintext = CryptoBox.Decrypt(envelope, config.Password);
+            }
+            else if (envelope.Type == "signed")
+            {
+                var signedEnvelope = JsonSerializer.Deserialize<SignedEnvelope>(payload, MessageJsonOptions);
+                if (signedEnvelope is null)
+                {
+                    return;
+                }
+                plaintext = CryptoBox.Verify(signedEnvelope, config.Password);
+            }
+            else
+            {
+                return;
+            }
             header = JsonSerializer.Deserialize<MessageHeader>(plaintext, MessageJsonOptions);
 
             switch (header?.Type)
@@ -1794,7 +1827,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void SendInputHello()
     {
-        if (transport is null || string.IsNullOrEmpty(config.Password))
+        if (transport is null)
         {
             return;
         }
@@ -1808,7 +1841,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void SendInputConfig()
     {
-        if (transport is null || string.IsNullOrEmpty(config.Password))
+        if (transport is null)
         {
             return;
         }
@@ -1830,7 +1863,7 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         pendingInputConfigSync = true;
         SendInputConfig();
-        if (transport is not null && !string.IsNullOrEmpty(config.Password))
+        if (transport is not null)
         {
             pendingInputConfigSync = false;
         }

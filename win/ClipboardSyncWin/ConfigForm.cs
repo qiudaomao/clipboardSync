@@ -23,6 +23,7 @@ internal sealed class ConfigForm : Form
     };
     private readonly TextBox passwordBox = new() { UseSystemPasswordChar = true };
     private readonly Button copyPasswordButton = new() { AutoSize = true };
+    private readonly CheckBox encryptTransportBox = new() { AutoSize = true };
     private readonly CheckBox inputSharingBox = new() { AutoSize = true };
     private readonly CheckBox reverseScrollBox = new() { AutoSize = true };
     private readonly ComboBox shiftModifierBox = new() { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -63,6 +64,7 @@ internal sealed class ConfigForm : Form
             Padding = new Padding(12, 0, 12, 0)
         };
 
+        encryptTransportBox.Text = AppText.Text("settings.encryptTransport");
         inputSharingBox.Text = AppText.Text("settings.enableInputSharing");
         reverseScrollBox.Text = AppText.Text("settings.reverseVerticalScroll");
         copyHostButton.Text = AppText.Text("settings.copyAddress");
@@ -89,6 +91,7 @@ internal sealed class ConfigForm : Form
         hostBox.Text = clientHostDraft;
         portBox.Value = Math.Clamp(Config.Port, 1, 65_535);
         passwordBox.Text = Config.Password;
+        encryptTransportBox.Checked = Config.EncryptTransport;
         inputSharingBox.Checked = Config.InputSharingEnabled;
         reverseScrollBox.Checked = Config.ReverseMouseVerticalScroll;
         ConfigureModifierBox(shiftModifierBox, Config.KeyboardModifierMap.Shift);
@@ -113,12 +116,13 @@ internal sealed class ConfigForm : Form
             Dock = DockStyle.Top,
             Padding = new Padding(12),
             ColumnCount = 2,
-            RowCount = 7
+            RowCount = 8
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
@@ -129,9 +133,10 @@ internal sealed class ConfigForm : Form
         AddRow(layout, 1, AppText.Text("settings.host"), BuildHostControl());
         AddRow(layout, 2, AppText.Text("settings.port"), portBox);
         AddRow(layout, 3, AppText.Text("settings.password"), BuildPasswordControl());
-        AddRow(layout, 4, AppText.Text("settings.input"), inputSharingBox);
-        AddRow(layout, 5, AppText.Text("settings.scroll"), reverseScrollBox);
-        AddRow(layout, 6, AppText.Text("settings.modifierKeys"), BuildModifierMapControl());
+        AddRow(layout, 4, AppText.Text("settings.encryption"), encryptTransportBox);
+        AddRow(layout, 5, AppText.Text("settings.input"), inputSharingBox);
+        AddRow(layout, 6, AppText.Text("settings.scroll"), reverseScrollBox);
+        AddRow(layout, 7, AppText.Text("settings.modifierKeys"), BuildModifierMapControl());
 
         var buttons = new FlowLayoutPanel
         {
@@ -327,9 +332,25 @@ internal sealed class ConfigForm : Form
             return;
         }
 
+        if (!encryptTransportBox.Checked && Config.EncryptTransport)
+        {
+            var answer = MessageBox.Show(
+                this,
+                AppText.Text("settings.confirmNoEncryption"),
+                Text,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+            if (answer != DialogResult.Yes)
+            {
+                encryptTransportBox.Checked = true;
+                return;
+            }
+        }
+
         Config.Host = host;
         Config.Port = (int)portBox.Value;
         Config.Password = password;
+        Config.EncryptTransport = encryptTransportBox.Checked;
         Config.InputSharingEnabled = inputSharingBox.Checked;
         Config.ReverseMouseVerticalScroll = reverseScrollBox.Checked;
         Config.KeyboardModifierMap = new KeyboardModifierMap

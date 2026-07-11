@@ -3,7 +3,9 @@
 #include <QHash>
 #include <QMutex>
 
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/rand.h>
 
 #include <memory>
@@ -16,6 +18,7 @@ constexpr int TagBytes = 16;
 constexpr int KeyBytes = 32;
 constexpr int Pbkdf2Rounds = 100000;
 const QByteArray RealtimeSalt("ClipboardSync realtime input v1");
+const QByteArray SignedSalt("ClipboardSync signed transport v1");
 
 QByteArray randomBytes(int size)
 {
@@ -30,17 +33,18 @@ using CipherContext = std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_f
 
 QByteArray CryptoBox::deriveKey(const QString &password, const QByteArray &salt)
 {
-    // Realtime (version 2) messages reuse a fixed salt precisely so this key
+    // Realtime and signed-transport keys reuse fixed salts precisely so they
     // can be cached: running 100k PBKDF2 rounds (~30-50 ms on a handheld CPU)
     // per mouse event would fall far behind a 60 Hz event stream in both
     // directions. Version 1 salts are random per message and are not cached.
-    const bool cacheable = salt == RealtimeSalt;
+    const bool cacheable = salt == RealtimeSalt || salt == SignedSalt;
     static QMutex cacheMutex;
-    static QHash<QString, QByteArray> realtimeKeyCache;
+    static QHash<QByteArray, QByteArray> fixedSaltKeyCache;
+    const QByteArray cacheKey = salt + QByteArrayLiteral("\0") + password.toUtf8();
     if (cacheable) {
         const QMutexLocker locker(&cacheMutex);
-        const auto cached = realtimeKeyCache.constFind(password);
-        if (cached != realtimeKeyCache.constEnd())
+        const auto cached = fixedSaltKeyCache.constFind(cacheKey);
+        if (cached != fixedSaltKeyCache.constEnd())
             return *cached;
     }
     const QByteArray utf8 = password.toUtf8();
@@ -53,9 +57,46 @@ QByteArray CryptoBox::deriveKey(const QString &password, const QByteArray &salt)
     }
     if (cacheable) {
         const QMutexLocker locker(&cacheMutex);
-        realtimeKeyCache.insert(password, key);
+        fixedSaltKeyCache.insert(cacheKey, key);
     }
     return key;
+}
+
+QJsonObject CryptoBox::sign(const QByteArray &plaintext, const QString &password)
+{
+    const QByteArray key = deriveKey(password, SignedSalt);
+    unsigned char mac[EVP_MAX_MD_SIZE];
+    unsigned int macLength = 0;
+    if (!HMAC(EVP_sha256(), key.constData(), key.size(),
+            reinterpret_cast<const unsigned char *>(plaintext.constData()), plaintext.size(), mac, &macLength))
+        throw std::runtime_error("HMAC signing failed");
+    return {
+        {QStringLiteral("type"), QStringLiteral("signed")},
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("payload"), QString::fromLatin1(plaintext.toBase64())},
+        {QStringLiteral("mac"), QString::fromLatin1(QByteArray(reinterpret_cast<char *>(mac), macLength).toBase64())}
+    };
+}
+
+QByteArray CryptoBox::verify(const QJsonObject &envelope, const QString &password)
+{
+    if (envelope.value(QStringLiteral("type")).toString() != QStringLiteral("signed")
+        || envelope.value(QStringLiteral("version")).toInt() != 1)
+        throw std::runtime_error("Unsupported signed envelope");
+    const QByteArray plaintext = QByteArray::fromBase64(
+        envelope.value(QStringLiteral("payload")).toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+    const QByteArray expectedMac = QByteArray::fromBase64(
+        envelope.value(QStringLiteral("mac")).toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+    const QByteArray key = deriveKey(password, SignedSalt);
+    unsigned char mac[EVP_MAX_MD_SIZE];
+    unsigned int macLength = 0;
+    if (!HMAC(EVP_sha256(), key.constData(), key.size(),
+            reinterpret_cast<const unsigned char *>(plaintext.constData()), plaintext.size(), mac, &macLength))
+        throw std::runtime_error("HMAC verification failed");
+    if (macLength != static_cast<unsigned int>(expectedMac.size())
+        || CRYPTO_memcmp(mac, expectedMac.constData(), macLength) != 0)
+        throw std::runtime_error("Signed message authentication failed");
+    return plaintext;
 }
 
 QJsonObject CryptoBox::encrypt(const QByteArray &plaintext, const QString &password, bool realtime)

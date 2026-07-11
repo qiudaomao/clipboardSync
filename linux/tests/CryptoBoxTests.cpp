@@ -30,6 +30,34 @@ int main(int argc, char **argv)
     if (!fixture.isObject() || CryptoBox::decrypt(fixture.object(), QStringLiteral("interop-password")) != expected)
         qFatal("Cross-platform AES-GCM fixture mismatch");
 
+    // Signed (unencrypted) transport: HMAC round-trip, tamper rejection, and
+    // wrong-password rejection.
+    const QJsonObject signedEnvelope = CryptoBox::sign(plaintext, QStringLiteral("correct horse battery staple"));
+    if (signedEnvelope.value(QStringLiteral("type")).toString() != QStringLiteral("signed"))
+        qFatal("Wrong signed envelope type");
+    if (CryptoBox::verify(signedEnvelope, QStringLiteral("correct horse battery staple")) != plaintext)
+        qFatal("Signed round-trip mismatch");
+    bool signedRejected = false;
+    try {
+        CryptoBox::verify(signedEnvelope, QStringLiteral("wrong password"));
+    } catch (const std::exception &) {
+        signedRejected = true;
+    }
+    if (!signedRejected)
+        qFatal("Signed envelope accepted a wrong password");
+    QJsonObject tampered = signedEnvelope;
+    QByteArray tamperedPayload = plaintext;
+    tamperedPayload[0] = tamperedPayload[0] == 'X' ? 'Y' : 'X';
+    tampered.insert(QStringLiteral("payload"), QString::fromLatin1(tamperedPayload.toBase64()));
+    bool tamperRejected = false;
+    try {
+        CryptoBox::verify(tampered, QStringLiteral("correct horse battery staple"));
+    } catch (const std::exception &) {
+        tamperRejected = true;
+    }
+    if (!tamperRejected)
+        qFatal("Tampered signed payload was accepted");
+
     // The realtime key must be cached after the first derivation: without the
     // cache each of these round-trips runs 2x 100k PBKDF2 rounds and this loop
     // takes >10 s, starving live mouse/key streams. Warm-up above already

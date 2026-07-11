@@ -16,6 +16,7 @@ internal static class CryptoBox
     private const int KeyBytes = 32;
     private const int Pbkdf2Rounds = 100_000;
     private static readonly byte[] RealtimeSalt = Encoding.UTF8.GetBytes("ClipboardSync realtime input v1");
+    private static readonly byte[] SignedSalt = Encoding.UTF8.GetBytes("ClipboardSync signed transport v1");
     private static readonly ConcurrentDictionary<string, byte[]> KeyCache = new();
 
     public static EncryptedEnvelope Encrypt(byte[] plaintext, string password)
@@ -80,6 +81,37 @@ internal static class CryptoBox
 
         using var aes = new AesGcm(key, TagBytes);
         aes.Decrypt(nonce, ciphertext, tag, plaintext);
+        return plaintext;
+    }
+
+    /// Authenticated-plaintext transport: the payload travels unencrypted but
+    /// carries an HMAC-SHA256 keyed by a password-derived key, so the password
+    /// still authenticates every message when transport encryption is off.
+    public static SignedEnvelope Sign(byte[] plaintext, string password)
+    {
+        var key = DeriveCachedKey(password, SignedSalt);
+        using var hmac = new HMACSHA256(key);
+        return new SignedEnvelope
+        {
+            Payload = Convert.ToBase64String(plaintext),
+            Mac = Convert.ToBase64String(hmac.ComputeHash(plaintext))
+        };
+    }
+
+    public static byte[] Verify(SignedEnvelope envelope, string password)
+    {
+        if (envelope.Type != "signed" || envelope.Version != 1)
+        {
+            throw new CryptographicException("Unsupported signed message.");
+        }
+        var plaintext = Convert.FromBase64String(envelope.Payload);
+        var expectedMac = Convert.FromBase64String(envelope.Mac);
+        var key = DeriveCachedKey(password, SignedSalt);
+        using var hmac = new HMACSHA256(key);
+        if (!CryptographicOperations.FixedTimeEquals(hmac.ComputeHash(plaintext), expectedMac))
+        {
+            throw new CryptographicException("Signed message authentication failed.");
+        }
         return plaintext;
     }
 

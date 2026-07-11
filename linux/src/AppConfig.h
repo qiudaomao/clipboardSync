@@ -12,6 +12,9 @@ struct AppConfig {
     QString host;
     quint16 port = 8787;
     QString password;
+    // The password always authenticates messages; this only chooses whether
+    // the transport payload is also encrypted (AES-GCM) or just HMAC-signed.
+    bool encryptTransport = true;
     QString deviceId;
     bool paused = false;
     QJsonArray portForwardRules;

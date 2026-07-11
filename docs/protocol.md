@@ -1,7 +1,8 @@
 # Clipboard Sync Protocol
 
 The app uses a single WebSocket connection with UTF-8 JSON messages.
-Clipboard payloads are encrypted before they are sent.
+Every message is authenticated with the shared sync password; transport
+encryption is optional per device (see "Signed Transport").
 
 ## Endpoint
 
@@ -54,12 +55,40 @@ All encrypted messages use a per-message 12-byte nonce and 16-byte
 authentication tag. Devices must use the same password; messages encrypted with
 a different password are ignored.
 
+## Signed Transport
+
+Transport encryption is optional per device — a settings checkbox trades
+confidentiality for CPU on trusted networks — but the sync password is always
+required and always authenticates every message. When a device turns transport
+encryption off, it sends signed envelopes instead of encrypted ones:
+
+```json
+{
+  "type": "signed",
+  "version": 1,
+  "payload": "base64-plaintext-message-json",
+  "mac": "base64-hmac-sha256",
+  "from": "sender-device-id",
+  "to": "receiver-device-id"
+}
+```
+
+`mac` is HMAC-SHA256 over the raw payload bytes, keyed by a cached PBKDF2 key
+derived exactly like the realtime AES key but with the fixed salt
+`ClipboardSync signed transport v1`. `from`/`to` carry the same routing hints
+as encrypted envelopes.
+
+Receivers accept both envelope kinds regardless of their own transport
+setting — each proves knowledge of the shared password — and reject anything
+else: a frame whose top-level `type` is neither `"encrypted"` nor `"signed"`,
+or whose MAC/decryption fails, is dropped. The sender's checkbox therefore
+only controls whether its own traffic is readable on the wire.
+
 ## Plaintext Messages
 
-After decryption, messages use a `type` discriminator. Clipboard updates use
+After authentication (decrypting an encrypted envelope or verifying a signed
+one), messages use a `type` discriminator. Clipboard updates use
 `type: "clipboard"` and input-sharing updates use `type: "input"`.
-
-Plaintext structures are never sent directly.
 
 ## Clipboard Message
 

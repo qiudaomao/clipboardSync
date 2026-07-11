@@ -91,6 +91,9 @@ internal sealed class AppConfig
     public string Host { get; set; } = "";
     public int Port { get; set; } = 8787;
     public string Password { get; set; } = "";
+    /// The password always authenticates messages; this only chooses whether
+    /// the transport payload is also encrypted (AES-GCM) or just HMAC-signed.
+    public bool EncryptTransport { get; set; } = true;
     public bool InputSharingEnabled { get; set; }
     public string? ControlDeviceId { get; set; }
     public bool ReverseMouseVerticalScroll { get; set; }
@@ -122,6 +125,7 @@ internal sealed class AppConfig
             Host = Host,
             Port = Port,
             Password = Password,
+            EncryptTransport = EncryptTransport,
             InputSharingEnabled = InputSharingEnabled,
             ControlDeviceId = ControlDeviceId,
             ReverseMouseVerticalScroll = ReverseMouseVerticalScroll,
@@ -144,6 +148,19 @@ internal sealed class EncryptedEnvelope
     /// From teaches the server which connection belongs to which device id; To names the intended
     /// receiver. Optional — absent on messages from older peers and on broadcasts — and advisory
     /// only: receivers still filter by the encrypted payload's own Target.
+    public string? From { get; set; }
+    public string? To { get; set; }
+}
+
+/// Authenticated-plaintext wire frame used when transport encryption is off:
+/// the payload is readable, but the HMAC (keyed by a password-derived key)
+/// still proves the sender knows the sync password.
+internal sealed class SignedEnvelope
+{
+    public string Type { get; set; } = "signed";
+    public int Version { get; set; } = 1;
+    public string Payload { get; set; } = "";
+    public string Mac { get; set; } = "";
     public string? From { get; set; }
     public string? To { get; set; }
 }

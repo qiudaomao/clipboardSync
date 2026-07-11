@@ -9,6 +9,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let portField = NSTextField()
     private let passwordField = NSSecureTextField()
     private let copyPasswordButton = NSButton(title: AppText.text("settings.copyPassword"), target: nil, action: nil)
+    private let encryptTransportButton = NSButton(checkboxWithTitle: AppText.text("settings.encryptTransport"), target: nil, action: nil)
     private let inputSharingButton = NSButton(checkboxWithTitle: AppText.text("settings.enableInputSharing"), target: nil, action: nil)
     private let reverseScrollButton = NSButton(checkboxWithTitle: AppText.text("settings.reverseVerticalScroll"), target: nil, action: nil)
     private let permissionLabel = NSTextField(wrappingLabelWithString: "")
@@ -59,6 +60,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         passwordField.stringValue = config.password
         inputSharingButton.state = config.inputSharingEnabled ? .on : .off
         reverseScrollButton.state = config.reverseMouseVerticalScroll ? .on : .off
+        encryptTransportButton.state = config.encryptTransport ? .on : .off
         selectModifier(config.keyboardModifierMap.shift, in: shiftModifierPopup)
         selectModifier(config.keyboardModifierMap.control, in: controlModifierPopup)
         selectModifier(config.keyboardModifierMap.alt, in: altModifierPopup)
@@ -183,7 +185,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             formRow(label: AppText.text("settings.mode"), control: modeControl),
             formRow(label: AppText.text("settings.host"), control: hostStack),
             formRow(label: AppText.text("settings.port"), control: portField),
-            formRow(label: AppText.text("settings.password"), control: passwordStack)
+            formRow(label: AppText.text("settings.password"), control: passwordStack),
+            formRow(label: "", control: encryptTransportButton)
         ])
         connectionStack.orientation = .vertical
         connectionStack.alignment = .leading
@@ -359,6 +362,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let host = mode == .client ? hostField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) : currentConfig.host
         let portText = portField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = passwordField.stringValue
+        let encryptTransport = encryptTransportButton.state == .on
         let inputSharingEnabled = inputSharingButton.state == .on
         let reverseMouseVerticalScroll = reverseScrollButton.state == .on
         let keyboardModifierMap = KeyboardModifierMap(
@@ -392,11 +396,25 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             return
         }
 
+        if !encryptTransport, currentConfig.encryptTransport {
+            let alert = NSAlert()
+            alert.messageText = AppText.text("settings.confirmNoEncryptionTitle")
+            alert.informativeText = AppText.text("settings.confirmNoEncryption")
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: AppText.text("settings.confirmNoEncryptionContinue"))
+            alert.addButton(withTitle: AppText.text("settings.cancel"))
+            if alert.runModal() != .alertFirstButtonReturn {
+                encryptTransportButton.state = .on
+                return
+            }
+        }
+
         let nextConfig = AppConfig(
             mode: mode,
             host: host.isEmpty ? currentConfig.host : host,
             port: port,
             password: password,
+            encryptTransport: encryptTransport,
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: currentConfig.controlDeviceId,
             reverseMouseVerticalScroll: reverseMouseVerticalScroll,

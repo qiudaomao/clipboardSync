@@ -17,6 +17,7 @@ AppConfig AppConfig::load()
         throw std::runtime_error("Configured port is outside 1..65535");
     config.port = static_cast<quint16>(port);
     config.password = settings.value(QStringLiteral("connection/password")).toString();
+    config.encryptTransport = settings.value(QStringLiteral("connection/encryptTransport"), true).toBool();
     config.deviceId = settings.value(QStringLiteral("identity/deviceId")).toString();
     config.paused = settings.value(QStringLiteral("sync/paused"), false).toBool();
     config.inputSharingEnabled = settings.value(QStringLiteral("input/sharingEnabled"), false).toBool();
@@ -52,6 +53,7 @@ void AppConfig::save() const
     settings.setValue(QStringLiteral("connection/host"), host.trimmed());
     settings.setValue(QStringLiteral("connection/port"), port);
     settings.setValue(QStringLiteral("connection/password"), password);
+    settings.setValue(QStringLiteral("connection/encryptTransport"), encryptTransport);
     settings.setValue(QStringLiteral("identity/deviceId"), deviceId);
     settings.setValue(QStringLiteral("sync/paused"), paused);
     settings.setValue(QStringLiteral("input/sharingEnabled"), inputSharingEnabled);
@@ -69,5 +71,7 @@ void AppConfig::save() const
 
 bool AppConfig::isComplete() const
 {
+    // The password is always required: it authenticates every message even
+    // when transport encryption is turned off.
     return !password.isEmpty() && port > 0 && (mode == Mode::Server || !host.isEmpty());
 }

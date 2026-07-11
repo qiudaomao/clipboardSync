@@ -42,6 +42,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             _wirePassword = newValue
         }
     }
+    /// Snapshot of `config.encryptTransport` readable from the wire queues.
+    private let wireEncryptLock = NSLock()
+    private var _wireEncrypt = true
+    private var wireEncrypt: Bool {
+        get {
+            wireEncryptLock.lock()
+            defer { wireEncryptLock.unlock() }
+            return _wireEncrypt
+        }
+        set {
+            wireEncryptLock.lock()
+            defer { wireEncryptLock.unlock() }
+            _wireEncrypt = newValue
+        }
+    }
     private var isSyncPaused = false
     private var peerCount = 0
     private var presenceTimer: Timer?
@@ -700,7 +715,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Broadcasts this device's own listen state so peers can show accurate status lights for rules
     /// that listen here. Only this device's local statuses are sent; each device reports its own.
     private func sendForwardStatuses() {
-        guard transport != nil, !config.password.isEmpty, peerCount > 0 else {
+        guard transport != nil, peerCount > 0 else {
             return
         }
         publishInput(InputMessage(
@@ -797,7 +812,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func sendForwards() {
-        guard transport != nil, !config.password.isEmpty else {
+        guard transport != nil else {
             return
         }
         publishInput(InputMessage(
@@ -863,7 +878,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         portForwardCoordinator.update(
             deviceId: deviceId,
             rules: portForwardStore.snapshot(),
-            transportReady: transport != nil && !config.password.isEmpty,
+            transportReady: transport != nil,
             onlinePeers: Set(inputDevices.keys)
         )
         // Presence and transport changes flow through here; refresh the panel's lights so remote
@@ -897,7 +912,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// with their own window closed still start reporting their live cursor position — otherwise
     /// only whichever device already has its window open would ever show up moving.
     private func broadcastLayoutWatch(enabled: Bool) {
-        guard transport != nil, !config.password.isEmpty, peerCount > 0 else {
+        guard transport != nil, peerCount > 0 else {
             return
         }
         publishInput(InputMessage(
@@ -988,7 +1003,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func broadcastLayout() {
-        guard transport != nil, !config.password.isEmpty else {
+        guard transport != nil else {
             return
         }
         publishInput(InputMessage(
@@ -1011,7 +1026,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func sendLayoutRequest(_ entries: [ScreenLayoutEntry]) {
-        guard transport != nil, !config.password.isEmpty else {
+        guard transport != nil else {
             return
         }
         publishInput(InputMessage(
@@ -1036,7 +1051,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Asks the server (the canonical layout owner) to drop a device's screens. Only meaningful
     /// when we're a client — the server applies it locally and rebroadcasts the resulting layout.
     private func sendLayoutForgetRequest(deviceId forgottenId: String) {
-        guard transport != nil, !config.password.isEmpty else {
+        guard transport != nil else {
             return
         }
         publishInput(InputMessage(
@@ -1072,7 +1087,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func broadcastCursorPosition(screenId: String, normalizedX: Double, normalizedY: Double) {
-        guard transport != nil, !config.password.isEmpty, peerCount > 0 else {
+        guard transport != nil, peerCount > 0 else {
             return
         }
         publishInput(InputMessage(
@@ -1268,6 +1283,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func canStartTransport(_ configuration: AppConfig) -> Bool {
+        // The password is always required: it authenticates every message even
+        // when transport encryption is turned off.
         guard !configuration.password.isEmpty else {
             return false
         }
@@ -1284,6 +1301,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func restartTransport() {
         isSyncPaused = false
         wirePassword = config.password
+        wireEncrypt = config.encryptTransport
         transport?.stop()
         peerCount = 0
         fileTransferCoordinator.cancelAll()
@@ -1383,22 +1401,53 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         _ = sendEncryptedInput(message)
     }
 
+    /// Unencrypted-transport wire frame: an HMAC-signed plaintext envelope, so
+    /// the password still authenticates the message without the AES cost.
+    private static func signedFrame<T: Encodable>(
+        _ message: T,
+        encoder: JSONEncoder,
+        password: String,
+        from: String,
+        to: String?
+    ) -> Data? {
+        guard
+            let data = try? encoder.encode(message),
+            var envelope = try? CryptoBox.sign(data, password: password)
+        else {
+            return nil
+        }
+        envelope.from = from
+        envelope.to = to
+        return try? encoder.encode(envelope)
+    }
+
     @discardableResult
     private func sendEncrypted<T: Encodable>(_ message: T, routedTo: String? = nil) -> Bool {
-        guard
-            let data = try? jsonEncoder.encode(message),
-            var envelope = try? CryptoBox.encrypt(data, password: config.password)
-        else {
-            statusText = AppText.text("status.encryptionFailed")
-            return false
+        let envelopeData: Data
+        if !config.encryptTransport {
+            guard let frame = Self.signedFrame(message, encoder: jsonEncoder, password: config.password, from: deviceId, to: routedTo) else {
+                statusText = AppText.text("status.encryptionFailed")
+                return false
+            }
+            envelopeData = frame
+        } else {
+            guard
+                let data = try? jsonEncoder.encode(message),
+                var envelope = try? CryptoBox.encrypt(data, password: config.password)
+            else {
+                statusText = AppText.text("status.encryptionFailed")
+                return false
+            }
+            envelope.from = deviceId
+            envelope.to = routedTo
+            guard let encoded = try? jsonEncoder.encode(envelope) else {
+                statusText = AppText.text("status.encryptionFailed")
+                return false
+            }
+            envelopeData = encoded
         }
-        envelope.from = deviceId
-        envelope.to = routedTo
 
-        guard
-            let envelopeData = try? jsonEncoder.encode(envelope),
-            let payload = String(data: envelopeData, encoding: .utf8)
-        else {
+        guard let payload = String(data: envelopeData, encoding: .utf8) else {
             statusText = AppText.text("status.encryptionFailed")
             return false
         }
@@ -1421,20 +1470,31 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// payload, shipped over the dedicated input channel when the peer supports it.
     @discardableResult
     private func sendEncryptedRealtime<T: Encodable>(_ message: T, routedTo: String? = nil) -> Bool {
-        guard
-            let data = try? jsonEncoder.encode(message),
-            var envelope = try? CryptoBox.encryptRealtime(data, password: config.password)
-        else {
-            statusText = AppText.text("status.encryptionFailed")
-            return false
+        let envelopeData: Data
+        if !config.encryptTransport {
+            guard let frame = Self.signedFrame(message, encoder: jsonEncoder, password: config.password, from: deviceId, to: routedTo) else {
+                statusText = AppText.text("status.encryptionFailed")
+                return false
+            }
+            envelopeData = frame
+        } else {
+            guard
+                let data = try? jsonEncoder.encode(message),
+                var envelope = try? CryptoBox.encryptRealtime(data, password: config.password)
+            else {
+                statusText = AppText.text("status.encryptionFailed")
+                return false
+            }
+            envelope.from = deviceId
+            envelope.to = routedTo
+            guard let encoded = try? jsonEncoder.encode(envelope) else {
+                statusText = AppText.text("status.encryptionFailed")
+                return false
+            }
+            envelopeData = encoded
         }
-        envelope.from = deviceId
-        envelope.to = routedTo
 
-        guard
-            let envelopeData = try? jsonEncoder.encode(envelope),
-            let payload = String(data: envelopeData, encoding: .utf8)
-        else {
+        guard let payload = String(data: envelopeData, encoding: .utf8) else {
             statusText = AppText.text("status.encryptionFailed")
             return false
         }
@@ -1460,20 +1520,31 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
             let encoder = JSONEncoder()
-            guard
-                let data = try? encoder.encode(message),
-                var envelope = try? CryptoBox.encryptRealtime(data, password: self.wirePassword)
-            else {
-                DispatchQueue.main.async { self.statusText = AppText.text("status.encryptionFailed") }
-                return
+            let envelopeData: Data
+            if !self.wireEncrypt {
+                guard let frame = Self.signedFrame(message, encoder: encoder, password: self.wirePassword, from: self.deviceId, to: routedTo) else {
+                    DispatchQueue.main.async { self.statusText = AppText.text("status.encryptionFailed") }
+                    return
+                }
+                envelopeData = frame
+            } else {
+                guard
+                    let data = try? encoder.encode(message),
+                    var envelope = try? CryptoBox.encryptRealtime(data, password: self.wirePassword)
+                else {
+                    DispatchQueue.main.async { self.statusText = AppText.text("status.encryptionFailed") }
+                    return
+                }
+                envelope.from = self.deviceId
+                envelope.to = routedTo
+                guard let encoded = try? encoder.encode(envelope) else {
+                    DispatchQueue.main.async { self.statusText = AppText.text("status.encryptionFailed") }
+                    return
+                }
+                envelopeData = encoded
             }
-            envelope.from = self.deviceId
-            envelope.to = routedTo
 
-            guard
-                let envelopeData = try? encoder.encode(envelope),
-                let payload = String(data: envelopeData, encoding: .utf8)
-            else {
+            guard let payload = String(data: envelopeData, encoding: .utf8) else {
                 DispatchQueue.main.async { self.statusText = AppText.text("status.encryptionFailed") }
                 return
             }
@@ -1493,12 +1564,27 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// heavy decode happen here; only state application hops to main.
     private func handleMessage(_ payload: String) {
         let decoder = JSONDecoder()
-        guard
-            let envelopeData = payload.data(using: .utf8),
-            let envelope = try? decoder.decode(EncryptedEnvelope.self, from: envelopeData),
-            let data = try? CryptoBox.decrypt(envelope, password: wirePassword),
-            let header = try? decoder.decode(MessageHeader.self, from: data)
-        else {
+        guard let envelopeData = payload.data(using: .utf8) else {
+            return
+        }
+        // Both envelope kinds prove knowledge of the sync password, so either is
+        // accepted regardless of this device's own transport setting; anything
+        // else is unauthenticated and dropped.
+        let data: Data
+        if let envelope = try? decoder.decode(EncryptedEnvelope.self, from: envelopeData), envelope.type == "encrypted" {
+            guard let decrypted = try? CryptoBox.decrypt(envelope, password: wirePassword) else {
+                return
+            }
+            data = decrypted
+        } else if let envelope = try? decoder.decode(SignedEnvelope.self, from: envelopeData), envelope.type == "signed" {
+            guard let verified = try? CryptoBox.verify(envelope, password: wirePassword) else {
+                return
+            }
+            data = verified
+        } else {
+            return
+        }
+        guard let header = try? decoder.decode(MessageHeader.self, from: data) else {
             return
         }
 
@@ -1701,7 +1787,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func sendInputHello() {
-        guard transport != nil, !config.password.isEmpty else {
+        guard transport != nil else {
             return
         }
         publishInput(inputCoordinator.makeHello(
@@ -1711,7 +1797,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func sendInputConfig() {
-        guard transport != nil, !config.password.isEmpty else {
+        guard transport != nil else {
             return
         }
         publishInput(InputMessage(
@@ -1736,7 +1822,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func syncInputConfig() {
         pendingInputConfigSync = true
         sendInputConfig()
-        if transport != nil, !config.password.isEmpty {
+        if transport != nil {
             pendingInputConfigSync = false
         }
     }
