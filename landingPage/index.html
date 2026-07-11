@@ -163,6 +163,23 @@
   }
   .btn-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
   .btn-ghost { color: var(--text); background: rgba(255,255,255,0.03); }
+  .dl-dropdown { position: relative; display: inline-block; }
+  .dl-dropdown > summary { list-style: none; cursor: pointer; }
+  .dl-dropdown > summary::-webkit-details-marker { display: none; }
+  .dl-dropdown > summary .caret { font-size: 10px; opacity: .75; margin-left: 2px; }
+  .dl-menu {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+    min-width: 100%; padding: 6px; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--border);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  }
+  .dl-menu a {
+    display: block; padding: 8px 12px; border-radius: 8px;
+    font-size: 13px; font-weight: 600; text-decoration: none; color: var(--text);
+    white-space: nowrap;
+  }
+  .dl-menu a:hover { background: rgba(128,148,180,0.18); }
+  .dl-menu a small { opacity: .65; font-weight: 400; }
   .btn-ghost:hover { background: rgba(255,255,255,0.07); }
   .btn-icon { font-size: 16px; line-height: 1; }
 
@@ -434,6 +451,9 @@
     text-align: center;
   }
   footer a { color: var(--muted); }
+  .footer-credit { margin-top: 8px; }
+  .footer-credit a { text-decoration: underline; text-underline-offset: 3px; }
+  .footer-credit a:hover { color: var(--text); }
 
   @media (max-width: 1000px) {
     .highlight-grid { grid-template-columns: 1fr 1fr; }
@@ -529,9 +549,15 @@
     <a class="btn btn-primary dl-win" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncWin-Setup.exe">
       <span class="btn-icon">⊞</span> <span data-i18n="dl.win">Download for Windows</span>
     </a>
-    <a class="btn btn-primary dl-linux" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncLinux-x86_64.flatpak">
-      <span class="btn-icon">🐧</span> <span data-i18n="dl.linux">Download for Linux</span>
-    </a>
+    <details class="dl-dropdown">
+      <summary class="btn btn-primary dl-linux">
+        <span class="btn-icon">🐧</span> <span data-i18n="dl.linux">Download for Linux</span> <span class="caret">▾</span>
+      </summary>
+      <div class="dl-menu">
+        <a href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncLinux-x86_64.flatpak"><span data-i18n="dl.linuxX64">x86_64</span> <small>(Intel / AMD)</small></a>
+        <a href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncLinux-aarch64.flatpak"><span data-i18n="dl.linuxArm">ARM64</span> <small>(aarch64)</small></a>
+      </div>
+    </details>
   </div>
   <div class="platform-note" data-i18n="hero.note">Free during beta · No account required · Your data stays on your network</div>
 
@@ -608,7 +634,7 @@
 <section class="faq wrap" id="faq">
   <div class="section-head"><h2 data-i18n="faq.head">Before you install</h2></div>
   <div class="faq-list">
-    <details><summary data-i18n="faq.q1">What systems are supported?</summary><p data-i18n="faq.a1">macOS 13 or later, 64-bit Windows 10/11, and Linux via Flatpak (x86_64 today; mouse/keyboard sharing needs an X11 session).</p></details>
+    <details><summary data-i18n="faq.q1">What systems are supported?</summary><p data-i18n="faq.a1">macOS 13 or later, 64-bit Windows 10/11, and Linux via Flatpak (x86_64 and ARM64; mouse/keyboard sharing needs an X11 session).</p></details>
     <details><summary data-i18n="faq.q2">What if the devices are not on the same subnet?</summary><p data-i18n="faq.a2">Direct LAN setup is simplest. Advanced users can connect across routed networks or a proxy they control; only use endpoints you trust.</p></details>
     <details><summary data-i18n="faq.q3">Where do received files go?</summary><p data-i18n="faq.a3">Received files are placed on your clipboard. Paste them into the folder where you want to keep them.</p></details>
     <details><summary data-i18n="faq.q4">Why does macOS ask for permissions?</summary><p data-i18n="faq.a4">Accessibility and Input Monitoring are only needed for mouse and keyboard sharing. Clipboard sync works independently.</p></details>
@@ -689,9 +715,15 @@
       <a class="btn btn-primary dl-win" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncWin-Setup.exe">
         <span class="btn-icon">⊞</span> <span data-i18n="dl.win">Download for Windows</span>
       </a>
-      <a class="btn btn-primary dl-linux" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncLinux-x86_64.flatpak">
-        <span class="btn-icon">🐧</span> <span data-i18n="dl.linux">Download for Linux</span>
-      </a>
+      <details class="dl-dropdown">
+        <summary class="btn btn-primary dl-linux">
+          <span class="btn-icon">🐧</span> <span data-i18n="dl.linux">Download for Linux</span> <span class="caret">▾</span>
+        </summary>
+        <div class="dl-menu">
+          <a href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncLinux-x86_64.flatpak"><span data-i18n="dl.linuxX64">x86_64</span> <small>(Intel / AMD)</small></a>
+          <a href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncLinux-aarch64.flatpak"><span data-i18n="dl.linuxArm">ARM64</span> <small>(aarch64)</small></a>
+        </div>
+      </details>
     </div>
   </div>
 </section>
@@ -699,6 +731,10 @@
 <footer>
   <div class="wrap" data-i18n="footer.text">
     Clipboard Sync — native clipboard sync over WebSocket.
+  </div>
+  <div class="wrap footer-credit">
+    © 2026 · <span data-i18n="footer.credit">dev with</span> ❤️ <span data-i18n="footer.by">by</span>
+    <a href="https://x.com/droidfu" target="_blank" rel="noopener">Zhuo Fu</a>
   </div>
 </footer>
 
@@ -712,6 +748,16 @@
     document.querySelectorAll(otherSelector).forEach(function (link) {
       link.classList.remove("btn-primary");
       link.classList.add("btn-ghost");
+    });
+  })();
+
+  (function () {
+    document.addEventListener("click", function (event) {
+      document.querySelectorAll("details.dl-dropdown[open]").forEach(function (dropdown) {
+        if (!dropdown.contains(event.target)) {
+          dropdown.removeAttribute("open");
+        }
+      });
     });
   })();
 
@@ -751,6 +797,8 @@
         "dl.mac": "Download for macOS",
         "dl.win": "Download for Windows",
         "dl.linux": "Download for Linux",
+        "dl.linuxX64": "x86_64",
+        "dl.linuxArm": "ARM64",
         "hero.note": "Free during beta · No account required · Password-protected connections",
         "setup.head": "Connected in three steps",
         "setup.sub": "No account and no cloud dashboard — just your devices and a shared password.",
@@ -775,7 +823,7 @@
         "trust.p3": "✓ Native automatic updates",
         "faq.head": "Before you install",
         "faq.q1": "What systems are supported?",
-        "faq.a1": "macOS 13 or later, 64-bit Windows 10/11, and Linux via Flatpak (x86_64 today; mouse/keyboard sharing needs an X11 session).",
+        "faq.a1": "macOS 13 or later, 64-bit Windows 10/11, and Linux via Flatpak (x86_64 and ARM64; mouse/keyboard sharing needs an X11 session).",
         "faq.q2": "What if the devices are not on the same subnet?",
         "faq.a2": "Direct LAN setup is simplest. Advanced users can connect across routed networks or a proxy they control; only use endpoints you trust.",
         "faq.q3": "Where do received files go?",
@@ -812,7 +860,9 @@
         "pf.badge": "macOS, Windows & Linux",
         "cta.t": "Sync your clipboard in minutes",
         "cta.p": "Set one device as the server, connect the others as child devices, and start copying across your network.",
-        "footer.text": "Clipboard Sync — native clipboard sync over WebSocket."
+        "footer.text": "Clipboard Sync — native clipboard sync over WebSocket.",
+        "footer.credit": "dev with",
+        "footer.by": "by"
       },
       zh: {
         "page.title": "剪贴板同步 — 局域网原生剪贴板同步",
@@ -829,6 +879,8 @@
         "dl.mac": "下载 macOS 版",
         "dl.win": "下载 Windows 版",
         "dl.linux": "下载 Linux 版",
+        "dl.linuxX64": "x86_64",
+        "dl.linuxArm": "ARM64",
         "hero.note": "公测期免费 · 无需账号 · 密码保护连接",
         "setup.head": "三步完成连接",
         "setup.sub": "无需账号和云端控制台，只需要你的设备与一个共享密码。",
@@ -853,7 +905,7 @@
         "trust.p3": "✓ 原生自动更新",
         "faq.head": "安装前须知",
         "faq.q1": "支持哪些系统？",
-        "faq.a1": "macOS 13 及以上版本、64 位 Windows 10/11，以及通过 Flatpak 的 Linux（目前提供 x86_64；鼠标键盘共享需要 X11 会话）。",
+        "faq.a1": "macOS 13 及以上版本、64 位 Windows 10/11，以及通过 Flatpak 的 Linux（提供 x86_64 与 ARM64；鼠标键盘共享需要 X11 会话）。",
         "faq.q2": "设备不在同一子网怎么办？",
         "faq.a2": "局域网直连最简单。高级用户可以通过自己控制的路由网络或代理连接；请只使用你信任的端点。",
         "faq.q3": "收到的文件在哪里？",
@@ -890,7 +942,9 @@
         "pf.badge": "macOS、Windows 和 Linux",
         "cta.t": "几分钟内同步你的剪贴板",
         "cta.p": "将一台设备设为服务端，其它设备设为子设备，然后开始跨设备复制粘贴。",
-        "footer.text": "剪贴板同步 — 基于 WebSocket 的原生剪贴板同步。"
+        "footer.text": "剪贴板同步 — 基于 WebSocket 的原生剪贴板同步。",
+        "footer.credit": "用",
+        "footer.by": "开发 · 作者"
       }
     };
 

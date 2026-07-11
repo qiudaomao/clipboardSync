@@ -17,6 +17,7 @@
 #include <QComboBox>
 #include <QCursor>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QDebug>
 #include <QDialog>
 #include <QDir>
@@ -219,6 +220,18 @@ void AppController::buildUi()
     });
     menu->addSeparator();
     menu->addAction(QStringLiteral("Check for Updates"), this, [this] { updates_->check(true); });
+    menu->addSeparator();
+    menu->addAction(QStringLiteral("About Clipboard Sync…"), this, [this] {
+        QMessageBox::about(window_, QStringLiteral("About Clipboard Sync"),
+            QStringLiteral("Clipboard Sync\nVersion %1\n© 2026 Zhuo Fu").arg(QCoreApplication::applicationVersion()));
+    });
+    menu->addAction(QStringLiteral("Project Homepage"), this, [] {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://clipboardsync.fuzhuo.me")));
+    });
+    menu->addAction(QStringLiteral("Send Feedback…"), this, [] {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("mailto:qiudaomao@gmail.com?subject=Clipboard%20Sync%20Feedback")));
+    });
+    menu->addSeparator();
     menu->addAction(QStringLiteral("Quit"), qApp, &QCoreApplication::quit);
     tray_ = new QSystemTrayIcon(appIcon, this);
     tray_->setToolTip(QStringLiteral("Clipboard Sync"));

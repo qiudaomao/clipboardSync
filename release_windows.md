@@ -4,7 +4,50 @@ Steps to cut a Windows release and publish it through NetSparkle auto-update.
 
 Release artifacts and `win-appcast.xml` live in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo (`git@github.com:qiudaomao/clipboardSyncRelease.git`), not in this repo.
 
-The current Windows release target is `v0.1.17`, matching the app version `0.1.17`.
+The current Windows release target is `v0.1.20`, matching the app version `0.1.20`.
+
+## Publishing from macOS
+
+The whole release can be cut from macOS; no Windows machine is needed. Differences from the
+Windows flow below:
+
+1. **Build**: use the official x64 .NET SDK in `~/.dotnet` with Windows targeting enabled:
+
+   ```sh
+   ~/.dotnet/dotnet publish win/ClipboardSyncWin/ClipboardSyncWin.csproj \
+     -c Release -r win-x64 --self-contained false -p:EnableWindowsTargeting=true
+   ```
+
+2. **Installer**: run the Inno Setup compiler in Docker instead of installing it:
+
+   ```sh
+   docker run --rm --platform linux/amd64 \
+     -e CLIPBOARD_SYNC_VERSION=<version> -e CLIPBOARD_SYNC_RELEASE_VERSION=v<version> \
+     -v "$PWD:/work" -w /work/win/installer amake/innosetup ClipboardSyncWin.iss
+   ```
+
+   The installer lands in `artifacts/windows/` exactly like the PowerShell script's output.
+
+3. **Ed25519 keys**: copy `NetSparkle_Ed25519.priv`/`.pub` from the Windows key machine
+   (`%LOCALAPPDATA%\netsparkle\`) into `~/Library/Application Support/netsparkle/` once.
+   Verify `--export` prints the public key compiled into `WinUpdateController.cs` before
+   signing anything.
+
+4. **Appcast generator quirks on macOS** (tool version 2.9.0):
+   - The global-tool shim can be built for the wrong architecture; invoke the tool DLL
+     directly: `~/.dotnet/dotnet exec --fx-version <installed 8.0.x> \
+     ~/.dotnet/tools/.store/netsparkleupdater.tools.appcastgenerator/**/NetSparkleUpdater.Tools.AppCastGenerator.dll ...`
+   - .NET cannot read a PE file's product version off-Windows, so the generator skips the
+     installer unless you pass **`--file-extract-version`** (derives `0.1.20` from
+     `...-v0.1.20.exe`).
+   - Run the generator against a scratch directory (its output file is named `appcast.xml`,
+     which would collide with the macOS appcast in the release checkout); copy the existing
+     `win-appcast.xml` in as `appcast.xml` first so `--reparse-existing` keeps old items.
+   - The standalone `--generate-signature` subcommand crashes on macOS. Use the
+     `appcast.xml.signature` the generator writes next to the appcast during generation —
+     the file is already LF on macOS, so that signature covers the exact bytes GitHub raw
+     serves. Always verify before pushing: download the pushed raw `win-appcast.xml` and
+     check the signature against the compiled public key.
 
 ## 1. One-time NetSparkle setup
 

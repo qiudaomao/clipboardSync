@@ -46,11 +46,19 @@ flatpak-builder --force-clean linux/flatpak-build \
   linux/packaging/io.github.qiudaomao.clipboardsync.yml
 ```
 
-To publish a single-file bundle (served by the landing page as
-`downloads/clipboardSyncLinux.flatpak`; see `push.sh`):
+To publish single-file bundles without any Linux machine, build them in Docker
+from the project root (same container image the CI release workflow uses; on
+Apple silicon the aarch64 build is native and x86_64 runs emulated):
 
 ```sh
-flatpak build-bundle <ostree-repo> clipboardSyncLinux.flatpak \
+./build-linux-flatpak.sh                # both arches → artifacts/linux/
+./build-linux-flatpak.sh -u v0.1.20     # also upload to clipboardSyncRelease
+```
+
+Or from an existing ostree repo (e.g. on the Steam Deck):
+
+```sh
+flatpak build-bundle <ostree-repo> clipboardSyncLinux-x86_64.flatpak \
   io.github.qiudaomao.clipboardsync master
 ```
 

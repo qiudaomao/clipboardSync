@@ -442,6 +442,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         homepageItem.target = self
         menu.addItem(homepageItem)
 
+        let feedbackItem = NSMenuItem(title: AppText.text("menu.feedback"), action: #selector(sendFeedback), keyEquivalent: "")
+        feedbackItem.target = self
+        menu.addItem(feedbackItem)
+
         let quitItem = NSMenuItem(title: AppText.text("menu.quit"), action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -1187,6 +1191,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openProjectHomepage() {
         guard let url = URL(string: "https://clipboardsync.fuzhuo.me") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func sendFeedback() {
+        guard let url = URL(string: "mailto:qiudaomao@gmail.com?subject=Clipboard%20Sync%20Feedback") else {
             return
         }
         NSWorkspace.shared.open(url)

@@ -82,8 +82,10 @@ elif [ -n "$LINUX_NAMES" ]; then
   while IFS= read -r asset; do
     [ -n "$asset" ] || continue
     retry gh release download "$LINUX_TAG" --repo "$REPO" -p "$asset" -D "$WORKDIR" --clobber
-    # Fixed per-arch names keep the landing page's links stable across versions.
+    # Fixed per-arch names keep the landing page's links stable across versions
+    # (no-op when the release asset already uses the fixed name).
     case "$asset" in
+      clipboardSyncLinux-aarch64.flatpak|clipboardSyncLinux-x86_64.flatpak) ;;
       *aarch64*|*arm64*) cp "$WORKDIR/$asset" "$WORKDIR/clipboardSyncLinux-aarch64.flatpak" ;;
       *) cp "$WORKDIR/$asset" "$WORKDIR/clipboardSyncLinux-x86_64.flatpak" ;;
     esac

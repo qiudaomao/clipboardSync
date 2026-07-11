@@ -33,3 +33,5 @@ artifacts/
 *.nupkg
 *.snupkg
 *.log
+
+.keys

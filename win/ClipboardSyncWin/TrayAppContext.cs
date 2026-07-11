@@ -380,6 +380,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.about"), null, (_, _) => ShowAbout()));
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.homepage"), null, (_, _) => OpenProjectHomepage()));
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.feedback"), null, (_, _) => OpenFeedbackEmail()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.exit"), null, (_, _) => ExitThread()));
         return menu;
@@ -409,6 +410,14 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         // UseShellExecute is required to open a URL in the default browser on .NET Core+.
         System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://clipboardsync.fuzhuo.me")
+        {
+            UseShellExecute = true
+        });
+    }
+
+    private static void OpenFeedbackEmail()
+    {
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mailto:qiudaomao@gmail.com?subject=Clipboard%20Sync%20Feedback")
         {
             UseShellExecute = true
         });
