@@ -1,6 +1,7 @@
 #include "InputSharingCoordinator.h"
 
 #include <QDateTime>
+#include <QDebug>
 #include <QJsonArray>
 
 #include <algorithm>
@@ -114,8 +115,13 @@ void InputSharingCoordinator::handle(const QJsonObject &message)
         updateStatus();
         return;
     }
-    if (!canReceiveRemoteInput())
+    if (!canReceiveRemoteInput()) {
+        if (kind == QStringLiteral("capture"))
+            qInfo().noquote() << "Ignoring remote capture from" << origin.left(8)
+                              << "- enabled:" << settings_.enabled << "peers:" << peerCount_
+                              << "controller:" << effectiveControlDeviceId().left(8);
         return;
+    }
     if (kind == QStringLiteral("capture"))
         handleCapture(message.value(QStringLiteral("capture")).toObject());
     else if (kind == QStringLiteral("mouseMove"))
@@ -339,6 +345,9 @@ QPointF clampPoint(const QPointF &point, const QRectF &rect)
 
 void InputSharingCoordinator::startRemoteCapture(const ScreenLayoutEntry &target, const QPointF &canvasPoint, ScreenEdge edge)
 {
+    qInfo().noquote() << "Starting remote capture toward"
+                      << deviceNames_.value(target.deviceId, target.deviceId.left(8))
+                      << "screen" << target.screenId << "edge" << screenEdgeValue(edge);
     virtualCursor_ = clampPoint(canvasPoint, target.rect());
     activeScreenId_ = target.screenId;
     activeTargetDeviceId_ = target.deviceId;
@@ -412,6 +421,9 @@ void InputSharingCoordinator::endRemoteCapture(const std::optional<QString> &ret
     mouseMoveSendTimer_.stop();
     const QString endingScreenId = *activeScreenId_;
     const QString endingTargetDeviceId = *activeTargetDeviceId_;
+    qInfo().noquote() << "Ending remote capture on" << endingScreenId
+                      << (returnToScreenId ? QStringLiteral("returning to %1").arg(*returnToScreenId)
+                                           : QStringLiteral("without return point"));
     sendPressedModifierKeyUps();
     pressedModifierKeys_.clear();
     const auto entryIt = layout_->entries().constFind(endingScreenId);
@@ -566,6 +578,8 @@ QJsonArray InputSharingCoordinator::currentPressedModifiers() const
 void InputSharingCoordinator::handleCapture(const QJsonObject &capture)
 {
     const QString action = capture.value(QStringLiteral("action")).toString();
+    qInfo().noquote() << "Remote capture" << action << "for screen"
+                      << capture.value(QStringLiteral("screenId")).toString();
     if (action == QStringLiteral("start")) {
         receivingRemote_ = true;
         receivingScreenId_ = capture.value(QStringLiteral("screenId")).toString();

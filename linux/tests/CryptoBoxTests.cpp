@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 
 int main(int argc, char **argv)
@@ -28,6 +29,21 @@ int main(int argc, char **argv)
     const QJsonDocument fixture = QJsonDocument::fromJson(fixtureJson);
     if (!fixture.isObject() || CryptoBox::decrypt(fixture.object(), QStringLiteral("interop-password")) != expected)
         qFatal("Cross-platform AES-GCM fixture mismatch");
-    qInfo() << "Crypto protocol tests passed";
+
+    // The realtime key must be cached after the first derivation: without the
+    // cache each of these round-trips runs 2x 100k PBKDF2 rounds and this loop
+    // takes >10 s, starving live mouse/key streams. Warm-up above already
+    // derived the key once.
+    QElapsedTimer realtimeTimer;
+    realtimeTimer.start();
+    for (int i = 0; i < 200; ++i) {
+        const QJsonObject envelope = CryptoBox::encrypt(plaintext, QStringLiteral("correct horse battery staple"), true);
+        if (CryptoBox::decrypt(envelope, QStringLiteral("correct horse battery staple")) != plaintext)
+            qFatal("Realtime round-trip mismatch");
+    }
+    if (realtimeTimer.elapsed() > 2000)
+        qFatal("Realtime envelopes are too slow (%lld ms for 200 round-trips); the key cache is not working",
+            static_cast<long long>(realtimeTimer.elapsed()));
+    qInfo() << "Crypto protocol tests passed;" << "200 realtime round-trips took" << realtimeTimer.elapsed() << "ms";
     return 0;
 }

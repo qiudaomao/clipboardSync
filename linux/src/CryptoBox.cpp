@@ -1,5 +1,8 @@
 #include "CryptoBox.h"
 
+#include <QHash>
+#include <QMutex>
+
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 
@@ -27,6 +30,19 @@ using CipherContext = std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_f
 
 QByteArray CryptoBox::deriveKey(const QString &password, const QByteArray &salt)
 {
+    // Realtime (version 2) messages reuse a fixed salt precisely so this key
+    // can be cached: running 100k PBKDF2 rounds (~30-50 ms on a handheld CPU)
+    // per mouse event would fall far behind a 60 Hz event stream in both
+    // directions. Version 1 salts are random per message and are not cached.
+    const bool cacheable = salt == RealtimeSalt;
+    static QMutex cacheMutex;
+    static QHash<QString, QByteArray> realtimeKeyCache;
+    if (cacheable) {
+        const QMutexLocker locker(&cacheMutex);
+        const auto cached = realtimeKeyCache.constFind(password);
+        if (cached != realtimeKeyCache.constEnd())
+            return *cached;
+    }
     const QByteArray utf8 = password.toUtf8();
     QByteArray key(KeyBytes, Qt::Uninitialized);
     if (PKCS5_PBKDF2_HMAC(utf8.constData(), utf8.size(),
@@ -34,6 +50,10 @@ QByteArray CryptoBox::deriveKey(const QString &password, const QByteArray &salt)
             Pbkdf2Rounds, EVP_sha256(), key.size(),
             reinterpret_cast<unsigned char *>(key.data())) != 1) {
         throw std::runtime_error("PBKDF2 key derivation failed");
+    }
+    if (cacheable) {
+        const QMutexLocker locker(&cacheMutex);
+        realtimeKeyCache.insert(password, key);
     }
     return key;
 }

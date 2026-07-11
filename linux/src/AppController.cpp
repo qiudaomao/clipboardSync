@@ -179,8 +179,11 @@ void AppController::buildUi()
     auto *statusAction = menu->addAction(QStringLiteral("Open Clipboard Sync"));
     connect(statusAction, &QAction::triggered, window_, &QWidget::show);
     menu->addAction(QStringLiteral("Settings"), this, &AppController::showSettings);
+    // Submenus are rebuilt eagerly on every state change: on KDE the tray menu
+    // is exported over DBusMenu, where aboutToShow-driven population arrives
+    // too late and the submenu stays empty.
     historyMenu_ = menu->addMenu(QStringLiteral("History"));
-    connect(historyMenu_, &QMenu::aboutToShow, this, &AppController::rebuildHistoryMenu);
+    rebuildHistoryMenu();
     menu->addAction(QStringLiteral("Send Files from Clipboard"), this, &AppController::sendFilesFromClipboard);
     menu->addSeparator();
     inputStatusAction_ = menu->addAction(QStringLiteral("Input sharing is off"));
@@ -190,7 +193,7 @@ void AppController::buildUi()
     inputSharingAction_->setChecked(config_.inputSharingEnabled);
     connect(inputSharingAction_, &QAction::triggered, this, &AppController::toggleInputSharing);
     controlDeviceMenu_ = menu->addMenu(QStringLiteral("Control Device"));
-    connect(controlDeviceMenu_, &QMenu::aboutToShow, this, &AppController::rebuildControlDeviceMenu);
+    rebuildControlDeviceMenu();
     menu->addAction(QStringLiteral("Screen Layout…"), this, &AppController::showScreenLayout);
     menu->addSeparator();
     pauseAction_ = menu->addAction(QStringLiteral("Pause Sync"));
@@ -339,6 +342,8 @@ void AppController::addHistory(const QJsonObject &message)
     history_.prepend(entry);
     while (history_.size() > 10)
         history_.removeLast();
+    if (historyMenu_)
+        rebuildHistoryMenu();
 }
 
 QString AppController::historyTitle(const QJsonObject &message)
@@ -570,6 +575,7 @@ void AppController::handleInputMessage(const QJsonObject &message)
             && message.value(QStringLiteral("role")).toString() == QStringLiteral("server")) {
             const QString controlDeviceId = message.value(QStringLiteral("controlDeviceId")).toString();
             if (!controlDeviceId.isEmpty() && config_.controlDeviceId != controlDeviceId) {
+                qInfo().noquote() << "Adopting server control device:" << controlDeviceId.left(8);
                 config_.controlDeviceId = controlDeviceId;
                 config_.save();
                 updateInputCoordinator();
@@ -720,6 +726,8 @@ void AppController::updateInputCoordinator(bool sendHello)
         const QSignalBlocker blocker(inputSharingAction_);
         inputSharingAction_->setChecked(config_.inputSharingEnabled);
     }
+    if (controlDeviceMenu_)
+        rebuildControlDeviceMenu();
     if (sendHello)
         sendInputHello();
 }
@@ -915,6 +923,10 @@ void AppController::toggleInputSharing()
 
 void AppController::setControlDevice(const QString &deviceId)
 {
+    qInfo().noquote() << "Control device selected locally:" << deviceId.left(8)
+                      << (config_.mode == AppConfig::Mode::Server
+                             ? QStringLiteral("(applying as server)")
+                             : QStringLiteral("(requesting from server)"));
     config_.controlDeviceId = deviceId;
     config_.save();
     updateInputCoordinator();
