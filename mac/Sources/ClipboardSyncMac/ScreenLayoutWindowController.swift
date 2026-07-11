@@ -183,7 +183,6 @@ final class ScreenLayoutCanvasView: NSView {
     /// is applied identically to every group member.
     private var draggingDeviceId: String?
     private var dragGroupOrigins: [String: CGPoint] = [:]
-    private var dragGroupSizes: [String: CGSize] = [:]
     private var dragAnchorCanvasPoint = CGPoint.zero
     private var dragMetrics: Metrics?
     private var didDragDuringGesture = false
@@ -410,7 +409,6 @@ final class ScreenLayoutCanvasView: NSView {
                 draggingDeviceId = entry.deviceId
                 let group = entries.filter { $0.deviceId == entry.deviceId }
                 dragGroupOrigins = Dictionary(uniqueKeysWithValues: group.map { ($0.screenId, CGPoint(x: $0.x, y: $0.y)) })
-                dragGroupSizes = Dictionary(uniqueKeysWithValues: group.map { ($0.screenId, CGSize(width: $0.width, height: $0.height)) })
                 dragAnchorCanvasPoint = CGPoint(
                     x: (point.x - metrics.marginX) / metrics.scale + metrics.originX,
                     y: (point.y - metrics.marginY) / metrics.scale + metrics.originY
@@ -431,11 +429,13 @@ final class ScreenLayoutCanvasView: NSView {
             x: (point.x - metrics.marginX) / metrics.scale + metrics.originX,
             y: (point.y - metrics.marginY) / metrics.scale + metrics.originY
         )
-        let candidateDelta = CGPoint(
+        // Dragging is free (overlaps and gaps allowed so groups are easy to
+        // move); the release snap below restores the no-overlap, zero-gap
+        // invariant.
+        let resolvedDelta = CGPoint(
             x: currentCanvasPoint.x - dragAnchorCanvasPoint.x,
             y: currentCanvasPoint.y - dragAnchorCanvasPoint.y
         )
-        let resolvedDelta = clampedGroupDelta(candidateDelta, excludingDeviceId: draggingDeviceId)
 
         for (screenId, origin) in dragGroupOrigins {
             guard let index = entries.firstIndex(where: { $0.screenId == screenId }) else {
@@ -452,7 +452,6 @@ final class ScreenLayoutCanvasView: NSView {
         defer {
             draggingDeviceId = nil
             dragGroupOrigins = [:]
-            dragGroupSizes = [:]
             dragMetrics = nil
         }
         guard didDragDuringGesture, let draggingDeviceId else {
@@ -461,43 +460,6 @@ final class ScreenLayoutCanvasView: NSView {
         snapGroupToTouch(deviceId: draggingDeviceId)
         needsDisplay = true
         onLayoutChanged?(entries)
-    }
-
-    // MARK: - Overlap prevention
-
-    /// A machine's own monitors move together as one rigid group — their relative arrangement is
-    /// fixed by the OS, not user-adjustable here. Slides the candidate group move along one axis
-    /// at a time (full move, X-only, Y-only, no move) and returns the first delta where none of
-    /// the group's screens overlap another machine's screen, so the group "bumps" against its
-    /// neighbors instead of passing through them while dragging.
-    private func clampedGroupDelta(_ candidateDelta: CGPoint, excludingDeviceId: String) -> CGPoint {
-        let others = entries.filter { $0.deviceId != excludingDeviceId }.map(\.rect)
-
-        func groupRects(for delta: CGPoint) -> [CGRect] {
-            dragGroupOrigins.map { screenId, origin in
-                CGRect(
-                    origin: CGPoint(x: origin.x + delta.x, y: origin.y + delta.y),
-                    size: dragGroupSizes[screenId] ?? .zero
-                )
-            }
-        }
-        func overlapsOthers(_ delta: CGPoint) -> Bool {
-            let rects = groupRects(for: delta)
-            return others.contains { other in rects.contains { rectsOverlap($0, other) } }
-        }
-
-        if !overlapsOthers(candidateDelta) {
-            return candidateDelta
-        }
-        let xOnly = CGPoint(x: candidateDelta.x, y: 0)
-        if !overlapsOthers(xOnly) {
-            return xOnly
-        }
-        let yOnly = CGPoint(x: 0, y: candidateDelta.y)
-        if !overlapsOthers(yOnly) {
-            return yOnly
-        }
-        return .zero
     }
 
     private func rectsOverlap(_ a: CGRect, _ b: CGRect) -> Bool {
@@ -509,8 +471,9 @@ final class ScreenLayoutCanvasView: NSView {
 
     /// After a drag ends, snaps the moved machine's whole group of screens so at least one edge of
     /// its combined footprint touches another machine's screen with no gap — a machine shouldn't
-    /// float disconnected from the rest of the layout. Falls back to leaving it where dropped if no
-    /// touching position is available without overlapping something else.
+    /// float disconnected from the rest of the layout, and a group dropped overlapping another is
+    /// pushed out to the nearest flush edge. Falls back to leaving it where dropped if no touching
+    /// position is available without overlapping something else.
     private func snapGroupToTouch(deviceId: String) {
         let memberIndices = entries.indices.filter { entries[$0].deviceId == deviceId }
         guard !memberIndices.isEmpty else {
@@ -524,7 +487,9 @@ final class ScreenLayoutCanvasView: NSView {
         }
 
         let touchEpsilon: CGFloat = 1.0
-        if others.contains(where: { $0.insetBy(dx: -touchEpsilon, dy: -touchEpsilon).intersects(groupBounds) }) {
+        let overlapping = others.contains { other in memberRects.contains { rectsOverlap($0, other) } }
+        let touching = others.contains { $0.insetBy(dx: -touchEpsilon, dy: -touchEpsilon).intersects(groupBounds) }
+        if touching, !overlapping {
             return
         }
 

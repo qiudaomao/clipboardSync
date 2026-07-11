@@ -183,7 +183,6 @@ internal sealed class ScreenLayoutCanvas : Panel
     /// is applied identically to every group member.
     private string? draggingDeviceId;
     private Dictionary<string, PointF> dragGroupOrigins = [];
-    private Dictionary<string, SizeF> dragGroupSizes = [];
     private PointF dragAnchorCanvasPoint;
     private Metrics? dragMetrics;
     private bool didDragDuringGesture;
@@ -461,7 +460,6 @@ internal sealed class ScreenLayoutCanvas : Panel
             draggingDeviceId = entry.DeviceId;
             var group = entries.Where(item => item.DeviceId == entry.DeviceId).ToList();
             dragGroupOrigins = group.ToDictionary(item => item.ScreenId, item => new PointF((float)item.X, (float)item.Y));
-            dragGroupSizes = group.ToDictionary(item => item.ScreenId, item => new SizeF((float)item.Width, (float)item.Height));
             dragAnchorCanvasPoint = new PointF(
                 (e.X - metrics.MarginX) / metrics.Scale + metrics.OriginX,
                 (e.Y - metrics.MarginY) / metrics.Scale + metrics.OriginY);
@@ -503,10 +501,12 @@ internal sealed class ScreenLayoutCanvas : Panel
         var currentCanvasPoint = new PointF(
             (e.X - metrics.MarginX) / metrics.Scale + metrics.OriginX,
             (e.Y - metrics.MarginY) / metrics.Scale + metrics.OriginY);
-        var candidateDelta = new PointF(
+        // Dragging is free (overlaps and gaps allowed so groups are easy to
+        // move); the release snap below restores the no-overlap, zero-gap
+        // invariant.
+        var resolvedDelta = new PointF(
             currentCanvasPoint.X - dragAnchorCanvasPoint.X,
             currentCanvasPoint.Y - dragAnchorCanvasPoint.Y);
-        var resolvedDelta = ClampedGroupDelta(candidateDelta, deviceId);
 
         foreach (var (screenId, origin) in dragGroupOrigins)
         {
@@ -528,7 +528,6 @@ internal sealed class ScreenLayoutCanvas : Panel
         var deviceId = draggingDeviceId;
         draggingDeviceId = null;
         dragGroupOrigins = [];
-        dragGroupSizes = [];
         dragMetrics = null;
         Capture = false;
 
@@ -541,49 +540,6 @@ internal sealed class ScreenLayoutCanvas : Panel
         LayoutChanged?.Invoke(entries.Select(item => item.Clone()).ToList());
     }
 
-    // MARK: Overlap prevention
-
-    /// A machine's own monitors move together as one rigid group - their relative arrangement is
-    /// fixed by the OS, not user-adjustable here. Slides the candidate group move along one axis at
-    /// a time (full move, X-only, Y-only, no move) and returns the first delta where none of the
-    /// group's screens overlap another machine's screen, so the group "bumps" against its neighbors
-    /// instead of passing through them while dragging.
-    private PointF ClampedGroupDelta(PointF candidateDelta, string excludingDeviceId)
-    {
-        var others = entries.Where(item => item.DeviceId != excludingDeviceId).Select(item => item.Rect).ToList();
-
-        List<RectangleF> GroupRects(PointF delta)
-        {
-            return dragGroupOrigins.Select(pair =>
-            {
-                var size = dragGroupSizes.TryGetValue(pair.Key, out var s) ? s : SizeF.Empty;
-                return new RectangleF(pair.Value.X + delta.X, pair.Value.Y + delta.Y, size.Width, size.Height);
-            }).ToList();
-        }
-
-        bool OverlapsOthers(PointF delta)
-        {
-            var rects = GroupRects(delta);
-            return others.Any(other => rects.Any(rect => RectsOverlap(rect, other)));
-        }
-
-        if (!OverlapsOthers(candidateDelta))
-        {
-            return candidateDelta;
-        }
-        var xOnly = new PointF(candidateDelta.X, 0);
-        if (!OverlapsOthers(xOnly))
-        {
-            return xOnly;
-        }
-        var yOnly = new PointF(0, candidateDelta.Y);
-        if (!OverlapsOthers(yOnly))
-        {
-            return yOnly;
-        }
-        return PointF.Empty;
-    }
-
     private static bool RectsOverlap(RectangleF a, RectangleF b)
     {
         const float epsilon = 0.5f;
@@ -594,8 +550,9 @@ internal sealed class ScreenLayoutCanvas : Panel
 
     /// After a drag ends, snaps the moved machine's whole group of screens so at least one edge of
     /// its combined footprint touches another machine's screen with no gap - a machine shouldn't
-    /// float disconnected from the rest of the layout. Falls back to leaving it where dropped if no
-    /// touching position is available without overlapping something else.
+    /// float disconnected from the rest of the layout, and a group dropped overlapping another is
+    /// pushed out to the nearest flush edge. Falls back to leaving it where dropped if no touching
+    /// position is available without overlapping something else.
     private void SnapGroupToTouch(string deviceId)
     {
         var memberIndices = Enumerable.Range(0, entries.Count).Where(i => entries[i].DeviceId == deviceId).ToList();
@@ -612,7 +569,9 @@ internal sealed class ScreenLayoutCanvas : Panel
         }
 
         const float touchEpsilon = 1f;
-        if (others.Any(other => RectangleF.Inflate(other, touchEpsilon, touchEpsilon).IntersectsWith(groupBounds)))
+        var overlapping = others.Any(other => memberRects.Any(rect => RectsOverlap(rect, other)));
+        var touching = others.Any(other => RectangleF.Inflate(other, touchEpsilon, touchEpsilon).IntersectsWith(groupBounds));
+        if (touching && !overlapping)
         {
             return;
         }
