@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Clipboard Sync
+Comment=Synchronize clipboard content between trusted devices
+Exec=clipboard-sync
+Icon=io.github.qiudaomao.clipboardsync
+Categories=Utility;
+Keywords=Clipboard;Sync;Network;
+Terminal=false

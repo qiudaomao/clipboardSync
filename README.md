@@ -1,10 +1,10 @@
 # Clipboard Sync
 
-Native, password-protected clipboard sync for macOS and Windows. The app runs in the menu bar or system tray and does not require an account or a hosted cloud dashboard.
+Native, password-protected clipboard sync for macOS, Windows, and Linux. The app runs in the menu bar or system tray and does not require an account or a hosted cloud dashboard. The Linux Qt 6 client supports text, image and explicit clipboard-file transfer plus port forwarding; input sharing remains capability-detected but is not yet enabled.
 
 ## Getting connected
 
-1. Install Clipboard Sync on both devices. The macOS build requires macOS 13 or later; the Windows installer targets 64-bit Windows 10/11.
+1. Install Clipboard Sync on both devices. The macOS build requires macOS 13 or later; the Windows installer targets 64-bit Windows 10/11; Linux requires Qt 6.7+ or the KDE 6.9 Flatpak runtime.
 2. Choose **Server** on one device. Configure the other devices as **Child Device** using the shown LAN address and the same password.
 3. Copy and paste normally. Text and images sync automatically.
 
@@ -25,3 +25,17 @@ The ordinary menu focuses on connection status, clipboard tasks, input sharing, 
 ![mac](assets/mac.png)
 
 ![win](assets/win.png)
+
+## Run Linux
+
+The Linux client requires Qt 6.7+, OpenSSL 3, CMake 3.24+, and Ninja. Build and
+run it with:
+
+```sh
+cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build linux/build
+ctest --test-dir linux/build --output-on-failure
+./linux/build/clipboard-sync
+```
+
+See [linux/README.md](linux/README.md) for desktop capability and update-channel details.

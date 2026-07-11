@@ -1,0 +1,100 @@
+cmake_minimum_required(VERSION 3.24)
+
+project(ClipboardSyncLinux VERSION 0.1.19 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
+
+find_package(Qt6 6.7 REQUIRED COMPONENTS Core DBus Gui Widgets Network WebSockets)
+find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+
+add_executable(clipboard-sync
+    src/main.cpp
+    src/AppController.cpp
+    src/AppController.h
+    src/AppConfig.cpp
+    src/AppConfig.h
+    src/ClipboardService.cpp
+    src/ClipboardService.h
+    src/CryptoBox.cpp
+    src/CryptoBox.h
+    src/FileTransferCoordinator.cpp
+    src/FileTransferCoordinator.h
+    src/LinuxCapabilities.cpp
+    src/LinuxCapabilities.h
+    src/PortForwardCoordinator.cpp
+    src/PortForwardCoordinator.h
+    src/PortForwardDialog.cpp
+    src/PortForwardDialog.h
+    src/SyncTransport.cpp
+    src/SyncTransport.h
+    src/UpdateController.cpp
+    src/UpdateController.h
+)
+
+target_compile_definitions(clipboard-sync PRIVATE
+    CLIPBOARD_SYNC_VERSION="${PROJECT_VERSION}"
+    QT_NO_CAST_FROM_ASCII
+    QT_NO_CAST_TO_ASCII
+)
+
+target_link_libraries(clipboard-sync PRIVATE
+    Qt6::Core Qt6::DBus Qt6::Gui Qt6::Widgets Qt6::Network Qt6::WebSockets
+    OpenSSL::Crypto
+)
+
+include(GNUInstallDirs)
+install(TARGETS clipboard-sync RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES packaging/io.github.qiudaomao.clipboardsync.desktop
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES packaging/io.github.qiudaomao.clipboardsync.metainfo.xml
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
+install(FILES packaging/io.github.qiudaomao.clipboardsync.svg
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+
+enable_testing()
+add_executable(protocol-tests tests/CryptoBoxTests.cpp src/CryptoBox.cpp src/CryptoBox.h)
+target_link_libraries(protocol-tests PRIVATE Qt6::Core OpenSSL::Crypto)
+target_include_directories(protocol-tests PRIVATE src)
+add_test(NAME protocol-tests COMMAND protocol-tests)
+
+add_executable(file-transfer-tests
+    tests/FileTransferTests.cpp
+    src/FileTransferCoordinator.cpp
+    src/FileTransferCoordinator.h
+)
+target_link_libraries(file-transfer-tests PRIVATE Qt6::Core)
+target_include_directories(file-transfer-tests PRIVATE src)
+add_test(NAME file-transfer-tests COMMAND file-transfer-tests)
+
+add_executable(port-forward-tests
+    tests/PortForwardTests.cpp
+    src/PortForwardCoordinator.cpp
+    src/PortForwardCoordinator.h
+)
+target_link_libraries(port-forward-tests PRIVATE Qt6::Core Qt6::Network)
+target_include_directories(port-forward-tests PRIVATE src)
+add_test(NAME port-forward-tests COMMAND port-forward-tests)
+
+add_executable(update-controller-tests
+    tests/UpdateControllerTests.cpp
+    src/UpdateController.cpp
+    src/UpdateController.h
+)
+target_compile_definitions(update-controller-tests PRIVATE CLIPBOARD_SYNC_VERSION="${PROJECT_VERSION}")
+target_link_libraries(update-controller-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Network)
+target_include_directories(update-controller-tests PRIVATE src)
+add_test(NAME update-controller-tests COMMAND update-controller-tests)
+
+add_executable(clipboard-service-tests
+    tests/ClipboardServiceTests.cpp
+    src/ClipboardService.cpp
+    src/ClipboardService.h
+)
+target_link_libraries(clipboard-service-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+target_include_directories(clipboard-service-tests PRIVATE src)
+add_test(NAME clipboard-service-tests COMMAND clipboard-service-tests)
+set_tests_properties(clipboard-service-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

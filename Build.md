@@ -8,6 +8,7 @@ The first milestone is a small native app on each platform:
 
 - macOS: Swift menu bar app.
 - Windows: C# system tray app.
+- Linux: C++20 Qt 6 tray/window app with X11 and Wayland capability detection.
 - Either side can run as a WebSocket server or client.
 - Local text clipboard changes are sent to connected peers.
 - Remote text overwrites the local system clipboard.
@@ -21,6 +22,22 @@ Stage 1 intentionally excludes clipboard history, images, files, encryption, and
 - `docs/protocol.md`: shared WebSocket message contract.
 - `mac/`: Xcode app project and Swift source for the macOS menu bar app.
 - `win/ClipboardSyncWin/`: .NET WinForms Windows tray app.
+- `linux/`: Qt 6/CMake Linux app, tests, desktop metadata, and Flatpak manifest.
+
+## Run Linux
+
+```sh
+cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build linux/build
+ctest --test-dir linux/build --output-on-failure
+./linux/build/clipboard-sync
+```
+
+Linux requires Qt 6.7+, OpenSSL 3, CMake 3.24+, and Ninja. The supported
+features are encrypted text/image sync, legacy and chunked clipboard-file
+receive/transfer, and TCP port forwarding. Input sharing is capability-detected
+but not implemented. The Flatpak packaging and update behavior are documented
+in `linux/README.md`.
 
 ## Run macOS
 

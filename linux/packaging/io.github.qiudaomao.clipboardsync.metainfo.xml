@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.qiudaomao.clipboardsync</id>
+  <name>Clipboard Sync</name>
+  <summary>Synchronize clipboard content between trusted devices</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.qiudaomao"><name>Clipboard Sync Developers</name></developer>
+  <description>
+    <p>Clipboard Sync transfers text, images, explicitly selected clipboard files, and TCP port-forward traffic between trusted devices using password-authenticated encryption.</p>
+  </description>
+  <launchable type="desktop-id">io.github.qiudaomao.clipboardsync.desktop</launchable>
+  <url type="homepage">https://github.com/qiudaomao/clipboardSync/</url>
+  <provides><binary>clipboard-sync</binary></provides>
+  <content_rating type="oars-1.1"/>
+  <releases><release version="0.1.19" date="2026-07-11"/></releases>
+</component>

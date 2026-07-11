@@ -1,0 +1,24 @@
+app-id: io.github.qiudaomao.clipboardsync
+runtime: org.kde.Platform
+runtime-version: "6.9"
+sdk: org.kde.Sdk
+command: clipboard-sync
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --filesystem=host:ro
+  - --filesystem=xdg-config/autostart:create
+  - --talk-name=org.kde.StatusNotifierWatcher
+
+modules:
+  - name: clipboard-sync
+    buildsystem: cmake-ninja
+    subdir: linux
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    sources:
+      - type: dir
+        path: ../..
