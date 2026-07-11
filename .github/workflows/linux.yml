@@ -38,4 +38,6 @@ jobs:
         run: |
           ./linux/build/clipboard-sync --diagnostics
           desktop-file-validate linux/packaging/io.github.qiudaomao.clipboardsync.desktop
-          appstreamcli validate linux/packaging/io.github.qiudaomao.clipboardsync.metainfo.xml
+          # --no-net keeps validation deterministic: live URL checks fail on
+          # network hiccups and on URLs that require authentication.
+          appstreamcli validate --no-net linux/packaging/io.github.qiudaomao.clipboardsync.metainfo.xml
