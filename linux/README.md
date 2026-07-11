@@ -46,6 +46,18 @@ flatpak-builder --force-clean linux/flatpak-build \
   linux/packaging/io.github.qiudaomao.clipboardsync.yml
 ```
 
+To publish a single-file bundle (served by the landing page as
+`downloads/clipboardSyncLinux.flatpak`; see `push.sh`):
+
+```sh
+flatpak build-bundle <ostree-repo> clipboardSyncLinux.flatpak \
+  io.github.qiudaomao.clipboardsync master
+```
+
+Users install the downloaded bundle with
+`flatpak install clipboardSyncLinux.flatpak` (the KDE Platform 6.9 runtime is
+pulled from Flathub automatically when a Flathub remote is configured).
+
 ## Input sharing
 
 Input sharing follows the shared protocol: enable it from the tray menu, pick

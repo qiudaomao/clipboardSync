@@ -1,0 +1,41 @@
+name: Linux
+
+on:
+  push:
+    paths:
+      - "linux/**"
+      - ".github/workflows/linux.yml"
+  pull_request:
+    paths:
+      - "linux/**"
+      - ".github/workflows/linux.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes appstream cmake desktop-file-utils ninja-build libssl-dev \
+            libx11-dev libxtst-dev libxfixes-dev
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.3"
+          modules: "qtwebsockets"
+          cache: true
+      - name: Configure
+        run: cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build linux/build --parallel
+      - name: Test
+        run: ctest --test-dir linux/build --output-on-failure
+      - name: Validate executable and packaging metadata
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ./linux/build/clipboard-sync --diagnostics
+          desktop-file-validate linux/packaging/io.github.qiudaomao.clipboardsync.desktop
+          appstreamcli validate linux/packaging/io.github.qiudaomao.clipboardsync.metainfo.xml

@@ -1,0 +1,62 @@
+name: Linux Release
+
+# Builds the flatpak for x86_64 (native) and aarch64 (qemu-emulated; this repo
+# is private, so GitHub's free arm64 runners are not available) and uploads the
+# single-file bundles to the public qiudaomao/clipboardSyncRelease repo, where
+# push.sh picks them up for the self-hosted download mirror.
+#
+# Required secret: RELEASE_TOKEN — a PAT with "contents: write" on
+# qiudaomao/clipboardSyncRelease (the default GITHUB_TOKEN cannot upload to
+# another repository).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "clipboardSyncRelease tag to upload the bundles to (e.g. v0.1.19)"
+        required: true
+
+jobs:
+  flatpak:
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.9
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU for aarch64
+        if: matrix.arch == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: clipboardSyncLinux-${{ matrix.arch }}.flatpak
+          manifest-path: linux/packaging/io.github.qiudaomao.clipboardsync.yml
+          arch: ${{ matrix.arch }}
+          upload-artifact: true
+
+  publish:
+    needs: flatpak
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: bundles
+          merge-multiple: true
+      - name: Upload to clipboardSyncRelease
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          tag="${{ github.event.inputs.release_tag || github.ref_name }}"
+          find bundles -name '*.flatpak' -print
+          gh release view "$tag" --repo qiudaomao/clipboardSyncRelease >/dev/null \
+            || gh release create "$tag" --repo qiudaomao/clipboardSyncRelease --title "$tag" --notes "Linux flatpak bundles for $tag"
+          find bundles -name '*.flatpak' -exec \
+            gh release upload "$tag" {} --repo qiudaomao/clipboardSyncRelease --clobber \;
