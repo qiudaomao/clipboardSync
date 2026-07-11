@@ -10,6 +10,7 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.7 REQUIRED COMPONENTS Core DBus Gui Widgets Network WebSockets)
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+find_package(X11 REQUIRED COMPONENTS Xtst Xfixes)
 
 add_executable(clipboard-sync
     src/main.cpp
@@ -23,16 +24,25 @@ add_executable(clipboard-sync
     src/CryptoBox.h
     src/FileTransferCoordinator.cpp
     src/FileTransferCoordinator.h
+    src/InputBackend.h
+    src/InputModels.cpp
+    src/InputModels.h
+    src/InputSharingCoordinator.cpp
+    src/InputSharingCoordinator.h
     src/LinuxCapabilities.cpp
     src/LinuxCapabilities.h
     src/PortForwardCoordinator.cpp
     src/PortForwardCoordinator.h
     src/PortForwardDialog.cpp
     src/PortForwardDialog.h
+    src/ScreenLayoutDialog.cpp
+    src/ScreenLayoutDialog.h
     src/SyncTransport.cpp
     src/SyncTransport.h
     src/UpdateController.cpp
     src/UpdateController.h
+    src/X11InputBackend.cpp
+    src/X11InputBackend.h
 )
 
 target_compile_definitions(clipboard-sync PRIVATE
@@ -44,6 +54,7 @@ target_compile_definitions(clipboard-sync PRIVATE
 target_link_libraries(clipboard-sync PRIVATE
     Qt6::Core Qt6::DBus Qt6::Gui Qt6::Widgets Qt6::Network Qt6::WebSockets
     OpenSSL::Crypto
+    X11::X11 X11::Xtst X11::Xfixes
 )
 
 include(GNUInstallDirs)
@@ -88,6 +99,19 @@ target_compile_definitions(update-controller-tests PRIVATE CLIPBOARD_SYNC_VERSIO
 target_link_libraries(update-controller-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Network)
 target_include_directories(update-controller-tests PRIVATE src)
 add_test(NAME update-controller-tests COMMAND update-controller-tests)
+
+add_executable(input-sharing-tests
+    tests/InputSharingTests.cpp
+    src/InputModels.cpp
+    src/InputModels.h
+    src/InputSharingCoordinator.cpp
+    src/InputSharingCoordinator.h
+    src/InputBackend.h
+)
+target_link_libraries(input-sharing-tests PRIVATE Qt6::Core Qt6::Gui)
+target_include_directories(input-sharing-tests PRIVATE src)
+add_test(NAME input-sharing-tests COMMAND input-sharing-tests)
+set_tests_properties(input-sharing-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(clipboard-service-tests
     tests/ClipboardServiceTests.cpp

@@ -17,6 +17,8 @@ public:
 signals:
     void localMessageReady(const QJsonObject &message);
     void errorOccurred(const QString &message);
+    // Received files were placed on the clipboard, ready to paste.
+    void filesApplied(int count);
 
 private:
     void readClipboard();

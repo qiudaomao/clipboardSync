@@ -1,6 +1,6 @@
 # Clipboard Sync
 
-Native, password-protected clipboard sync for macOS, Windows, and Linux. The app runs in the menu bar or system tray and does not require an account or a hosted cloud dashboard. The Linux Qt 6 client supports text, image and explicit clipboard-file transfer plus port forwarding; input sharing remains capability-detected but is not yet enabled.
+Native, password-protected clipboard sync for macOS, Windows, and Linux. The app runs in the menu bar or system tray and does not require an account or a hosted cloud dashboard. The Linux Qt 6 client supports text, image and explicit clipboard-file transfer, port forwarding, and keyboard/mouse input sharing with the shared screen layout on X11 sessions; Wayland sessions detect but do not yet offer input sharing.
 
 ## Getting connected
 

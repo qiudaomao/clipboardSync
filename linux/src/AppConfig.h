@@ -1,5 +1,7 @@
 #pragma once
 
+#include "InputModels.h"
+
 #include <QString>
 #include <QJsonArray>
 
@@ -13,6 +15,10 @@ struct AppConfig {
     QString deviceId;
     bool paused = false;
     QJsonArray portForwardRules;
+    bool inputSharingEnabled = false;
+    QString controlDeviceId; // empty selects this device
+    bool reverseMouseVerticalScroll = false;
+    KeyboardModifierMap keyboardModifierMap;
 
     static AppConfig load();
     void save() const;

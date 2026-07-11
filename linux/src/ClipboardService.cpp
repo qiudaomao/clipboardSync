@@ -141,6 +141,7 @@ bool ClipboardService::applyReceivedFiles(const QStringList &paths)
     applyingRemote_ = true;
     clipboard_->setMimeData(mime);
     applyingRemote_ = false;
+    emit filesApplied(paths.size());
     return true;
 }
 

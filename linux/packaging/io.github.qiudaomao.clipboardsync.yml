@@ -7,7 +7,9 @@ command: clipboard-sync
 finish-args:
   - --share=ipc
   - --share=network
-  - --socket=fallback-x11
+  # Real X11 access (not fallback) so XTest input injection and capture work
+  # in X11 sessions; Wayland sessions still get the Wayland socket.
+  - --socket=x11
   - --socket=wayland
   - --filesystem=host:ro
   - --filesystem=xdg-config/autostart:create

@@ -33,11 +33,12 @@ ctest --test-dir linux/build --output-on-failure
 ./linux/build/clipboard-sync
 ```
 
-Linux requires Qt 6.7+, OpenSSL 3, CMake 3.24+, and Ninja. The supported
-features are encrypted text/image sync, legacy and chunked clipboard-file
-receive/transfer, and TCP port forwarding. Input sharing is capability-detected
-but not implemented. The Flatpak packaging and update behavior are documented
-in `linux/README.md`.
+Linux requires Qt 6.7+, OpenSSL 3, CMake 3.24+, Ninja, and the X11 client
+libraries (`libX11`, `libXtst`, `libXfixes`). The supported features are
+encrypted text/image sync, legacy and chunked clipboard-file receive/transfer,
+TCP port forwarding, and keyboard/mouse input sharing with the shared screen
+layout on X11 sessions (capability-detected only on Wayland). The Flatpak
+packaging and update behavior are documented in `linux/README.md`.
 
 ## Run macOS
 
