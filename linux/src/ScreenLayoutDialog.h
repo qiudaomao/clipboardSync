@@ -24,6 +24,13 @@ public:
     void updateRemoteCursor(const QString &deviceId, const QString &screenId,
         double normalizedX, double normalizedY);
 
+    // The zero-gap snap applied when a drag is released: the delta that moves
+    // `deviceId`'s whole group flush against the nearest other machine's edge
+    // (or out of an overlap), preferring the axis with more span overlap.
+    // Returns (0,0) when the group already touches without overlapping, or no
+    // overlap-free touching position exists. Public for tests.
+    static QPointF snapDeltaForGroup(const QList<ScreenLayoutEntry> &entries, const QString &deviceId);
+
 signals:
     void layoutChanged(const QList<ScreenLayoutEntry> &entries);
     void forgetDeviceRequested(const QString &deviceId);

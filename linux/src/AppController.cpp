@@ -826,8 +826,10 @@ void AppController::showScreenLayout()
             updateCursorReporting();
         });
     }
-    refreshLayoutDialog();
+    // Show before refreshing: refreshLayoutDialog only populates a visible
+    // dialog, so the reverse order opened a permanently empty panel.
     layoutDialog_->show();
+    refreshLayoutDialog();
     layoutDialog_->raise();
     layoutDialog_->activateWindow();
     broadcastLayoutWatch(true);

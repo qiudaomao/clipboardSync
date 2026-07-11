@@ -9,10 +9,38 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
+#include <optional>
 
 namespace {
 constexpr double CanvasMargin = 24.0;
 constexpr double HintBandHeight = 40.0;
+
+bool rectsOverlap(const QRectF &a, const QRectF &b)
+{
+    constexpr double epsilon = 0.5;
+    return a.intersects(b.adjusted(epsilon, epsilon, -epsilon, -epsilon));
+}
+
+// Candidate origins placing `rect` flush against one edge of `other`, only
+// offered along the axis where the two rects share more span, so a drag that's
+// clearly meant to go above/below doesn't snap back beside the other screen
+// just because that's marginally closer in raw distance.
+QList<QPointF> touchCandidates(const QRectF &rect, const QRectF &other)
+{
+    const double horizontalOverlap = std::min(rect.bottom(), other.bottom()) - std::max(rect.top(), other.top());
+    const double verticalOverlap = std::min(rect.right(), other.right()) - std::max(rect.left(), other.left());
+    QList<QPointF> candidates;
+    if (horizontalOverlap > 0 && horizontalOverlap >= verticalOverlap) {
+        candidates.append(QPointF(other.right(), rect.y()));
+        candidates.append(QPointF(other.left() - rect.width(), rect.y()));
+    } else if (verticalOverlap > 0) {
+        candidates.append(QPointF(rect.x(), other.bottom()));
+        candidates.append(QPointF(rect.x(), other.top() - rect.height()));
+    }
+    return candidates;
+}
 }
 
 ScreenLayoutDialog::ScreenLayoutDialog(QWidget *parent) : QDialog(parent)
@@ -199,12 +227,69 @@ void ScreenLayoutDialog::mouseReleaseEvent(QMouseEvent *event)
     }
     const QString draggedId = draggingDeviceId_;
     draggingDeviceId_.clear();
+    // Dragging is free (overlaps and gaps allowed so groups are easy to move);
+    // the release magnets the group flush against its nearest neighbor.
+    const QPointF snap = snapDeltaForGroup(entries_, draggedId);
     QList<ScreenLayoutEntry> moved;
-    for (const auto &entry : entries_)
-        if (entry.deviceId == draggedId)
-            moved.append(entry);
+    for (auto &entry : entries_) {
+        if (entry.deviceId != draggedId)
+            continue;
+        entry.x += snap.x();
+        entry.y += snap.y();
+        moved.append(entry);
+    }
+    update();
     if (!moved.isEmpty())
         emit layoutChanged(moved);
+}
+
+QPointF ScreenLayoutDialog::snapDeltaForGroup(const QList<ScreenLayoutEntry> &entries, const QString &deviceId)
+{
+    QList<QRectF> memberRects;
+    QList<QRectF> others;
+    QRectF groupBounds;
+    for (const auto &entry : entries) {
+        if (entry.deviceId == deviceId) {
+            memberRects.append(entry.rect());
+            groupBounds = groupBounds.isNull() ? entry.rect() : groupBounds.united(entry.rect());
+        } else {
+            others.append(entry.rect());
+        }
+    }
+    if (memberRects.isEmpty() || others.isEmpty())
+        return QPointF(0, 0);
+
+    const bool overlapping = std::any_of(others.cbegin(), others.cend(), [&memberRects](const QRectF &other) {
+        return std::any_of(memberRects.cbegin(), memberRects.cend(),
+            [&other](const QRectF &rect) { return rectsOverlap(rect, other); });
+    });
+    constexpr double touchEpsilon = 1.0;
+    const bool touching = std::any_of(others.cbegin(), others.cend(), [&groupBounds](const QRectF &other) {
+        return other.adjusted(-touchEpsilon, -touchEpsilon, touchEpsilon, touchEpsilon).intersects(groupBounds);
+    });
+    if (touching && !overlapping)
+        return QPointF(0, 0);
+
+    std::optional<QPointF> bestDelta;
+    double bestDistance = std::numeric_limits<double>::max();
+    for (const QRectF &other : others) {
+        for (const QPointF &candidateOrigin : touchCandidates(groupBounds, other)) {
+            const QPointF delta = candidateOrigin - groupBounds.topLeft();
+            const double distance = std::hypot(delta.x(), delta.y());
+            if (distance >= bestDistance)
+                continue;
+            const bool collides = std::any_of(others.cbegin(), others.cend(), [&](const QRectF &other2) {
+                return std::any_of(memberRects.cbegin(), memberRects.cend(), [&](const QRectF &rect) {
+                    return rectsOverlap(rect.translated(delta), other2);
+                });
+            });
+            if (collides)
+                continue;
+            bestDistance = distance;
+            bestDelta = delta;
+        }
+    }
+    return bestDelta.value_or(QPointF(0, 0));
 }
 
 void ScreenLayoutDialog::contextMenuEvent(QContextMenuEvent *event)

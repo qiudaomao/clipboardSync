@@ -113,6 +113,18 @@ target_include_directories(input-sharing-tests PRIVATE src)
 add_test(NAME input-sharing-tests COMMAND input-sharing-tests)
 set_tests_properties(input-sharing-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(screen-layout-tests
+    tests/ScreenLayoutDialogTests.cpp
+    src/InputModels.cpp
+    src/InputModels.h
+    src/ScreenLayoutDialog.cpp
+    src/ScreenLayoutDialog.h
+)
+target_link_libraries(screen-layout-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+target_include_directories(screen-layout-tests PRIVATE src)
+add_test(NAME screen-layout-tests COMMAND screen-layout-tests)
+set_tests_properties(screen-layout-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(clipboard-service-tests
     tests/ClipboardServiceTests.cpp
     src/ClipboardService.cpp
