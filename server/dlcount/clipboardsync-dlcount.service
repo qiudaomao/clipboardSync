@@ -1,0 +1,13 @@
+[Unit]
+Description=Clipboard Sync download counter
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/node /opt/clipboardsync-dlcount/server.js
+DynamicUser=yes
+StateDirectory=clipboardsync-dlcount
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -543,10 +543,10 @@
     encrypted, and without the cloud.
   </p>
   <div class="cta-row" id="download">
-    <a class="btn btn-primary dl-mac" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncMac.zip">
+    <a class="btn btn-primary dl-mac" href="https://clipboardsync.fuzhuo.me/dl/clipboardSyncMac.zip">
       <span class="btn-icon"></span> <span data-i18n="dl.mac">Download for macOS</span>
     </a>
-    <a class="btn btn-primary dl-win" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncWin-Setup.exe">
+    <a class="btn btn-primary dl-win" href="https://clipboardsync.fuzhuo.me/dl/clipboardSyncWin-Setup.exe">
       <span class="btn-icon">⊞</span> <span data-i18n="dl.win">Download for Windows</span>
     </a>
     <details class="dl-dropdown">
@@ -554,12 +554,13 @@
         <span class="btn-icon">🐧</span> <span data-i18n="dl.linux">Download for Linux</span> <span class="caret">▾</span>
       </summary>
       <div class="dl-menu">
-        <a href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncLinux-x86_64.flatpak"><span data-i18n="dl.linuxX64">x86_64</span> <small>(Intel / AMD)</small></a>
-        <a href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncLinux-aarch64.flatpak"><span data-i18n="dl.linuxArm">ARM64</span> <small>(aarch64)</small></a>
+        <a href="https://clipboardsync.fuzhuo.me/dl/clipboardSyncLinux-x86_64.flatpak"><span data-i18n="dl.linuxX64">x86_64</span> <small>(Intel / AMD)</small></a>
+        <a href="https://clipboardsync.fuzhuo.me/dl/clipboardSyncLinux-aarch64.flatpak"><span data-i18n="dl.linuxArm">ARM64</span> <small>(aarch64)</small></a>
       </div>
     </details>
   </div>
   <div class="platform-note" data-i18n="hero.note">Free during beta · No account required · Your data stays on your network</div>
+  <div class="platform-note dl-counter" id="dlCounter" hidden>⬇ <span id="dlCounterNum">0</span> <span data-i18n="hero.downloads">downloads</span></div>
 
   <div class="hero-img">
     <img src="assets/hero.svg" alt="Clipboard, mouse and keyboard syncing between a MacBook and a Windows PC" />
@@ -709,10 +710,10 @@
     <h2 data-i18n="cta.t">Sync your clipboard in minutes</h2>
     <p data-i18n="cta.p">Set one device as the server, connect the others as child devices, and start copying across your network.</p>
     <div class="cta-row">
-      <a class="btn btn-primary dl-mac" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncMac.zip">
+      <a class="btn btn-primary dl-mac" href="https://clipboardsync.fuzhuo.me/dl/clipboardSyncMac.zip">
         <span class="btn-icon"></span> <span data-i18n="dl.mac">Download for macOS</span>
       </a>
-      <a class="btn btn-primary dl-win" href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncWin-Setup.exe">
+      <a class="btn btn-primary dl-win" href="https://clipboardsync.fuzhuo.me/dl/clipboardSyncWin-Setup.exe">
         <span class="btn-icon">⊞</span> <span data-i18n="dl.win">Download for Windows</span>
       </a>
       <details class="dl-dropdown">
@@ -720,8 +721,8 @@
           <span class="btn-icon">🐧</span> <span data-i18n="dl.linux">Download for Linux</span> <span class="caret">▾</span>
         </summary>
         <div class="dl-menu">
-          <a href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncLinux-x86_64.flatpak"><span data-i18n="dl.linuxX64">x86_64</span> <small>(Intel / AMD)</small></a>
-          <a href="https://clipboardsync.fuzhuo.me/downloads/clipboardSyncLinux-aarch64.flatpak"><span data-i18n="dl.linuxArm">ARM64</span> <small>(aarch64)</small></a>
+          <a href="https://clipboardsync.fuzhuo.me/dl/clipboardSyncLinux-x86_64.flatpak"><span data-i18n="dl.linuxX64">x86_64</span> <small>(Intel / AMD)</small></a>
+          <a href="https://clipboardsync.fuzhuo.me/dl/clipboardSyncLinux-aarch64.flatpak"><span data-i18n="dl.linuxArm">ARM64</span> <small>(aarch64)</small></a>
         </div>
       </details>
     </div>
@@ -759,6 +760,16 @@
         }
       });
     });
+  })();
+
+  (function () {
+    fetch("/api/dl/counts").then(function (response) {
+      return response.json();
+    }).then(function (data) {
+      if (!data || !data.total) { return; }
+      document.getElementById("dlCounterNum").textContent = data.total.toLocaleString();
+      document.getElementById("dlCounter").hidden = false;
+    }).catch(function () { /* counter is decorative; stay hidden on failure */ });
   })();
 
   (function () {
@@ -800,6 +811,7 @@
         "dl.linuxX64": "x86_64",
         "dl.linuxArm": "ARM64",
         "hero.note": "Free during beta · No account required · Password-protected connections",
+        "hero.downloads": "downloads",
         "setup.head": "Connected in three steps",
         "setup.sub": "No account and no cloud dashboard — just your devices and a shared password.",
         "setup.s1t": "Install on both devices",
@@ -882,6 +894,7 @@
         "dl.linuxX64": "x86_64",
         "dl.linuxArm": "ARM64",
         "hero.note": "公测期免费 · 无需账号 · 密码保护连接",
+        "hero.downloads": "次下载",
         "setup.head": "三步完成连接",
         "setup.sub": "无需账号和云端控制台，只需要你的设备与一个共享密码。",
         "setup.s1t": "在两台设备上安装",
