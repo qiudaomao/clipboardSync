@@ -53,6 +53,7 @@
   :root[data-theme="light"] .btn-ghost,
   :root[data-theme="light"] .eyebrow { background: rgba(15,23,42,0.03); }
   :root[data-theme="light"] .btn-ghost:hover { background: rgba(15,23,42,0.06); }
+  :root[data-theme="light"] .btn-primary { color: #ffffff; }
   :root[data-theme="light"] .shot-card { background: linear-gradient(180deg, #ffffff, #f4f6fa); box-shadow: 0 24px 60px -34px rgba(15,23,42,0.45); }
   :root[data-theme="light"] .shot-card img { border-color: rgba(15,23,42,0.10); }
   :root[data-theme="light"] .highlight-card { background: #ffffff; }
@@ -766,7 +767,7 @@
     fetch("/api/dl/counts").then(function (response) {
       return response.json();
     }).then(function (data) {
-      if (!data || !data.total) { return; }
+      if (!data || typeof data.total !== "number") { return; }
       document.getElementById("dlCounterNum").textContent = data.total.toLocaleString();
       document.getElementById("dlCounter").hidden = false;
     }).catch(function () { /* counter is decorative; stay hidden on failure */ });
