@@ -11,12 +11,19 @@ The current Windows release target is `v0.1.20`, matching the app version `0.1.2
 The whole release can be cut from macOS; no Windows machine is needed. Differences from the
 Windows flow below:
 
-1. **Build**: use the official x64 .NET SDK in `~/.dotnet` with Windows targeting enabled:
+1. **Build**: use the official x64 .NET SDK in `~/.dotnet` with Windows targeting enabled.
+   Publish **both** the app and the secure-desktop input service (the installer packages the
+   service from its own publish output):
 
    ```sh
    ~/.dotnet/dotnet publish win/ClipboardSyncWin/ClipboardSyncWin.csproj \
      -c Release -r win-x64 --self-contained false -p:EnableWindowsTargeting=true
+   ~/.dotnet/dotnet publish win/ClipboardSyncInputService/ClipboardSyncInputService.csproj \
+     -c Release -r win-x64 --self-contained false -p:EnableWindowsTargeting=true
    ```
+
+   (`build-windows.ps1` on Windows publishes both projects automatically; the macOS flow uses
+   these raw commands, so the service publish must be run explicitly.)
 
 2. **Installer**: run the Inno Setup compiler in Docker instead of installing it:
 

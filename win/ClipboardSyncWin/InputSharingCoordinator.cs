@@ -58,6 +58,9 @@ internal sealed class InputSharingCoordinator : IDisposable
     private readonly LowLevelProc mouseProc;
     private readonly LowLevelProc keyboardProc;
     private readonly object remoteMouseMoveLock = new();
+    private readonly object inputServiceLock = new();
+    private WindowsInputServiceClient? inputServiceClient;
+    private volatile bool disposed;
     private AppConfig config = new();
     private SyncMode role = SyncMode.Client;
     private int peerCount;
@@ -168,6 +171,7 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     public void Dispose()
     {
+        disposed = true;
         ReleaseRemoteModifiers();
         SendPressedModifierKeyUps();
         ShowLocalCursor();
@@ -178,6 +182,16 @@ internal sealed class InputSharingCoordinator : IDisposable
         CancelPendingMouseMoveSend();
         ClearPendingRemoteMouseMove();
         RemoveHooks();
+
+        WindowsInputServiceClient? client;
+        lock (inputServiceLock)
+        {
+            client = inputServiceClient;
+            inputServiceClient = null;
+        }
+        // Disposing disconnects the pipe, which makes the secure-desktop agent release any keys or
+        // buttons it still had pressed for us.
+        client?.Dispose();
     }
 
     private string EffectiveControlDeviceId => string.IsNullOrWhiteSpace(config.ControlDeviceId)
@@ -1372,7 +1386,16 @@ internal sealed class InputSharingCoordinator : IDisposable
             left.Meta == right.Meta;
     }
 
-    private static void SendMouseInput(MouseFlags flags, int data, int dx = 0, int dy = 0)
+    private void SendMouseInput(MouseFlags flags, int data, int dx = 0, int dy = 0)
+    {
+        if (TryInjectViaService(client => client.TryInjectMouse((uint)flags, data, dx, dy)))
+        {
+            return;
+        }
+        SendMouseInputLocal(flags, data, dx, dy);
+    }
+
+    private static void SendMouseInputLocal(MouseFlags flags, int data, int dx = 0, int dy = 0)
     {
         var input = new INPUT
         {
@@ -1419,7 +1442,49 @@ internal sealed class InputSharingCoordinator : IDisposable
         Keys.Insert, Keys.Delete, Keys.LWin, Keys.RWin
     ];
 
-    private static void SendKeyboardInput(ushort virtualKey, bool keyUp)
+    private void SendKeyboardInput(ushort virtualKey, bool keyUp)
+    {
+        var extended = ExtendedKeys.Contains((Keys)virtualKey);
+        if (TryInjectViaService(client => client.TryInjectKeyboard(virtualKey, keyUp, extended)))
+        {
+            return;
+        }
+        SendKeyboardInputLocal(virtualKey, keyUp);
+    }
+
+    /// Routes an injection through the secure-desktop input service when it is connected, so the
+    /// event can reach the lock screen / UAC desktop that an in-process SendInput cannot touch.
+    /// Returns false (and the caller falls back to in-process injection) whenever the service is
+    /// not installed, still connecting, or faulted — i.e. the ordinary unlocked-desktop case.
+    private bool TryInjectViaService(Func<WindowsInputServiceClient, bool> inject)
+    {
+        if (disposed)
+        {
+            return false;
+        }
+
+        WindowsInputServiceClient client;
+        lock (inputServiceLock)
+        {
+            if (disposed)
+            {
+                return false;
+            }
+            client = inputServiceClient ??= new WindowsInputServiceClient();
+        }
+
+        try
+        {
+            return client.IsReady && inject(client);
+        }
+        catch (InvalidOperationException)
+        {
+            // The client was disposed concurrently; fall back to in-process injection.
+            return false;
+        }
+    }
+
+    private static void SendKeyboardInputLocal(ushort virtualKey, bool keyUp)
     {
         // Include the layout's scan code alongside the virtual key so injected presses look like
         // physical ones to consumers that read scan codes (consoles, games, RDP).

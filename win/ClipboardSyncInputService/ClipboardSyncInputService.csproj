@@ -2,29 +2,22 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <UseWindowsForms>true</UseWindowsForms>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <ApplicationIcon>Assets\clipboard-sync-icon.ico</ApplicationIcon>
-    <AssemblyName>ClipboardSync</AssemblyName>
+    <AssemblyName>ClipboardSync.InputService</AssemblyName>
     <Version>0.1.21</Version>
     <AssemblyVersion>0.1.21.0</AssemblyVersion>
     <FileVersion>0.1.21.0</FileVersion>
     <InformationalVersion>0.1.21</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <AssemblyTitle>Clipboard Sync</AssemblyTitle>
-    <Description>Native clipboard sync over WebSocket.</Description>
+    <AssemblyTitle>Clipboard Sync Windows Input Service</AssemblyTitle>
+    <Description>Secure-desktop input broker for Clipboard Sync.</Description>
     <Company>qiudaomao</Company>
     <Product>Clipboard Sync</Product>
     <Copyright>Copyright (c) 2026 qiudaomao</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="Assets\clipboard-sync-icon.ico" CopyToOutputDirectory="PreserveNewest" />
-    <Compile Include="..\Shared\SecureInputProtocol.cs" Link="WindowsInput\SecureInputProtocol.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetCore" Version="3.1.0" />
+    <Compile Include="..\Shared\SecureInputProtocol.cs" Link="SecureInputProtocol.cs" />
   </ItemGroup>
 </Project>
