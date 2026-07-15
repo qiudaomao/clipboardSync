@@ -60,6 +60,7 @@ private:
     void setSleepPrevention(SleepPreventionDuration duration);
     void setLowBatterySleepPreventionGuard(bool enabled);
     void updateSleepPreventionMenu();
+    QString sleepPreventionStatusText() const;
     void reportSleepPreventionError(const QString &details);
     void receiveEnvelope(const QString &payload);
     void reportError(const QString &details);
@@ -119,8 +120,10 @@ private:
     QMenu *controlDeviceMenu_ = nullptr;
     QMenu *historyMenu_ = nullptr;
     QMenu *sleepPreventionMenu_ = nullptr;
+    QAction *sleepPreventionStatusAction_ = nullptr;
     QAction *lowBatterySleepPreventionAction_ = nullptr;
     QList<QAction *> sleepPreventionActions_;
+    QTimer sleepPreventionStatusTimer_;
     QList<QJsonObject> history_;
     ScreenLayoutDialog *layoutDialog_ = nullptr;
     QHash<QString, PeerDevice> devices_;

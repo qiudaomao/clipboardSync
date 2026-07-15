@@ -79,8 +79,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var startStopItem = NSMenuItem()
     private var launchAtLoginItem = NSMenuItem()
     private var sleepPreventionItem = NSMenuItem()
+    private var sleepPreventionStatusItem = NSMenuItem()
     private var lowBatterySleepPreventionItem = NSMenuItem()
     private var sleepPreventionItems: [SleepPreventionDuration: NSMenuItem] = [:]
+    private var sleepPreventionStatusTimer: Timer?
     private var inputStatusMenuItem = NSMenuItem()
     private var inputSharingItem = NSMenuItem()
     private var controlDeviceMenuItem = NSMenuItem(title: AppText.text("menu.controlDevice"), action: nil, keyEquivalent: "")
@@ -295,6 +297,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        sleepPreventionStatusTimer?.invalidate()
+        sleepPreventionStatusTimer = nil
         clipboard.stop()
         inputCoordinator.stop()
         portForwardCoordinator.stop()
@@ -465,6 +469,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sleepPreventionMenu.autoenablesItems = false
         sleepPreventionItem = NSMenuItem(title: AppText.text("menu.preventSystemSleep"), action: nil, keyEquivalent: "")
         sleepPreventionItem.submenu = sleepPreventionMenu
+        sleepPreventionStatusItem = NSMenuItem(title: AppText.text("sleep.statusOff"), action: nil, keyEquivalent: "")
+        sleepPreventionStatusItem.isEnabled = false
+        sleepPreventionMenu.addItem(sleepPreventionStatusItem)
+        sleepPreventionMenu.addItem(.separator())
         for duration in SleepPreventionDuration.allCases {
             let item = NSMenuItem(title: AppText.text(duration.titleKey), action: #selector(setSleepPrevention), keyEquivalent: "")
             item.target = self
@@ -480,6 +488,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
         lowBatterySleepPreventionItem.target = self
         sleepPreventionMenu.addItem(lowBatterySleepPreventionItem)
+        let statusTimer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            self?.updateSleepPreventionStatus()
+        }
+        RunLoop.main.add(statusTimer, forMode: .common)
+        sleepPreventionStatusTimer = statusTimer
         moreFeaturesMenu.addItem(sleepPreventionItem)
 
         launchAtLoginItem = NSMenuItem(title: AppText.text("menu.launchAtLogin"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
@@ -546,6 +559,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.state = sleepPreventionController.selection == duration ? .on : .off
         }
         lowBatterySleepPreventionItem.state = sleepPreventionController.lowBatteryGuardEnabled ? .on : .off
+        updateSleepPreventionStatus()
         switch sleepPreventionController.suspensionReason {
         case .lowBattery:
             sleepPreventionItem.title = AppText.text("menu.preventSystemSleepPausedLowBattery")
@@ -557,6 +571,37 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshControlDeviceMenu()
         refreshSendFilesMenu()
         refreshHistoryMenu()
+    }
+
+    private func updateSleepPreventionStatus() {
+        let paused = sleepPreventionController.suspensionReason != nil
+        switch sleepPreventionController.selection {
+        case .disabled:
+            sleepPreventionStatusItem.title = AppText.text("sleep.statusOff")
+        case .forever:
+            sleepPreventionStatusItem.title = AppText.text(
+                paused ? "sleep.statusPausedForever" : "sleep.statusForever"
+            )
+        default:
+            guard let expiresAt = sleepPreventionController.expiresAt else {
+                preconditionFailure("A timed sleep-prevention selection has no expiration")
+            }
+            let remainingMinutes = max(0, Int(ceil(expiresAt.timeIntervalSinceNow / 60)))
+            let hours = remainingMinutes / 60
+            let minutes = remainingMinutes % 60
+            if hours > 0 {
+                sleepPreventionStatusItem.title = AppText.format(
+                    paused ? "sleep.statusPausedRemainingHoursMinutes" : "sleep.statusRemainingHoursMinutes",
+                    hours,
+                    minutes
+                )
+            } else {
+                sleepPreventionStatusItem.title = AppText.format(
+                    paused ? "sleep.statusPausedRemainingMinutes" : "sleep.statusRemainingMinutes",
+                    minutes
+                )
+            }
+        }
     }
 
     @objc private func handleStatusAction() {

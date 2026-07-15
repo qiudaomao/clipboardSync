@@ -5,8 +5,9 @@ protocol as the macOS and Windows clients. The implementation supports Server
 and Child Device modes, automatic text and PNG clipboard sync, explicit chunked
 clipboard-file transfer, TCP port forwarding, and — on X11 sessions — keyboard
 and mouse input sharing with the shared screen layout. `More Features -> Prevent
-System Sleep` can inhibit suspend forever or for 1, 2, 4, 6, or 8 hours through
-the desktop Inhibit portal, including inside the Flatpak sandbox. Its independent
+System Sleep` shows its live state and remaining time in the first submenu row,
+and can inhibit suspend and display idle forever or for 1, 2, 4, 6, or 8 hours
+through the desktop Inhibit portal, including inside the Flatpak sandbox. Its independent
 low-battery checkbox reads UPower and pauses that inhibitor only while the system
 is on battery power below 20%; AC power or battery recovery resumes the original
 selection without extending a timed deadline.

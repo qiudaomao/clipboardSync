@@ -34,9 +34,11 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem startStopItem;
     private readonly ToolStripMenuItem launchAtLoginItem;
     private readonly ToolStripMenuItem sleepPreventionItem;
+    private readonly ToolStripMenuItem sleepPreventionStatusItem;
     private readonly ToolStripMenuItem lowBatterySleepPreventionItem;
     private readonly Dictionary<SleepPreventionDuration, ToolStripMenuItem> sleepPreventionItems = [];
     private readonly SleepPreventionController sleepPreventionController;
+    private readonly System.Windows.Forms.Timer sleepPreventionStatusTimer = new() { Interval = 30_000 };
     private readonly ToolStripMenuItem sendFilesItem;
     private readonly FileTransferCoordinator fileTransferCoordinator = new();
     private readonly ClipboardMonitor clipboardMonitor;
@@ -126,6 +128,7 @@ internal sealed class TrayAppContext : ApplicationContext
         startStopItem = new ToolStripMenuItem(AppText.Text("menu.resumeSync"), null, (_, _) => ToggleTransport());
         launchAtLoginItem = new ToolStripMenuItem(AppText.Text("menu.launchAtLogin"), null, (_, _) => ToggleLaunchAtLogin());
         sleepPreventionItem = new ToolStripMenuItem(AppText.Text("menu.preventSystemSleep"));
+        sleepPreventionStatusItem = new ToolStripMenuItem(AppText.Text("sleep.statusOff")) { Enabled = false };
         lowBatterySleepPreventionItem = new ToolStripMenuItem(
             AppText.Text("sleep.disableBelow20OnBattery"),
             null,
@@ -206,6 +209,8 @@ internal sealed class TrayAppContext : ApplicationContext
         };
         sleepPreventionController.Failure += ShowSleepPreventionError;
         sleepPreventionController.StateChanged += UpdateMenu;
+        sleepPreventionStatusTimer.Tick += (_, _) => UpdateSleepPreventionStatus();
+        sleepPreventionStatusTimer.Start();
         bool savedSleepPreventionExpired;
         try
         {
@@ -279,6 +284,8 @@ internal sealed class TrayAppContext : ApplicationContext
             trayMenu.Dispose();
             trayIcon.Dispose();
             screenLayoutForm?.Dispose();
+            sleepPreventionStatusTimer.Stop();
+            sleepPreventionStatusTimer.Dispose();
             sleepPreventionController.Dispose();
         }
 
@@ -415,6 +422,8 @@ internal sealed class TrayAppContext : ApplicationContext
 
         var moreFeaturesItem = new ToolStripMenuItem(AppText.Text("menu.moreFeatures"));
         moreFeaturesItem.DropDownItems.Add(new ToolStripMenuItem(AppText.Text("menu.portForward"), null, (_, _) => ShowPortForward()));
+        sleepPreventionItem.DropDownItems.Add(sleepPreventionStatusItem);
+        sleepPreventionItem.DropDownItems.Add(new ToolStripSeparator());
         foreach (var duration in Enum.GetValues<SleepPreventionDuration>())
         {
             var durationItem = new ToolStripMenuItem(AppText.Text(duration.TitleKey()))
@@ -431,6 +440,7 @@ internal sealed class TrayAppContext : ApplicationContext
         moreFeaturesItem.DropDownItems.Add(launchAtLoginItem);
         menu.Items.Add(moreFeaturesItem);
         menu.Items.Add(checkForUpdatesItem);
+        menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.updateHistory"), null, (_, _) => updateController.ShowUpdateHistory()));
         menu.Items.Add(startStopItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.about"), null, (_, _) => ShowAbout()));
@@ -513,6 +523,7 @@ internal sealed class TrayAppContext : ApplicationContext
             item.Checked = sleepPreventionController.Selection == duration;
         }
         lowBatterySleepPreventionItem.Checked = sleepPreventionController.LowBatteryGuardEnabled;
+        UpdateSleepPreventionStatus();
         sleepPreventionItem.Text = sleepPreventionController.SuspensionReason switch
         {
             SleepPreventionSuspensionReason.LowBattery => AppText.Text("menu.preventSystemSleepPausedLowBattery"),
@@ -523,6 +534,37 @@ internal sealed class TrayAppContext : ApplicationContext
         RefreshControlDeviceMenu();
         RefreshSendFilesMenu();
         RefreshHistoryMenu();
+    }
+
+    private void UpdateSleepPreventionStatus()
+    {
+        var paused = sleepPreventionController.SuspensionReason is not null;
+        sleepPreventionStatusItem.Text = sleepPreventionController.Selection switch
+        {
+            SleepPreventionDuration.Disabled => AppText.Text("sleep.statusOff"),
+            SleepPreventionDuration.Forever => AppText.Text(
+                paused ? "sleep.statusPausedForever" : "sleep.statusForever"),
+            _ => FormatTimedSleepPreventionStatus(paused)
+        };
+    }
+
+    private string FormatTimedSleepPreventionStatus(bool paused)
+    {
+        var expiration = sleepPreventionController.ExpiresAt
+            ?? throw new InvalidOperationException("A timed sleep-prevention selection has no expiration.");
+        var remainingMinutes = Math.Max(0, (int)Math.Ceiling((expiration - DateTimeOffset.UtcNow).TotalMinutes));
+        var hours = remainingMinutes / 60;
+        var minutes = remainingMinutes % 60;
+        if (hours > 0)
+        {
+            return AppText.Format(
+                paused ? "sleep.statusPausedRemainingHoursMinutes" : "sleep.statusRemainingHoursMinutes",
+                hours,
+                minutes);
+        }
+        return AppText.Format(
+            paused ? "sleep.statusPausedRemainingMinutes" : "sleep.statusRemainingMinutes",
+            minutes);
     }
 
     private void HandleStatusAction()

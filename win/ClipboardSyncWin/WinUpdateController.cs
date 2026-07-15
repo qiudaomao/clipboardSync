@@ -1,6 +1,9 @@
 using System.Drawing;
 using System.Globalization;
+using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using NetSparkleUpdater;
 using NetSparkleUpdater.Enums;
 using NetSparkleUpdater.SignatureVerifiers;
@@ -25,6 +28,7 @@ internal sealed class WinUpdateController : IDisposable
 
     private readonly SparkleUpdater? updater;
     private readonly SynchronizationContext uiContext;
+    private UpdateHistoryForm? updateHistoryForm;
 
     public WinUpdateController(Icon appIcon, Action closeApplication)
     {
@@ -129,9 +133,127 @@ internal sealed class WinUpdateController : IDisposable
         updater.CheckForUpdatesAtUserRequest(ignoreSkippedVersions: true);
     }
 
+    public void ShowUpdateHistory()
+    {
+        if (updater is null)
+        {
+            MessageBox.Show(
+                AppText.Text("updates.notConfigured"),
+                AppText.Text("app.name"),
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        if (updateHistoryForm is { IsDisposed: false })
+        {
+            updateHistoryForm.Activate();
+            return;
+        }
+
+        var form = new UpdateHistoryForm();
+        updateHistoryForm = form;
+        form.FormClosed += (_, _) =>
+        {
+            if (ReferenceEquals(updateHistoryForm, form))
+            {
+                updateHistoryForm = null;
+            }
+        };
+        form.Show();
+        _ = LoadUpdateHistoryAsync(form);
+    }
+
     public void Dispose()
     {
+        updateHistoryForm?.Close();
         updater?.Dispose();
+    }
+
+    private async Task LoadUpdateHistoryAsync(UpdateHistoryForm form)
+    {
+        var failures = new List<string>();
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        var candidates = new[] { updater?.AppCastUrl, AppCastUrl }
+            .Concat(FallbackAppCastUrls)
+            .Where(url => !string.IsNullOrWhiteSpace(url))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Cast<string>();
+
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                var xml = await http.GetStringAsync(candidate).ConfigureAwait(false);
+                var entries = ParseUpdateHistory(xml);
+                FileLogWriter.WriteLine($"Loaded {entries.Count} update history entries from {candidate}");
+                uiContext.Post(_ =>
+                {
+                    if (!form.IsDisposed)
+                    {
+                        form.SetEntries(entries);
+                    }
+                }, null);
+                return;
+            }
+            catch (Exception ex)
+            {
+                var failure = $"{candidate}: {ex.Message}";
+                failures.Add(failure);
+                FileLogWriter.WriteLine($"Update history feed failed: {failure}");
+            }
+        }
+
+        var message = string.Join(Environment.NewLine, failures);
+        uiContext.Post(_ =>
+        {
+            if (!form.IsDisposed)
+            {
+                form.SetLoadFailure(message);
+            }
+        }, null);
+    }
+
+    internal static IReadOnlyList<UpdateHistoryEntry> ParseUpdateHistory(string xml)
+    {
+        var document = XDocument.Parse(xml, LoadOptions.None);
+        XNamespace sparkle = "http://www.andymatuschak.org/xml-namespaces/sparkle";
+        var entries = document.Descendants("item").Select(item =>
+        {
+            var version = item.Element(sparkle + "shortVersionString")?.Value
+                ?? item.Element(sparkle + "version")?.Value
+                ?? throw new InvalidDataException("An update history item is missing its version.");
+            var publishedAt = DateTimeOffset.TryParse(
+                item.Element("pubDate")?.Value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces,
+                out var parsedDate)
+                ? parsedDate
+                : (DateTimeOffset?)null;
+            var enclosureUrl = item.Element("enclosure")?.Attribute("url")?.Value;
+            var downloadUri = Uri.TryCreate(enclosureUrl, UriKind.Absolute, out var parsedUri)
+                ? parsedUri
+                : null;
+            return new UpdateHistoryEntry(
+                version,
+                publishedAt,
+                NormalizeReleaseNotes(item.Element("description")?.Value ?? ""),
+                downloadUri);
+        }).ToList();
+
+        if (entries.Count == 0)
+        {
+            throw new InvalidDataException("The update feed contains no release history entries.");
+        }
+
+        return entries;
+    }
+
+    private static string NormalizeReleaseNotes(string raw)
+    {
+        var withLineBreaks = Regex.Replace(raw, "<br\\s*/?>", Environment.NewLine, RegexOptions.IgnoreCase);
+        var withoutTags = Regex.Replace(withLineBreaks, "<[^>]+>", "");
+        return WebUtility.HtmlDecode(withoutTags).Trim();
     }
 
     private void ShowUpdaterError(string message)

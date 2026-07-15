@@ -96,6 +96,10 @@ void AppController::start()
         });
     connect(sleepPrevention_, &SleepPreventionController::stateChanged,
         this, &AppController::updateSleepPreventionMenu);
+    sleepPreventionStatusTimer_.setInterval(30'000);
+    connect(&sleepPreventionStatusTimer_, &QTimer::timeout,
+        this, &AppController::updateSleepPreventionMenu);
+    sleepPreventionStatusTimer_.start();
     bool savedSleepPreventionExpired = false;
     try {
         sleepPrevention_->setLowBatteryGuardEnabled(
@@ -244,6 +248,9 @@ void AppController::buildUi()
     auto *more = menu->addMenu(QStringLiteral("More Features"));
     more->addAction(QStringLiteral("Port Forward"), this, &AppController::showPortForward);
     sleepPreventionMenu_ = more->addMenu(QStringLiteral("Prevent System Sleep"));
+    sleepPreventionStatusAction_ = sleepPreventionMenu_->addAction(QStringLiteral("Status: Off"));
+    sleepPreventionStatusAction_->setEnabled(false);
+    sleepPreventionMenu_->addSeparator();
     auto *sleepPreventionGroup = new QActionGroup(sleepPreventionMenu_);
     sleepPreventionGroup->setExclusive(true);
     for (const SleepPreventionChoice &choice : SleepPreventionController::choices()) {
@@ -339,6 +346,8 @@ void AppController::updateSleepPreventionMenu()
     }
     if (lowBatterySleepPreventionAction_)
         lowBatterySleepPreventionAction_->setChecked(sleepPrevention_->lowBatteryGuardEnabled());
+    if (sleepPreventionStatusAction_)
+        sleepPreventionStatusAction_->setText(sleepPreventionStatusText());
     if (sleepPreventionMenu_) {
         switch (sleepPrevention_->suspensionReason()) {
         case SleepPreventionSuspensionReason::None:
@@ -354,6 +363,42 @@ void AppController::updateSleepPreventionMenu()
             break;
         }
     }
+}
+
+QString AppController::sleepPreventionStatusText() const
+{
+    const bool paused = sleepPrevention_->suspensionReason()
+        != SleepPreventionSuspensionReason::None;
+    switch (sleepPrevention_->selection()) {
+    case SleepPreventionDuration::Disabled:
+        return QStringLiteral("Status: Off");
+    case SleepPreventionDuration::Forever:
+        return paused
+            ? QStringLiteral("Status: Paused — Forever selected")
+            : QStringLiteral("Status: On — Forever");
+    case SleepPreventionDuration::OneHour:
+    case SleepPreventionDuration::TwoHours:
+    case SleepPreventionDuration::FourHours:
+    case SleepPreventionDuration::SixHours:
+    case SleepPreventionDuration::EightHours:
+        break;
+    }
+
+    if (!sleepPrevention_->expiresAt().isValid())
+        throw std::logic_error("A timed sleep-prevention selection has no expiration");
+    const qint64 remainingSeconds = std::max<qint64>(0,
+        QDateTime::currentDateTimeUtc().secsTo(sleepPrevention_->expiresAt().toUTC()));
+    const qint64 remainingMinutes = (remainingSeconds + 59) / 60;
+    const qint64 hours = remainingMinutes / 60;
+    const qint64 minutes = remainingMinutes % 60;
+    if (hours > 0) {
+        return paused
+            ? QStringLiteral("Status: Paused — %1 h %2 min remaining").arg(hours).arg(minutes)
+            : QStringLiteral("Status: %1 h %2 min remaining").arg(hours).arg(minutes);
+    }
+    return paused
+        ? QStringLiteral("Status: Paused — %1 min remaining").arg(minutes)
+        : QStringLiteral("Status: %1 min remaining").arg(minutes);
 }
 
 void AppController::reportSleepPreventionError(const QString &details)

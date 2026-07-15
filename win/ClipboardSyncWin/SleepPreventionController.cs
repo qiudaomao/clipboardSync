@@ -70,6 +70,7 @@ internal sealed class SleepPreventionController : IDisposable
     private enum ExecutionState : uint
     {
         SystemRequired = 0x00000001,
+        DisplayRequired = 0x00000002,
         Continuous = 0x80000000
     }
 
@@ -436,13 +437,14 @@ internal sealed class SleepPreventionController : IDisposable
         {
             return;
         }
-        var previousState = SetThreadExecutionState(ExecutionState.Continuous | ExecutionState.SystemRequired);
+        var previousState = SetThreadExecutionState(
+            ExecutionState.Continuous | ExecutionState.SystemRequired | ExecutionState.DisplayRequired);
         if (previousState == 0)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows rejected the system sleep-prevention request.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows rejected the system sleep and display-idle prevention request.");
         }
         requestActive = true;
-        Trace.WriteLine("Acquired Windows ES_SYSTEM_REQUIRED execution-state request.");
+        Trace.WriteLine("Acquired Windows ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED execution-state request.");
     }
 
     private void ReleaseRequestIfNeeded()
@@ -454,10 +456,10 @@ internal sealed class SleepPreventionController : IDisposable
         var previousState = SetThreadExecutionState(ExecutionState.Continuous);
         if (previousState == 0)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows could not release the system sleep-prevention request.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows could not release the system sleep and display-idle prevention request.");
         }
         requestActive = false;
-        Trace.WriteLine("Released Windows ES_SYSTEM_REQUIRED execution-state request.");
+        Trace.WriteLine("Released Windows system and display execution-state request.");
     }
 
     private void ScheduleExpirationTimer()

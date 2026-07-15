@@ -24,6 +24,8 @@ const QString PortalPath = QStringLiteral("/org/freedesktop/portal/desktop");
 const QString InhibitInterface = QStringLiteral("org.freedesktop.portal.Inhibit");
 const QString RequestInterface = QStringLiteral("org.freedesktop.portal.Request");
 constexpr quint32 InhibitSuspendFlag = 4;
+constexpr quint32 InhibitIdleFlag = 8;
+constexpr quint32 InhibitSleepAndDisplayIdleFlags = InhibitSuspendFlag | InhibitIdleFlag;
 
 const QString UPowerService = QStringLiteral("org.freedesktop.UPower");
 const QString UPowerPath = QStringLiteral("/org/freedesktop/UPower");
@@ -287,9 +289,9 @@ void SleepPreventionController::acquirePortalRequestIfNeeded()
     QVariantMap options;
     options.insert(QStringLiteral("handle_token"), token);
     options.insert(QStringLiteral("reason"),
-        QStringLiteral("Clipboard Sync is preventing system sleep at the user's request"));
+        QStringLiteral("Clipboard Sync is preventing system sleep and display idle at the user's request"));
     const QDBusReply<QDBusObjectPath> reply = portal.call(QStringLiteral("Inhibit"),
-        QString{}, InhibitSuspendFlag, options);
+        QString{}, InhibitSleepAndDisplayIdleFlags, options);
     if (!reply.isValid())
         throw dbusFailure(QStringLiteral("The desktop rejected the sleep-prevention request"), reply.error());
     if (reply.value().path().isEmpty())

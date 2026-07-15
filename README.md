@@ -19,9 +19,9 @@ Files remain an explicit clipboard workflow: copy files in Finder or Explorer, c
 5. Password-authenticated payloads, with optional transport encryption (uncheck on trusted networks to save CPU).
 6. Mouse and keyboard sharing with a visual screen layout.
 7. Advanced TCP port forwarding between connected devices.
-8. Native system sleep prevention for a chosen duration or indefinitely.
+8. Native system-sleep and display-idle prevention for a chosen duration or indefinitely.
 
-The ordinary menu focuses on connection status, clipboard tasks, input sharing, and pausing/resuming sync. The work mode is selected only in Settings. Port forwarding, **Prevent System Sleep**, and launch-at-login live under **More Features**. Sleep prevention can be left disabled, enabled forever, or enabled for 1, 2, 4, 6, or 8 hours. An independent option can pause it while running on battery below 20%; reconnecting power or recovering to 20% resumes the original choice, while timed choices keep their original deadline. First launch opens Settings automatically; incomplete configuration remains actionable from the status row.
+The ordinary menu focuses on connection status, clipboard tasks, input sharing, and pausing/resuming sync. The work mode is selected only in Settings. Port forwarding, **Prevent System Sleep**, and launch-at-login live under **More Features**. Sleep prevention keeps both the system and display awake from idle, shows its live state and remaining time as the first submenu row, and can be left disabled, enabled forever, or enabled for 1, 2, 4, 6, or 8 hours. An independent option can pause it while running on battery below 20%; reconnecting power or recovering to 20% resumes the original choice, while timed choices keep their original deadline. Explicit user sleep and laptop-lid actions remain under operating-system control. First launch opens Settings automatically; incomplete configuration remains actionable from the status row.
 
 ![mac](assets/mac.png)
 

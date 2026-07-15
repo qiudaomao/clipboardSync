@@ -16,9 +16,9 @@ enum SleepPreventionError: LocalizedError {
         case .invalidTimedExpiration:
             return "The saved timed sleep-prevention setting has no valid expiration."
         case let .assertionCreationFailed(code):
-            return "macOS rejected the no-idle-sleep assertion (IOKit error \(code))."
+            return "macOS rejected the system-sleep and display-idle assertion (IOKit error \(code))."
         case let .assertionReleaseFailed(code):
-            return "macOS could not release the no-idle-sleep assertion (IOKit error \(code))."
+            return "macOS could not release the system-sleep and display-idle assertion (IOKit error \(code))."
         case .powerSourceSnapshotUnavailable:
             return "macOS did not provide a power-source snapshot. Sleep prevention is paused for battery safety."
         case .powerSourceListUnavailable:
@@ -407,16 +407,16 @@ final class SleepPreventionController {
 
         var nextAssertionID: IOPMAssertionID = 0
         let result = IOPMAssertionCreateWithName(
-            kIOPMAssertionTypeNoIdleSleep as CFString,
+            kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
             IOPMAssertionLevel(kIOPMAssertionLevelOn),
-            "Clipboard Sync: user requested system sleep prevention" as CFString,
+            "Clipboard Sync: user requested system sleep and display-idle prevention" as CFString,
             &nextAssertionID
         )
         guard result == kIOReturnSuccess else {
             throw SleepPreventionError.assertionCreationFailed(result)
         }
         assertionID = nextAssertionID
-        NSLog("Acquired macOS no-idle-sleep assertion \(nextAssertionID)")
+        NSLog("Acquired macOS display-idle and system-idle sleep assertion \(nextAssertionID)")
     }
 
     private func releaseAssertionIfNeeded() throws {
@@ -426,7 +426,7 @@ final class SleepPreventionController {
             throw SleepPreventionError.assertionReleaseFailed(result)
         }
         self.assertionID = nil
-        NSLog("Released macOS no-idle-sleep assertion \(assertionID)")
+        NSLog("Released macOS display-idle and system-idle sleep assertion \(assertionID)")
     }
 
     private func scheduleExpirationTimer() {
