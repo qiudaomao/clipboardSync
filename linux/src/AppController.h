@@ -6,6 +6,7 @@
 
 #include <QHash>
 #include <QJsonObject>
+#include <QList>
 #include <QObject>
 #include <QSet>
 #include <QTimer>
@@ -23,6 +24,7 @@ class InputBackend;
 class InputSharingCoordinator;
 class PortForwardCoordinator;
 class ScreenLayoutDialog;
+class SleepPreventionController;
 class SyncTransport;
 class UpdateController;
 
@@ -55,6 +57,10 @@ private:
     void publishPortForwards();
     bool launchAtLoginEnabled() const;
     void setLaunchAtLogin(bool enabled);
+    void setSleepPrevention(SleepPreventionDuration duration);
+    void setLowBatterySleepPreventionGuard(bool enabled);
+    void updateSleepPreventionMenu();
+    void reportSleepPreventionError(const QString &details);
     void receiveEnvelope(const QString &payload);
     void reportError(const QString &details);
     void updateStatus(const QString &status);
@@ -99,6 +105,7 @@ private:
     PortForwardCoordinator *portForward_;
     SyncTransport *transport_;
     UpdateController *updates_;
+    SleepPreventionController *sleepPrevention_;
     ScreenLayoutStore layoutStore_;
     InputBackend *inputBackend_ = nullptr;
     InputSharingCoordinator *input_ = nullptr;
@@ -111,6 +118,9 @@ private:
     QAction *inputStatusAction_ = nullptr;
     QMenu *controlDeviceMenu_ = nullptr;
     QMenu *historyMenu_ = nullptr;
+    QMenu *sleepPreventionMenu_ = nullptr;
+    QAction *lowBatterySleepPreventionAction_ = nullptr;
+    QList<QAction *> sleepPreventionActions_;
     QList<QJsonObject> history_;
     ScreenLayoutDialog *layoutDialog_ = nullptr;
     QHash<QString, PeerDevice> devices_;

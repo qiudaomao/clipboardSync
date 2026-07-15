@@ -14,6 +14,9 @@ finish-args:
   - --filesystem=host:ro
   - --filesystem=xdg-config/autostart:create
   - --talk-name=org.kde.StatusNotifierWatcher
+  # Read the system battery percentage and AC/battery state for the optional
+  # low-battery sleep-prevention guard.
+  - --system-talk-name=org.freedesktop.UPower
 
 modules:
   - name: clipboard-sync

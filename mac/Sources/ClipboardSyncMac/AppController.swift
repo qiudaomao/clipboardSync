@@ -12,6 +12,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let screenLayoutStore = ScreenLayoutStore()
     private lazy var inputCoordinator = InputSharingCoordinator(deviceId: deviceId, layoutStore: screenLayoutStore)
     private let updateController = UpdateController()
+    private let sleepPreventionController = SleepPreventionController()
 
     private let shouldShowInitialSetup = !AppConfig.hasSavedConfiguration
     private var config = AppConfig.load()
@@ -77,6 +78,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusActionMenuItem = NSMenuItem()
     private var startStopItem = NSMenuItem()
     private var launchAtLoginItem = NSMenuItem()
+    private var sleepPreventionItem = NSMenuItem()
+    private var lowBatterySleepPreventionItem = NSMenuItem()
+    private var sleepPreventionItems: [SleepPreventionDuration: NSMenuItem] = [:]
     private var inputStatusMenuItem = NSMenuItem()
     private var inputSharingItem = NSMenuItem()
     private var controlDeviceMenuItem = NSMenuItem(title: AppText.text("menu.controlDevice"), action: nil, keyEquivalent: "")
@@ -200,6 +204,38 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenu()
+        sleepPreventionController.onExpired = { [weak self] in
+            guard let self else { return }
+            self.config.sleepPreventionDuration = .disabled
+            self.config.sleepPreventionUntil = nil
+            self.config.save()
+            self.updateMenu()
+        }
+        sleepPreventionController.onFailure = { [weak self] error in
+            self?.presentSleepPreventionError(error)
+        }
+        sleepPreventionController.onStateChanged = { [weak self] in
+            self?.updateMenu()
+        }
+        do {
+            try sleepPreventionController.setLowBatteryGuardEnabled(
+                config.disableSleepPreventionBelow20PercentOnBattery
+            )
+            let expired = try sleepPreventionController.restore(
+                selection: config.sleepPreventionDuration,
+                expiresAt: config.sleepPreventionUntil
+            )
+            if expired {
+                config.sleepPreventionDuration = .disabled
+                config.sleepPreventionUntil = nil
+                config.save()
+            }
+        } catch SleepPreventionError.invalidTimedExpiration {
+            fatalError("Failed to restore system sleep prevention: saved timed setting has no valid expiration")
+        } catch {
+            presentSleepPreventionError(error)
+        }
+        updateMenu()
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
             selector: #selector(workspaceApplicationDidActivate),
@@ -265,6 +301,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         transport?.stop()
         presenceTimer?.invalidate()
         cursorReportTimer?.invalidate()
+        do {
+            try sleepPreventionController.stopForTermination()
+        } catch {
+            NSLog("Failed to release system sleep prevention during termination: \(error.localizedDescription)")
+        }
     }
 
     /// Periodically re-broadcasts our own hello (so peers keep our `lastSeen` fresh even when we
@@ -412,12 +453,34 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(configureItem)
 
         let moreFeaturesMenu = NSMenu(title: AppText.text("menu.moreFeatures"))
+        moreFeaturesMenu.autoenablesItems = false
         let moreFeaturesItem = NSMenuItem(title: AppText.text("menu.moreFeatures"), action: nil, keyEquivalent: "")
         moreFeaturesItem.submenu = moreFeaturesMenu
 
         let portForwardItem = NSMenuItem(title: AppText.text("menu.portForward"), action: #selector(showPortForward), keyEquivalent: "")
         portForwardItem.target = self
         moreFeaturesMenu.addItem(portForwardItem)
+
+        let sleepPreventionMenu = NSMenu(title: AppText.text("menu.preventSystemSleep"))
+        sleepPreventionMenu.autoenablesItems = false
+        sleepPreventionItem = NSMenuItem(title: AppText.text("menu.preventSystemSleep"), action: nil, keyEquivalent: "")
+        sleepPreventionItem.submenu = sleepPreventionMenu
+        for duration in SleepPreventionDuration.allCases {
+            let item = NSMenuItem(title: AppText.text(duration.titleKey), action: #selector(setSleepPrevention), keyEquivalent: "")
+            item.target = self
+            item.representedObject = duration.rawValue
+            sleepPreventionMenu.addItem(item)
+            sleepPreventionItems[duration] = item
+        }
+        sleepPreventionMenu.addItem(.separator())
+        lowBatterySleepPreventionItem = NSMenuItem(
+            title: AppText.text("sleep.disableBelow20OnBattery"),
+            action: #selector(toggleLowBatterySleepPreventionGuard),
+            keyEquivalent: ""
+        )
+        lowBatterySleepPreventionItem.target = self
+        sleepPreventionMenu.addItem(lowBatterySleepPreventionItem)
+        moreFeaturesMenu.addItem(sleepPreventionItem)
 
         launchAtLoginItem = NSMenuItem(title: AppText.text("menu.launchAtLogin"), action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLoginItem.target = self
@@ -479,6 +542,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         inputSharingItem.state = config.inputSharingEnabled ? .on : .off
         startStopItem.title = AppText.text(isSyncPaused || transport == nil ? "menu.resumeSync" : "menu.pauseSync")
         launchAtLoginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        for (duration, item) in sleepPreventionItems {
+            item.state = sleepPreventionController.selection == duration ? .on : .off
+        }
+        lowBatterySleepPreventionItem.state = sleepPreventionController.lowBatteryGuardEnabled ? .on : .off
+        switch sleepPreventionController.suspensionReason {
+        case .lowBattery:
+            sleepPreventionItem.title = AppText.text("menu.preventSystemSleepPausedLowBattery")
+        case .batteryStatusUnavailable:
+            sleepPreventionItem.title = AppText.text("menu.preventSystemSleepPausedBatteryUnavailable")
+        case nil:
+            sleepPreventionItem.title = AppText.text("menu.preventSystemSleep")
+        }
         refreshControlDeviceMenu()
         refreshSendFilesMenu()
         refreshHistoryMenu()
@@ -1177,6 +1252,49 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } catch {
             NSLog("Failed to toggle launch at login: \(error.localizedDescription)")
         }
+        updateMenu()
+    }
+
+    @objc private func setSleepPrevention(_ sender: NSMenuItem) {
+        guard
+            let rawValue = sender.representedObject as? String,
+            let duration = SleepPreventionDuration(rawValue: rawValue)
+        else {
+            preconditionFailure("Sleep prevention menu item is missing a valid duration")
+        }
+
+        do {
+            let expiration = try sleepPreventionController.select(duration)
+            config.sleepPreventionDuration = duration
+            config.sleepPreventionUntil = expiration
+            config.save()
+            updateMenu()
+        } catch {
+            presentSleepPreventionError(error)
+        }
+    }
+
+    @objc private func toggleLowBatterySleepPreventionGuard() {
+        let enabled = !sleepPreventionController.lowBatteryGuardEnabled
+        do {
+            try sleepPreventionController.setLowBatteryGuardEnabled(enabled)
+            config.disableSleepPreventionBelow20PercentOnBattery = enabled
+            config.save()
+            updateMenu()
+        } catch {
+            presentSleepPreventionError(error)
+        }
+    }
+
+    private func presentSleepPreventionError(_ error: Error) {
+        NSLog("System sleep prevention failed: \(error.localizedDescription)")
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = AppText.text("sleep.errorTitle")
+        alert.informativeText = AppText.format("sleep.errorMessage", error.localizedDescription)
+        alert.addButton(withTitle: "OK")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
         updateMenu()
     }
 

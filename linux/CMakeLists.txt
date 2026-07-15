@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ClipboardSyncLinux VERSION 0.1.22 LANGUAGES CXX)
+project(ClipboardSyncLinux VERSION 0.1.23 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,6 +37,8 @@ add_executable(clipboard-sync
     src/PortForwardDialog.h
     src/ScreenLayoutDialog.cpp
     src/ScreenLayoutDialog.h
+    src/SleepPreventionController.cpp
+    src/SleepPreventionController.h
     src/SyncTransport.cpp
     src/SyncTransport.h
     src/UpdateController.cpp
@@ -134,3 +136,14 @@ target_link_libraries(clipboard-service-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Wi
 target_include_directories(clipboard-service-tests PRIVATE src)
 add_test(NAME clipboard-service-tests COMMAND clipboard-service-tests)
 set_tests_properties(clipboard-service-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(sleep-prevention-tests
+    tests/SleepPreventionTests.cpp
+    src/AppConfig.cpp
+    src/AppConfig.h
+    src/SleepPreventionController.cpp
+    src/SleepPreventionController.h
+)
+target_link_libraries(sleep-prevention-tests PRIVATE Qt6::Core Qt6::DBus)
+target_include_directories(sleep-prevention-tests PRIVATE src)
+add_test(NAME sleep-prevention-tests COMMAND sleep-prevention-tests)

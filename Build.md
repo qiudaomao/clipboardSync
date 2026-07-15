@@ -59,6 +59,7 @@ Text and image clipboard changes sync automatically. File clipboard contents are
 The `History` submenu keeps the latest 10 clipboard items and can restore/resend an item.
 Set the same sync password on every device before starting. Clipboard payloads are encrypted with AES-GCM over the existing WebSocket connection; unchecking `Encrypt transport` in Settings keeps HMAC password authentication but skips payload encryption to save CPU on trusted networks.
 Input Sharing is off by default. Enable it from Settings or the menu, choose `Server -> Client` or `Client -> Server`, and arrange each machine's screen in the `Screen Layout...` menu window (drag rects to match how they physically sit relative to each other). macOS needs Accessibility/Input Monitoring permission before keyboard and mouse sharing can run.
+`More Features -> Prevent System Sleep` can keep the Mac awake forever or for 1, 2, 4, 6, or 8 hours. Its independent low-battery checkbox pauses the IOKit assertion only while the Mac is on battery power below 20%, and resumes on AC power or battery recovery without extending a timed deadline. Timed choices retain their original deadline if the app is relaunched.
 
 The Swift Package in `mac/Package.swift` is kept as a lightweight compiler check, but the Xcode project is the native app bundle build.
 
@@ -86,6 +87,7 @@ Text and image clipboard changes sync automatically. File clipboard contents are
 The `History` submenu keeps the latest 10 clipboard items and can restore/resend an item.
 Set the same sync password on every device before starting. Clipboard payloads are encrypted with AES-GCM over the existing WebSocket connection; unchecking `Encrypt transport` in Settings keeps HMAC password authentication but skips payload encryption to save CPU on trusted networks.
 Input Sharing is off by default. Enable it from Configure or the tray menu, choose `Server -> Client` or `Client -> Server`, and arrange each machine's screen in the `Screen Layout...` tray menu window (drag rects to match how they physically sit relative to each other).
+`More Features -> Prevent System Sleep` can keep Windows awake forever or for 1, 2, 4, 6, or 8 hours. Its independent low-battery checkbox pauses the Windows execution-state request only while the PC is on battery power below 20%, and resumes on AC power or battery recovery without extending a timed deadline. Timed choices retain their original deadline if the app is relaunched.
 
 ### Auto-update (NetSparkle)
 

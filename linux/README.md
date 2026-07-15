@@ -4,7 +4,12 @@ The Linux client is a Qt 6 application using the same encrypted WebSocket
 protocol as the macOS and Windows clients. The implementation supports Server
 and Child Device modes, automatic text and PNG clipboard sync, explicit chunked
 clipboard-file transfer, TCP port forwarding, and — on X11 sessions — keyboard
-and mouse input sharing with the shared screen layout.
+and mouse input sharing with the shared screen layout. `More Features -> Prevent
+System Sleep` can inhibit suspend forever or for 1, 2, 4, 6, or 8 hours through
+the desktop Inhibit portal, including inside the Flatpak sandbox. Its independent
+low-battery checkbox reads UPower and pauses that inhibitor only while the system
+is on battery power below 20%; AC power or battery recovery resumes the original
+selection without extending a timed deadline.
 
 ## Build
 
@@ -65,6 +70,8 @@ flatpak build-bundle <ostree-repo> clipboardSyncLinux-x86_64.flatpak \
 Users install the downloaded bundle with
 `flatpak install clipboardSyncLinux.flatpak` (the KDE Platform 6.9 runtime is
 pulled from Flathub automatically when a Flathub remote is configured).
+The manifest grants read access to `org.freedesktop.UPower` on the system bus so
+the optional low-battery sleep-prevention guard also works inside the sandbox.
 
 ## Input sharing
 

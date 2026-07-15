@@ -99,6 +99,9 @@ internal sealed class AppConfig
     public bool ReverseMouseVerticalScroll { get; set; }
     public KeyboardModifierMap KeyboardModifierMap { get; set; } = new();
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
+    public SleepPreventionDuration SleepPreventionDuration { get; set; }
+    public DateTimeOffset? SleepPreventionUntil { get; set; }
+    public bool DisableSleepPreventionBelow20PercentOnBattery { get; set; }
 
     public void Normalize()
     {
@@ -113,6 +116,18 @@ internal sealed class AppConfig
         if (string.IsNullOrWhiteSpace(DeviceId))
         {
             DeviceId = Guid.NewGuid().ToString("N");
+        }
+        if (!Enum.IsDefined(SleepPreventionDuration))
+        {
+            throw new InvalidDataException($"Unknown sleep-prevention duration: {(int)SleepPreventionDuration}");
+        }
+        if (!SleepPreventionDuration.IsTimed())
+        {
+            SleepPreventionUntil = null;
+        }
+        else if (SleepPreventionUntil is null)
+        {
+            throw new InvalidDataException("A timed sleep-prevention setting must include an expiration.");
         }
     }
 
@@ -130,7 +145,10 @@ internal sealed class AppConfig
             ControlDeviceId = ControlDeviceId,
             ReverseMouseVerticalScroll = ReverseMouseVerticalScroll,
             KeyboardModifierMap = modifierMap.Clone(),
-            DeviceId = DeviceId
+            DeviceId = DeviceId,
+            SleepPreventionDuration = SleepPreventionDuration,
+            SleepPreventionUntil = SleepPreventionUntil,
+            DisableSleepPreventionBelow20PercentOnBattery = DisableSleepPreventionBelow20PercentOnBattery
         };
     }
 }

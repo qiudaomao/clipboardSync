@@ -33,6 +33,10 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly Dictionary<string, InputDeviceMenuDevice> inputDevices = [];
     private readonly ToolStripMenuItem startStopItem;
     private readonly ToolStripMenuItem launchAtLoginItem;
+    private readonly ToolStripMenuItem sleepPreventionItem;
+    private readonly ToolStripMenuItem lowBatterySleepPreventionItem;
+    private readonly Dictionary<SleepPreventionDuration, ToolStripMenuItem> sleepPreventionItems = [];
+    private readonly SleepPreventionController sleepPreventionController;
     private readonly ToolStripMenuItem sendFilesItem;
     private readonly FileTransferCoordinator fileTransferCoordinator = new();
     private readonly ClipboardMonitor clipboardMonitor;
@@ -108,6 +112,7 @@ internal sealed class TrayAppContext : ApplicationContext
     public TrayAppContext()
     {
         uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+        sleepPreventionController = new SleepPreventionController(uiContext);
         initialSetupPending = !ConfigStore.HasSavedConfiguration;
         config = ConfigStore.Load();
         RepairLaunchAtLoginPath();
@@ -120,6 +125,11 @@ internal sealed class TrayAppContext : ApplicationContext
         controlDeviceItem = new ToolStripMenuItem(AppText.Text("menu.controlDevice"));
         startStopItem = new ToolStripMenuItem(AppText.Text("menu.resumeSync"), null, (_, _) => ToggleTransport());
         launchAtLoginItem = new ToolStripMenuItem(AppText.Text("menu.launchAtLogin"), null, (_, _) => ToggleLaunchAtLogin());
+        sleepPreventionItem = new ToolStripMenuItem(AppText.Text("menu.preventSystemSleep"));
+        lowBatterySleepPreventionItem = new ToolStripMenuItem(
+            AppText.Text("sleep.disableBelow20OnBattery"),
+            null,
+            (_, _) => ToggleLowBatterySleepPreventionGuard());
         sendFilesItem = new ToolStripMenuItem(AppText.Text("menu.sendFiles"));
         trayIcon = LoadTrayIcon();
         inputCoordinator = new InputSharingCoordinator(config.DeviceId, screenLayoutStore);
@@ -187,6 +197,37 @@ internal sealed class TrayAppContext : ApplicationContext
             PruneStaleDevices();
         };
 
+        sleepPreventionController.Expired += () =>
+        {
+            config.SleepPreventionDuration = SleepPreventionDuration.Disabled;
+            config.SleepPreventionUntil = null;
+            ConfigStore.Save(config);
+            UpdateMenu();
+        };
+        sleepPreventionController.Failure += ShowSleepPreventionError;
+        sleepPreventionController.StateChanged += UpdateMenu;
+        bool savedSleepPreventionExpired;
+        try
+        {
+            sleepPreventionController.SetLowBatteryGuardEnabled(
+                config.DisableSleepPreventionBelow20PercentOnBattery);
+            savedSleepPreventionExpired = sleepPreventionController.Restore(
+                config.SleepPreventionDuration,
+                config.SleepPreventionUntil);
+        }
+        catch (Exception ex)
+        {
+            ShowSleepPreventionError(ex);
+            savedSleepPreventionExpired = false;
+        }
+        if (savedSleepPreventionExpired)
+        {
+            config.SleepPreventionDuration = SleepPreventionDuration.Disabled;
+            config.SleepPreventionUntil = null;
+            ConfigStore.Save(config);
+        }
+        UpdateMenu();
+
         if (BetaLicense.IsExpired)
         {
             status = AppText.Text("status.betaExpired");
@@ -238,6 +279,7 @@ internal sealed class TrayAppContext : ApplicationContext
             trayMenu.Dispose();
             trayIcon.Dispose();
             screenLayoutForm?.Dispose();
+            sleepPreventionController.Dispose();
         }
 
         base.Dispose(disposing);
@@ -373,6 +415,19 @@ internal sealed class TrayAppContext : ApplicationContext
 
         var moreFeaturesItem = new ToolStripMenuItem(AppText.Text("menu.moreFeatures"));
         moreFeaturesItem.DropDownItems.Add(new ToolStripMenuItem(AppText.Text("menu.portForward"), null, (_, _) => ShowPortForward()));
+        foreach (var duration in Enum.GetValues<SleepPreventionDuration>())
+        {
+            var durationItem = new ToolStripMenuItem(AppText.Text(duration.TitleKey()))
+            {
+                Tag = duration
+            };
+            durationItem.Click += (_, _) => SetSleepPrevention(duration);
+            sleepPreventionItem.DropDownItems.Add(durationItem);
+            sleepPreventionItems[duration] = durationItem;
+        }
+        sleepPreventionItem.DropDownItems.Add(new ToolStripSeparator());
+        sleepPreventionItem.DropDownItems.Add(lowBatterySleepPreventionItem);
+        moreFeaturesItem.DropDownItems.Add(sleepPreventionItem);
         moreFeaturesItem.DropDownItems.Add(launchAtLoginItem);
         menu.Items.Add(moreFeaturesItem);
         menu.Items.Add(checkForUpdatesItem);
@@ -453,6 +508,18 @@ internal sealed class TrayAppContext : ApplicationContext
         inputSharingItem.Checked = config.InputSharingEnabled;
         startStopItem.Text = AppText.Text(isSyncPaused || transport is null ? "menu.resumeSync" : "menu.pauseSync");
         launchAtLoginItem.Checked = IsLaunchAtLoginEnabled();
+        foreach (var (duration, item) in sleepPreventionItems)
+        {
+            item.Checked = sleepPreventionController.Selection == duration;
+        }
+        lowBatterySleepPreventionItem.Checked = sleepPreventionController.LowBatteryGuardEnabled;
+        sleepPreventionItem.Text = sleepPreventionController.SuspensionReason switch
+        {
+            SleepPreventionSuspensionReason.LowBattery => AppText.Text("menu.preventSystemSleepPausedLowBattery"),
+            SleepPreventionSuspensionReason.BatteryStatusUnavailable => AppText.Text("menu.preventSystemSleepPausedBatteryUnavailable"),
+            null => AppText.Text("menu.preventSystemSleep"),
+            _ => throw new InvalidOperationException("Unknown sleep-prevention suspension reason.")
+        };
         RefreshControlDeviceMenu();
         RefreshSendFilesMenu();
         RefreshHistoryMenu();
@@ -466,6 +533,52 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
         RestartTransport();
+    }
+
+    private void SetSleepPrevention(SleepPreventionDuration duration)
+    {
+        DateTimeOffset? expiration;
+        try
+        {
+            expiration = sleepPreventionController.Select(duration);
+        }
+        catch (Exception ex)
+        {
+            ShowSleepPreventionError(ex);
+            return;
+        }
+        config.SleepPreventionDuration = duration;
+        config.SleepPreventionUntil = expiration;
+        ConfigStore.Save(config);
+        UpdateMenu();
+    }
+
+    private void ToggleLowBatterySleepPreventionGuard()
+    {
+        var enabled = !sleepPreventionController.LowBatteryGuardEnabled;
+        try
+        {
+            sleepPreventionController.SetLowBatteryGuardEnabled(enabled);
+        }
+        catch (Exception ex)
+        {
+            ShowSleepPreventionError(ex);
+            return;
+        }
+        config.DisableSleepPreventionBelow20PercentOnBattery = enabled;
+        ConfigStore.Save(config);
+        UpdateMenu();
+    }
+
+    private void ShowSleepPreventionError(Exception error)
+    {
+        System.Diagnostics.Trace.WriteLine($"System sleep prevention failed: {error}");
+        MessageBox.Show(
+            AppText.Format("sleep.errorMessage", error.Message),
+            AppText.Text("sleep.errorTitle"),
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
+        UpdateMenu();
     }
 
     /// One entry per online peer: files go to exactly the device the user picks, never to every

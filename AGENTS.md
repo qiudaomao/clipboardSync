@@ -15,7 +15,7 @@
 - User-facing work modes are **Server** and **Child Device**, with Server shown first. Mode is selected only in Settings and is the single source of truth.
 - First launch must open connection setup. Missing configuration and disconnected states must expose an action; they must not exist only as passive status text.
 - Do not expose a general Restart action. The main menu may pause/resume sync; recovery-specific reconnect remains attached to connection status.
-- **More Features** contains Port Forward and Launch at Login.
+- **More Features** contains Port Forward, Prevent System Sleep, and Launch at Login. Prevent System Sleep offers Do not disable, Forever, 1 hour, 2 hour, 4 hour, 6 hour, and 8 hour; timed choices retain an absolute deadline across relaunches. Its independent low-battery option pauses the native sleep inhibitor only while the machine is on battery power below 20%, then resumes the original selection on AC power or battery recovery without extending a timed deadline.
 - File sending stays clipboard-based. Do not add a separate file picker without an explicit product decision.
 - Received-file notifications must explain that the files are on the clipboard and can be pasted at the desired location.
 - Port-forward edits are transactional: all row edits, including enable/disable, apply together on Save. Remote updates must not silently discard a local draft.

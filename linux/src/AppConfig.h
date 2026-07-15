@@ -2,8 +2,25 @@
 
 #include "InputModels.h"
 
+#include <QDateTime>
 #include <QString>
 #include <QJsonArray>
+
+#include <optional>
+
+enum class SleepPreventionDuration {
+    Disabled,
+    Forever,
+    OneHour,
+    TwoHours,
+    FourHours,
+    SixHours,
+    EightHours
+};
+
+QString sleepPreventionDurationStorageValue(SleepPreventionDuration duration);
+SleepPreventionDuration sleepPreventionDurationFromStorageValue(const QString &value);
+std::optional<int> sleepPreventionDurationHours(SleepPreventionDuration duration);
 
 struct AppConfig {
     enum class Mode { ChildDevice, Server };
@@ -22,6 +39,9 @@ struct AppConfig {
     QString controlDeviceId; // empty selects this device
     bool reverseMouseVerticalScroll = false;
     KeyboardModifierMap keyboardModifierMap;
+    SleepPreventionDuration sleepPreventionDuration = SleepPreventionDuration::Disabled;
+    QDateTime sleepPreventionUntil;
+    bool disableSleepPreventionBelow20PercentOnBattery = false;
 
     static AppConfig load();
     void save() const;

@@ -7,11 +7,13 @@
 #include "PortForwardCoordinator.h"
 #include "PortForwardDialog.h"
 #include "ScreenLayoutDialog.h"
+#include "SleepPreventionController.h"
 #include "SyncTransport.h"
 #include "UpdateController.h"
 #include "X11InputBackend.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -51,6 +53,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace {
 constexpr int CursorReportIntervalMs = 50;
@@ -64,7 +67,8 @@ const QStringList RealtimeInputKinds{QStringLiteral("capture"), QStringLiteral("
 AppController::AppController(QObject *parent)
     : QObject(parent), config_(AppConfig::load()), capabilities_(LinuxCapabilities::detect()),
       clipboard_(new ClipboardService(this)), files_(new FileTransferCoordinator(this)),
-      portForward_(new PortForwardCoordinator(this)), transport_(new SyncTransport(this)), updates_(new UpdateController(this))
+      portForward_(new PortForwardCoordinator(this)), transport_(new SyncTransport(this)),
+      updates_(new UpdateController(this)), sleepPrevention_(new SleepPreventionController(this))
 {
     inputBackend_ = new X11InputBackend(this);
     input_ = new InputSharingCoordinator(inputBackend_, &layoutStore_, this);
@@ -74,6 +78,39 @@ void AppController::start()
 {
     qInfo().noquote() << "Linux capabilities:" << capabilities_.diagnosticSummary();
     buildUi();
+    connect(sleepPrevention_, &SleepPreventionController::expired, this, [this] {
+        config_.sleepPreventionDuration = SleepPreventionDuration::Disabled;
+        config_.sleepPreventionUntil = {};
+        config_.save();
+        updateSleepPreventionMenu();
+    });
+    connect(sleepPrevention_, &SleepPreventionController::errorOccurred,
+        this, &AppController::reportSleepPreventionError);
+    connect(sleepPrevention_, &SleepPreventionController::inhibitionLost,
+        this, [this](const QString &details) {
+            config_.sleepPreventionDuration = SleepPreventionDuration::Disabled;
+            config_.sleepPreventionUntil = {};
+            config_.save();
+            updateSleepPreventionMenu();
+            reportSleepPreventionError(details);
+        });
+    connect(sleepPrevention_, &SleepPreventionController::stateChanged,
+        this, &AppController::updateSleepPreventionMenu);
+    bool savedSleepPreventionExpired = false;
+    try {
+        sleepPrevention_->setLowBatteryGuardEnabled(
+            config_.disableSleepPreventionBelow20PercentOnBattery);
+        savedSleepPreventionExpired = sleepPrevention_->restore(
+            config_.sleepPreventionDuration, config_.sleepPreventionUntil);
+    } catch (const std::exception &error) {
+        reportSleepPreventionError(QString::fromUtf8(error.what()));
+    }
+    if (savedSleepPreventionExpired) {
+        config_.sleepPreventionDuration = SleepPreventionDuration::Disabled;
+        config_.sleepPreventionUntil = {};
+        config_.save();
+    }
+    updateSleepPreventionMenu();
     connect(clipboard_, &ClipboardService::localMessageReady, this, &AppController::publishClipboard);
     connect(clipboard_, &ClipboardService::errorOccurred, this, &AppController::reportError);
     connect(clipboard_, &ClipboardService::filesApplied, this, [this](int count) {
@@ -206,6 +243,25 @@ void AppController::buildUi()
     });
     auto *more = menu->addMenu(QStringLiteral("More Features"));
     more->addAction(QStringLiteral("Port Forward"), this, &AppController::showPortForward);
+    sleepPreventionMenu_ = more->addMenu(QStringLiteral("Prevent System Sleep"));
+    auto *sleepPreventionGroup = new QActionGroup(sleepPreventionMenu_);
+    sleepPreventionGroup->setExclusive(true);
+    for (const SleepPreventionChoice &choice : SleepPreventionController::choices()) {
+        QAction *action = sleepPreventionMenu_->addAction(choice.title);
+        action->setCheckable(true);
+        action->setProperty("sleepPreventionDuration", static_cast<int>(choice.duration));
+        sleepPreventionGroup->addAction(action);
+        sleepPreventionActions_.append(action);
+        connect(action, &QAction::triggered, this, [this, duration = choice.duration] {
+            setSleepPrevention(duration);
+        });
+    }
+    sleepPreventionMenu_->addSeparator();
+    lowBatterySleepPreventionAction_ = sleepPreventionMenu_->addAction(
+        QStringLiteral("Disable below 20% battery (on battery power)"));
+    lowBatterySleepPreventionAction_->setCheckable(true);
+    connect(lowBatterySleepPreventionAction_, &QAction::triggered,
+        this, &AppController::setLowBatterySleepPreventionGuard);
     auto *launchAtLogin = more->addAction(QStringLiteral("Launch at Login"));
     launchAtLogin->setCheckable(true);
     launchAtLogin->setChecked(launchAtLoginEnabled());
@@ -244,6 +300,68 @@ void AppController::buildUi()
         tray_->show();
     else
         window_->show();
+}
+
+void AppController::setSleepPrevention(SleepPreventionDuration duration)
+{
+    QDateTime expiration;
+    try {
+        expiration = sleepPrevention_->setDuration(duration);
+    } catch (const std::exception &error) {
+        reportSleepPreventionError(QString::fromUtf8(error.what()));
+        return;
+    }
+    config_.sleepPreventionDuration = duration;
+    config_.sleepPreventionUntil = expiration;
+    config_.save();
+    updateSleepPreventionMenu();
+}
+
+void AppController::setLowBatterySleepPreventionGuard(bool enabled)
+{
+    try {
+        sleepPrevention_->setLowBatteryGuardEnabled(enabled);
+    } catch (const std::exception &error) {
+        reportSleepPreventionError(QString::fromUtf8(error.what()));
+        return;
+    }
+    config_.disableSleepPreventionBelow20PercentOnBattery = enabled;
+    config_.save();
+    updateSleepPreventionMenu();
+}
+
+void AppController::updateSleepPreventionMenu()
+{
+    for (QAction *action : std::as_const(sleepPreventionActions_)) {
+        const auto duration = static_cast<SleepPreventionDuration>(
+            action->property("sleepPreventionDuration").toInt());
+        action->setChecked(sleepPrevention_->selection() == duration);
+    }
+    if (lowBatterySleepPreventionAction_)
+        lowBatterySleepPreventionAction_->setChecked(sleepPrevention_->lowBatteryGuardEnabled());
+    if (sleepPreventionMenu_) {
+        switch (sleepPrevention_->suspensionReason()) {
+        case SleepPreventionSuspensionReason::None:
+            sleepPreventionMenu_->setTitle(QStringLiteral("Prevent System Sleep"));
+            break;
+        case SleepPreventionSuspensionReason::LowBattery:
+            sleepPreventionMenu_->setTitle(
+                QStringLiteral("Prevent System Sleep (paused: battery below 20%)"));
+            break;
+        case SleepPreventionSuspensionReason::BatteryStatusUnavailable:
+            sleepPreventionMenu_->setTitle(
+                QStringLiteral("Prevent System Sleep (paused: battery status unavailable)"));
+            break;
+        }
+    }
+}
+
+void AppController::reportSleepPreventionError(const QString &details)
+{
+    qCritical().noquote() << "System sleep prevention failed:" << details;
+    QMessageBox::critical(window_, QStringLiteral("Could Not Update Sleep Prevention"),
+        QStringLiteral("Clipboard Sync could not update system sleep prevention:\n\n%1").arg(details));
+    updateSleepPreventionMenu();
 }
 
 void AppController::showSettings()

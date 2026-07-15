@@ -12,6 +12,56 @@ enum SyncMode: String, Codable {
     case server
 }
 
+enum SleepPreventionDuration: String, Codable, CaseIterable {
+    case disabled
+    case forever
+    case oneHour
+    case twoHours
+    case fourHours
+    case sixHours
+    case eightHours
+
+    var hours: Int? {
+        switch self {
+        case .disabled, .forever:
+            return nil
+        case .oneHour:
+            return 1
+        case .twoHours:
+            return 2
+        case .fourHours:
+            return 4
+        case .sixHours:
+            return 6
+        case .eightHours:
+            return 8
+        }
+    }
+
+    var isTimed: Bool {
+        hours != nil
+    }
+
+    var titleKey: String {
+        switch self {
+        case .disabled:
+            return "sleep.doNotDisable"
+        case .forever:
+            return "sleep.forever"
+        case .oneHour:
+            return "sleep.oneHour"
+        case .twoHours:
+            return "sleep.twoHours"
+        case .fourHours:
+            return "sleep.fourHours"
+        case .sixHours:
+            return "sleep.sixHours"
+        case .eightHours:
+            return "sleep.eightHours"
+        }
+    }
+}
+
 enum ScreenEdge: String, Codable, CaseIterable {
     case left
     case right
@@ -110,6 +160,19 @@ enum AppText {
             "menu.completeSetup": "Complete Setup...",
             "menu.reconnect": "Reconnect",
             "menu.moreFeatures": "More Features",
+            "menu.preventSystemSleep": "Prevent System Sleep",
+            "menu.preventSystemSleepPausedLowBattery": "Prevent System Sleep (paused: battery below 20%)",
+            "menu.preventSystemSleepPausedBatteryUnavailable": "Prevent System Sleep (paused: battery status unavailable)",
+            "sleep.doNotDisable": "Do not disable",
+            "sleep.forever": "Forever",
+            "sleep.oneHour": "1 hour",
+            "sleep.twoHours": "2 hour",
+            "sleep.fourHours": "4 hour",
+            "sleep.sixHours": "6 hour",
+            "sleep.eightHours": "8 hour",
+            "sleep.disableBelow20OnBattery": "Disable below 20% battery (on battery power)",
+            "sleep.errorTitle": "Could Not Update Sleep Prevention",
+            "sleep.errorMessage": "Clipboard Sync could not update system sleep prevention:\n\n%@",
             "forward.title": "Port Forward",
             "forward.subtitle": "Forward a TCP port on one device to a port on another. Connections to In are tunneled over the encrypted sync connection and delivered to Out.",
             "forward.in": "In (listen)",
@@ -283,6 +346,19 @@ enum AppText {
             "menu.completeSetup": "完成设置...",
             "menu.reconnect": "重新连接",
             "menu.moreFeatures": "更多功能",
+            "menu.preventSystemSleep": "防止系统睡眠",
+            "menu.preventSystemSleepPausedLowBattery": "防止系统睡眠（已暂停：电池低于 20%）",
+            "menu.preventSystemSleepPausedBatteryUnavailable": "防止系统睡眠（已暂停：无法获取电池状态）",
+            "sleep.doNotDisable": "不禁用系统睡眠",
+            "sleep.forever": "永久",
+            "sleep.oneHour": "1 小时",
+            "sleep.twoHours": "2 小时",
+            "sleep.fourHours": "4 小时",
+            "sleep.sixHours": "6 小时",
+            "sleep.eightHours": "8 小时",
+            "sleep.disableBelow20OnBattery": "电池供电且电量低于 20% 时禁用",
+            "sleep.errorTitle": "无法更新睡眠防止设置",
+            "sleep.errorMessage": "Clipboard Sync 无法更新系统睡眠防止设置：\n\n%@",
             "forward.title": "端口转发",
             "forward.subtitle": "将一台设备的 TCP 端口转发到另一台设备的端口。连接到“入口”的流量会经加密同步连接隧道送达“出口”。",
             "forward.in": "入口（监听）",
@@ -456,6 +532,19 @@ enum AppText {
             "menu.completeSetup": "설정 완료...",
             "menu.reconnect": "다시 연결",
             "menu.moreFeatures": "더 많은 기능",
+            "menu.preventSystemSleep": "시스템 잠자기 방지",
+            "menu.preventSystemSleepPausedLowBattery": "시스템 잠자기 방지 (일시 중지: 배터리 20% 미만)",
+            "menu.preventSystemSleepPausedBatteryUnavailable": "시스템 잠자기 방지 (일시 중지: 배터리 상태 확인 불가)",
+            "sleep.doNotDisable": "잠자기를 비활성화하지 않음",
+            "sleep.forever": "계속",
+            "sleep.oneHour": "1시간",
+            "sleep.twoHours": "2시간",
+            "sleep.fourHours": "4시간",
+            "sleep.sixHours": "6시간",
+            "sleep.eightHours": "8시간",
+            "sleep.disableBelow20OnBattery": "배터리 사용 중 20% 미만이면 비활성화",
+            "sleep.errorTitle": "잠자기 방지 설정을 업데이트할 수 없음",
+            "sleep.errorMessage": "Clipboard Sync에서 시스템 잠자기 방지 설정을 업데이트하지 못했습니다.\n\n%@",
             "forward.title": "포트 포워딩",
             "forward.subtitle": "한 기기의 TCP 포트를 다른 기기의 포트로 전달합니다. In으로 들어온 연결은 암호화된 동기화 연결을 통해 Out으로 전달됩니다.",
             "forward.in": "In (수신)",
@@ -629,6 +718,19 @@ enum AppText {
             "menu.completeSetup": "設定を完了...",
             "menu.reconnect": "再接続",
             "menu.moreFeatures": "その他の機能",
+            "menu.preventSystemSleep": "システムのスリープを防止",
+            "menu.preventSystemSleepPausedLowBattery": "システムのスリープを防止（一時停止中：バッテリー 20% 未満）",
+            "menu.preventSystemSleepPausedBatteryUnavailable": "システムのスリープを防止（一時停止中：バッテリー状態を取得できません）",
+            "sleep.doNotDisable": "スリープを無効にしない",
+            "sleep.forever": "無期限",
+            "sleep.oneHour": "1 時間",
+            "sleep.twoHours": "2 時間",
+            "sleep.fourHours": "4 時間",
+            "sleep.sixHours": "6 時間",
+            "sleep.eightHours": "8 時間",
+            "sleep.disableBelow20OnBattery": "バッテリー使用時に 20% 未満なら無効化",
+            "sleep.errorTitle": "スリープ防止設定を更新できません",
+            "sleep.errorMessage": "Clipboard Sync はシステムのスリープ防止設定を更新できませんでした。\n\n%@",
             "forward.title": "ポート転送",
             "forward.subtitle": "あるデバイスの TCP ポートを別のデバイスのポートへ転送します。In への接続は暗号化された同期接続を経由して Out に届きます。",
             "forward.in": "In（待ち受け）",
@@ -820,6 +922,9 @@ struct AppConfig: Codable {
     var controlDeviceId: String?
     var reverseMouseVerticalScroll: Bool
     var keyboardModifierMap: KeyboardModifierMap
+    var sleepPreventionDuration: SleepPreventionDuration
+    var sleepPreventionUntil: Date?
+    var disableSleepPreventionBelow20PercentOnBattery: Bool
 
     static let defaults = AppConfig(
         mode: .client,
@@ -830,7 +935,10 @@ struct AppConfig: Codable {
         inputSharingEnabled: false,
         controlDeviceId: nil,
         reverseMouseVerticalScroll: false,
-        keyboardModifierMap: .identity
+        keyboardModifierMap: .identity,
+        sleepPreventionDuration: .disabled,
+        sleepPreventionUntil: nil,
+        disableSleepPreventionBelow20PercentOnBattery: false
     )
     private static let storageKey = "ClipboardSyncMac.config"
 
@@ -847,7 +955,10 @@ struct AppConfig: Codable {
         inputSharingEnabled: Bool,
         controlDeviceId: String?,
         reverseMouseVerticalScroll: Bool,
-        keyboardModifierMap: KeyboardModifierMap = .identity
+        keyboardModifierMap: KeyboardModifierMap = .identity,
+        sleepPreventionDuration: SleepPreventionDuration,
+        sleepPreventionUntil: Date?,
+        disableSleepPreventionBelow20PercentOnBattery: Bool
     ) {
         self.mode = mode
         self.host = host
@@ -858,6 +969,9 @@ struct AppConfig: Codable {
         self.controlDeviceId = controlDeviceId
         self.reverseMouseVerticalScroll = reverseMouseVerticalScroll
         self.keyboardModifierMap = keyboardModifierMap
+        self.sleepPreventionDuration = sleepPreventionDuration
+        self.sleepPreventionUntil = sleepPreventionUntil
+        self.disableSleepPreventionBelow20PercentOnBattery = disableSleepPreventionBelow20PercentOnBattery
     }
 
     init(from decoder: Decoder) throws {
@@ -871,6 +985,12 @@ struct AppConfig: Codable {
         controlDeviceId = try container.decodeIfPresent(String.self, forKey: .controlDeviceId) ?? Self.defaults.controlDeviceId
         reverseMouseVerticalScroll = try container.decodeIfPresent(Bool.self, forKey: .reverseMouseVerticalScroll) ?? Self.defaults.reverseMouseVerticalScroll
         keyboardModifierMap = try container.decodeIfPresent(KeyboardModifierMap.self, forKey: .keyboardModifierMap) ?? Self.defaults.keyboardModifierMap
+        sleepPreventionDuration = try container.decodeIfPresent(SleepPreventionDuration.self, forKey: .sleepPreventionDuration) ?? Self.defaults.sleepPreventionDuration
+        sleepPreventionUntil = try container.decodeIfPresent(Date.self, forKey: .sleepPreventionUntil)
+        disableSleepPreventionBelow20PercentOnBattery = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .disableSleepPreventionBelow20PercentOnBattery
+        ) ?? Self.defaults.disableSleepPreventionBelow20PercentOnBattery
     }
 
     static func load() -> AppConfig {
@@ -903,7 +1023,10 @@ struct AppConfig: Codable {
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: controlDeviceId?.trimmingCharacters(in: .whitespacesAndNewlines),
             reverseMouseVerticalScroll: reverseMouseVerticalScroll,
-            keyboardModifierMap: keyboardModifierMap
+            keyboardModifierMap: keyboardModifierMap,
+            sleepPreventionDuration: sleepPreventionDuration,
+            sleepPreventionUntil: sleepPreventionDuration.isTimed ? sleepPreventionUntil : nil,
+            disableSleepPreventionBelow20PercentOnBattery: disableSleepPreventionBelow20PercentOnBattery
         )
     }
 }

@@ -418,7 +418,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: currentConfig.controlDeviceId,
             reverseMouseVerticalScroll: reverseMouseVerticalScroll,
-            keyboardModifierMap: keyboardModifierMap
+            keyboardModifierMap: keyboardModifierMap,
+            sleepPreventionDuration: currentConfig.sleepPreventionDuration,
+            sleepPreventionUntil: currentConfig.sleepPreventionUntil,
+            disableSleepPreventionBelow20PercentOnBattery: currentConfig.disableSleepPreventionBelow20PercentOnBattery
         )
         onSave?(nextConfig)
         close()
