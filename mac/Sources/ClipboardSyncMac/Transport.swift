@@ -11,6 +11,16 @@ enum TransportChannels {
     static let inputSubprotocol = "clipboardsync-input"
 }
 
+/// Reads the routing target out of a binary frame without the password, so a relay can forward it
+/// blind. The first wire byte picks the codec — `TunnelFrame` (port-forward data) or `BulkFrame`
+/// (clipboard image / file chunk). Returns "" for a broadcast and nil for a frame neither codec
+/// recognises (which a relay treats the same as a broadcast).
+enum BinaryFrameRouting {
+    static func target(of frame: Data) -> String? {
+        BulkFrame.isBulkFrame(frame) ? BulkFrame.peekTarget(frame) : TunnelFrame.peekTarget(frame)
+    }
+}
+
 protocol Transport: AnyObject {
     var onStatus: ((String) -> Void)? { get set }
     /// Delivers a received payload; the flag is true when it arrived on the dedicated input

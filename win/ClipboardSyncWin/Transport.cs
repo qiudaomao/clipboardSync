@@ -25,6 +25,16 @@ internal static class TransportChannels
     public const string InputSubprotocol = "clipboardsync-input";
 }
 
+/// Reads the routing target out of a binary frame without the password, so a relay can forward it
+/// blind. The first wire byte picks the codec - TunnelFrame (port-forward data) or BulkFrame
+/// (clipboard image / file chunk). Returns "" for a broadcast and null for a frame neither codec
+/// recognises (which a relay treats the same as a broadcast).
+internal static class BinaryFrameRouting
+{
+    public static string? Target(byte[] frame)
+        => BulkFrame.IsBulkFrame(frame) ? BulkFrame.PeekTarget(frame) : TunnelFrame.PeekTarget(frame);
+}
+
 internal interface ISyncTransport : IDisposable
 {
     event Action<string>? StatusChanged;
@@ -451,11 +461,12 @@ internal sealed class ServerTransport : ISyncTransport
                 };
                 peer.BinaryReceived += async frame =>
                 {
-                    // A binary frame is a port-forward "data" frame; its target sits in the
-                    // plaintext header, so the relay routes it without being able to read the
-                    // payload. Same early-out as the text path: a frame for another device is
-                    // never handed to the local app.
-                    var target = TunnelFrame.PeekTarget(frame);
+                    // A binary frame is a port-forward "data" frame or a large clipboard/file
+                    // payload; its target sits in the plaintext header of either codec, so the
+                    // relay routes it without reading the payload. A clipboard image carries an
+                    // empty target and is broadcast. Same early-out as the text path: a frame
+                    // addressed to another device is never handed to the local app.
+                    var target = BinaryFrameRouting.Target(frame);
                     if (!IsRelayOnly(target))
                     {
                         try

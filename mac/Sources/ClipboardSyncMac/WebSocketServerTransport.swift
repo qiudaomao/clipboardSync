@@ -129,11 +129,12 @@ final class WebSocketServerTransport: Transport {
             guard let self else {
                 return
             }
-            // A binary frame is a port-forward `data` frame; its target sits in the plaintext
-            // header, so the relay routes it without being able to read the payload. Same
-            // early-out as the text path: a frame for another device is never handed to the
-            // local app.
-            let target = TunnelFrame.peekTarget(frame)
+            // A binary frame is a port-forward `data` frame or a large clipboard/file payload; its
+            // target sits in the plaintext header of either codec, so the relay routes it without
+            // reading the payload. A clipboard image carries an empty target and is broadcast. Same
+            // early-out as the text path: a frame addressed to another device is never handed to
+            // the local app.
+            let target = BinaryFrameRouting.target(of: frame)
             if !self.isRelayOnly(target) {
                 self.onBinaryMessage?(frame)
             }

@@ -21,6 +21,8 @@ int main(int argc, char **argv)
     FileTransferCoordinator receiver;
     sender.configure(QStringLiteral("sender-device"));
     receiver.configure(QStringLiteral("receiver-device"));
+    // Control messages (offer/accept/ack/fileDone) travel on messageReady; chunks travel as raw
+    // bytes on chunkReady, which the app ships as a binary BulkFrame. Both must be relayed.
     QObject::connect(&sender, &FileTransferCoordinator::messageReady, &receiver,
         [&receiver](const QJsonObject &message, const QString &) {
             QTimer::singleShot(0, &receiver, [&receiver, message] { receiver.handle(message); });
@@ -28,6 +30,10 @@ int main(int argc, char **argv)
     QObject::connect(&receiver, &FileTransferCoordinator::messageReady, &sender,
         [&sender](const QJsonObject &message, const QString &) {
             QTimer::singleShot(0, &sender, [&sender, message] { sender.handle(message); });
+        });
+    QObject::connect(&sender, &FileTransferCoordinator::chunkReady, &receiver,
+        [&receiver](const QJsonObject &message, const QString &, const QByteArray &data) {
+            QTimer::singleShot(0, &receiver, [&receiver, message, data] { receiver.handleChunk(message, data); });
         });
     QObject::connect(&receiver, &FileTransferCoordinator::filesReceived, &app,
         [&app, &sourceBytes](const QStringList &paths) {

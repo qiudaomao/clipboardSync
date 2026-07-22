@@ -8,6 +8,7 @@
 #include "PortForwardDialog.h"
 #include "ScreenLayoutDialog.h"
 #include "SleepPreventionController.h"
+#include "BulkFrame.h"
 #include "SyncTransport.h"
 #include "TunnelFrame.h"
 #include "UpdateController.h"
@@ -138,6 +139,7 @@ void AppController::start()
     files_->configure(config_.deviceId);
     connect(files_, &FileTransferCoordinator::messageReady, this,
         [this](const QJsonObject &message, const QString &target) { publishEncrypted(message, true, target); });
+    connect(files_, &FileTransferCoordinator::chunkReady, this, &AppController::publishFileChunk);
     connect(files_, &FileTransferCoordinator::filesReceived, clipboard_, &ClipboardService::applyReceivedFiles);
     connect(files_, &FileTransferCoordinator::statusChanged, this, &AppController::updateStatus);
     connect(files_, &FileTransferCoordinator::errorOccurred, this, &AppController::reportError);
@@ -511,7 +513,45 @@ void AppController::publishClipboard(QJsonObject message)
     if (config_.paused || !config_.isComplete())
         return;
     message.insert(QStringLiteral("origin"), config_.deviceId);
+    // An image is the one large clipboard payload, so it ships as a binary BulkFrame with the
+    // pixels as raw bytes instead of base64 inside JSON. Text and the inline-files path stay on the
+    // JSON envelope, where their size makes the binary framing pointless.
+    if (message.value(QStringLiteral("kind")).toString() == QStringLiteral("image")) {
+        publishClipboardImage(message);
+        return;
+    }
     publishEncrypted(message, false);
+}
+
+void AppController::publishClipboardImage(const QJsonObject &message)
+{
+    QJsonObject image = message.value(QStringLiteral("image")).toObject();
+    const QByteArray pixels = QByteArray::fromBase64(
+        image.value(QStringLiteral("dataBase64")).toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+    // The metadata carries the image with an emptied blob; the pixels ride as the frame payload.
+    image.insert(QStringLiteral("dataBase64"), QString());
+    QJsonObject meta = message;
+    meta.insert(QStringLiteral("image"), image);
+    publishBulk(BulkFrame::Kind::ClipboardImage, meta, QString(), pixels);
+}
+
+void AppController::publishFileChunk(const QJsonObject &meta, const QString &target, const QByteArray &data)
+{
+    publishBulk(BulkFrame::Kind::FileChunk, meta, target, data);
+}
+
+void AppController::publishBulk(BulkFrame::Kind kind, const QJsonObject &meta, const QString &target, const QByteArray &payload)
+{
+    if (config_.paused || !config_.isComplete())
+        return;
+    try {
+        const QByteArray metaJson = QJsonDocument(meta).toJson(QJsonDocument::Compact);
+        transport_->sendBinary(
+            BulkFrame::encode(kind, metaJson, config_.deviceId, target, payload, config_.password, config_.encryptTransport),
+            target);
+    } catch (const std::exception &error) {
+        reportError(QStringLiteral("Could not encode outgoing payload: %1").arg(QString::fromUtf8(error.what())));
+    }
 }
 
 void AppController::addHistory(const QJsonObject &message)
@@ -616,12 +656,47 @@ void AppController::publishTunnelData(const QString &connectionId, const QString
 
 void AppController::handleBinaryFrame(const QByteArray &frame)
 {
+    // A binary frame is either a port-forward `data` chunk (TunnelFrame) or a large clipboard/file
+    // payload (BulkFrame); the first wire byte says which.
+    if (BulkFrame::isBulkFrame(frame)) {
+        handleBulkFrame(frame);
+        return;
+    }
     const TunnelFrame::Decoded decoded = TunnelFrame::decode(frame, config_.password);
     // Wrong password, tampering, or a malformed frame: drop it silently, exactly as the envelope
     // path does for a payload it cannot authenticate.
     if (!decoded.valid || decoded.origin == config_.deviceId || decoded.target != config_.deviceId)
         return;
     portForward_->handleData(decoded.connectionId, decoded.payload);
+}
+
+void AppController::handleBulkFrame(const QByteArray &frame)
+{
+    const BulkFrame::Decoded decoded = BulkFrame::decode(frame, config_.password);
+    // A clipboard image is a broadcast (empty target); a file chunk is addressed to us.
+    if (!decoded.valid || decoded.origin == config_.deviceId
+        || (!decoded.target.isEmpty() && decoded.target != config_.deviceId))
+        return;
+
+    const QJsonObject meta = QJsonDocument::fromJson(decoded.meta).object();
+    switch (decoded.kind) {
+    case BulkFrame::Kind::ClipboardImage: {
+        if (!decoded.target.isEmpty())
+            return;
+        // Rebuild the message the existing clipboard path expects: the metadata's image with its
+        // emptied dataBase64 refilled from the raw frame bytes.
+        QJsonObject image = meta.value(QStringLiteral("image")).toObject();
+        image.insert(QStringLiteral("dataBase64"), QString::fromLatin1(decoded.payload.toBase64()));
+        QJsonObject message = meta;
+        message.insert(QStringLiteral("image"), image);
+        if (clipboard_->applyRemote(message))
+            addHistory(message);
+        break;
+    }
+    case BulkFrame::Kind::FileChunk:
+        files_->handleChunk(meta, decoded.payload);
+        break;
+    }
 }
 
 void AppController::announcePresence()

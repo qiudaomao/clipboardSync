@@ -1,5 +1,6 @@
 #include "SyncTransport.h"
 
+#include "BulkFrame.h"
 #include "EnvelopeRouting.h"
 #include "TunnelFrame.h"
 
@@ -190,10 +191,13 @@ void SyncTransport::attachSocket(QWebSocket *socket)
         }
     });
     connect(socket, &QWebSocket::binaryMessageReceived, this, [this, socket](const QByteArray &frame) {
-        // A binary frame is a port-forward `data` frame; its target sits in the plaintext header,
-        // so the relay routes it without being able to read the payload. Same early-out as the
-        // text path: a frame for another device is never handed to the local app.
-        const QString target = TunnelFrame::peekTarget(frame);
+        // A binary frame is a port-forward `data` frame or a large clipboard/file payload; its
+        // target sits in the plaintext header of either codec, so the relay routes it without
+        // reading the payload. A clipboard image carries an empty target and is broadcast. Same
+        // early-out as the text path: a frame addressed to another device is never handed to the
+        // local app.
+        const QString target = BulkFrame::isBulkFrame(frame)
+            ? BulkFrame::peekTarget(frame) : TunnelFrame::peekTarget(frame);
         if (!isRelayOnly(target))
             emit binaryReceived(frame);
         for (auto it = peers_.cbegin(); it != peers_.cend(); ++it) {

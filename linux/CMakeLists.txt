@@ -20,6 +20,8 @@ add_executable(clipboard-sync
     src/AppConfig.h
     src/ClipboardService.cpp
     src/ClipboardService.h
+    src/BulkFrame.cpp
+    src/BulkFrame.h
     src/CryptoBox.cpp
     src/CryptoBox.h
     src/EnvelopeRouting.cpp
@@ -97,6 +99,17 @@ add_executable(tunnel-frame-tests
 target_link_libraries(tunnel-frame-tests PRIVATE Qt6::Core OpenSSL::Crypto)
 target_include_directories(tunnel-frame-tests PRIVATE src)
 add_test(NAME tunnel-frame-tests COMMAND tunnel-frame-tests)
+
+add_executable(bulk-frame-tests
+    tests/BulkFrameTests.cpp
+    src/BulkFrame.cpp
+    src/BulkFrame.h
+    src/CryptoBox.cpp
+    src/CryptoBox.h
+)
+target_link_libraries(bulk-frame-tests PRIVATE Qt6::Core OpenSSL::Crypto)
+target_include_directories(bulk-frame-tests PRIVATE src)
+add_test(NAME bulk-frame-tests COMMAND bulk-frame-tests)
 
 add_executable(file-transfer-tests
     tests/FileTransferTests.cpp

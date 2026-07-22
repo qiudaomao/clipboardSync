@@ -15,10 +15,17 @@ public:
     void configure(const QString &deviceId);
     bool sendFiles(const QStringList &paths, const QString &target, const QString &targetName);
     void handle(const QJsonObject &message);
+    /// Receives a `chunk` decoded from a binary BulkFrame: the metadata message plus the raw bytes,
+    /// which go straight to disk with no base64 decode.
+    void handleChunk(const QJsonObject &message, const QByteArray &data);
     void cancelAll();
 
 signals:
     void messageReady(const QJsonObject &message, const QString &target);
+    /// Emits a `chunk` as its metadata (without the blob) plus the raw bytes, for the caller to
+    /// ship as a binary BulkFrame. Chunks are large and sent back to back, so keeping them off the
+    /// base64+JSON envelope path is the whole point; every other file message stays on messageReady.
+    void chunkReady(const QJsonObject &message, const QString &target, const QByteArray &data);
     void filesReceived(const QStringList &paths);
     void statusChanged(const QString &status);
     void errorOccurred(const QString &details);
@@ -49,7 +56,6 @@ private:
     void handleOffer(const QJsonObject &message);
     void handleAccept(const QJsonObject &message);
     void handleAck(const QJsonObject &message);
-    void handleChunk(const QJsonObject &message);
     void handleFileDone(const QJsonObject &message);
     void pump();
     void failOutgoing(const QString &reason, bool notify = true);

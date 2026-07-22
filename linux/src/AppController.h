@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AppConfig.h"
+#include "BulkFrame.h"
 #include "InputModels.h"
 #include "LinuxCapabilities.h"
 
@@ -50,8 +51,15 @@ private:
     /// Puts one forwarded TCP chunk on the wire as a binary TunnelFrame — no base64, no JSON and
     /// no UTF-16 round trip, unlike the envelope path every other message takes.
     void publishTunnelData(const QString &connectionId, const QString &target, const QByteArray &payload);
-    /// A binary frame is always a port-forward `data` chunk.
+    /// A binary frame is either a port-forward `data` chunk or a large clipboard/file payload.
     void handleBinaryFrame(const QByteArray &frame);
+    void handleBulkFrame(const QByteArray &frame);
+    /// Ships a clipboard image as a broadcast BulkFrame (pixels raw, metadata JSON with an emptied
+    /// blob) instead of a base64 blob wrapped in two JSON layers.
+    void publishClipboardImage(const QJsonObject &message);
+    /// Ships a file-transfer chunk as a targeted BulkFrame.
+    void publishFileChunk(const QJsonObject &meta, const QString &target, const QByteArray &data);
+    void publishBulk(BulkFrame::Kind kind, const QJsonObject &meta, const QString &target, const QByteArray &payload);
     void publishEncrypted(QJsonObject message, bool realtime, const QString &target = {});
     void addHistory(const QJsonObject &message);
     void rebuildHistoryMenu();

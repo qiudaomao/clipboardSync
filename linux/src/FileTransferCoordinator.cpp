@@ -60,7 +60,8 @@ void FileTransferCoordinator::handle(const QJsonObject &message)
     if (kind == QStringLiteral("offer")) handleOffer(message);
     else if (kind == QStringLiteral("accept")) handleAccept(message);
     else if (kind == QStringLiteral("ack")) handleAck(message);
-    else if (kind == QStringLiteral("chunk")) handleChunk(message);
+    // `chunk` now arrives as a binary BulkFrame via handleChunk(message, data); a `chunk` on the
+    // JSON path is a stale or hostile peer and is ignored.
     else if (kind == QStringLiteral("fileDone")) handleFileDone(message);
     else if (kind == QStringLiteral("done")) {
         if (outgoing_ && outgoing_->id == message.value(QStringLiteral("transferId")).toString()) {
@@ -142,10 +143,15 @@ void FileTransferCoordinator::pump()
     outgoing_->bytesRead += chunk.size();
     outgoing_->waitingChunk = outgoing_->nextChunk++;
     outgoing_->lastActivity = now();
-    sendMessage(QStringLiteral("chunk"), outgoing_->id, outgoing_->target,
-        {{QStringLiteral("fileIndex"), outgoing_->fileIndex},
-         {QStringLiteral("chunkIndex"), outgoing_->waitingChunk},
-         {QStringLiteral("dataBase64"), QString::fromLatin1(chunk.toBase64())}});
+    QJsonObject meta{
+        {QStringLiteral("type"), QStringLiteral("file")},
+        {QStringLiteral("origin"), deviceId_},
+        {QStringLiteral("target"), outgoing_->target},
+        {QStringLiteral("kind"), QStringLiteral("chunk")},
+        {QStringLiteral("transferId"), outgoing_->id},
+        {QStringLiteral("fileIndex"), outgoing_->fileIndex},
+        {QStringLiteral("chunkIndex"), outgoing_->waitingChunk}};
+    emit chunkReady(meta, outgoing_->target, chunk);
 }
 
 void FileTransferCoordinator::handleAck(const QJsonObject &message)
@@ -157,15 +163,16 @@ void FileTransferCoordinator::handleAck(const QJsonObject &message)
     pump();
 }
 
-void FileTransferCoordinator::handleChunk(const QJsonObject &message)
+void FileTransferCoordinator::handleChunk(const QJsonObject &message, const QByteArray &data)
 {
     const QString id = message.value(QStringLiteral("transferId")).toString();
     Incoming *transfer = incoming_.value(id, nullptr);
     if (!transfer) return;
+    if (message.value(QStringLiteral("origin")).toString() != transfer->origin) { failIncoming(id, QStringLiteral("chunk from wrong origin")); return; }
     const int fileIndex = message.value(QStringLiteral("fileIndex")).toInt(-1);
     const int chunkIndex = message.value(QStringLiteral("chunkIndex")).toInt(-1);
     if (fileIndex != transfer->fileIndex || chunkIndex != transfer->expectedChunk) { failIncoming(id, QStringLiteral("out-of-sequence chunk")); return; }
-    const QByteArray chunk = QByteArray::fromBase64(message.value(QStringLiteral("dataBase64")).toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+    const QByteArray &chunk = data;
     if (chunk.isEmpty() || chunk.size() > ChunkBytes) { failIncoming(id, QStringLiteral("invalid chunk")); return; }
     const FileInfo &info = transfer->files.at(fileIndex);
     if (!transfer->file.isOpen()) {

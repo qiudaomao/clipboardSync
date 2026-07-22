@@ -8,6 +8,10 @@ import Foundation
 /// holds more than a few chunks in memory, so there is no file-size limit.
 final class FileTransferCoordinator {
     var onSend: ((FileTransferMessage) -> Void)?
+    /// Emits a `chunk` as its metadata (with `dataBase64` nil) plus the raw bytes, for the caller
+    /// to ship as a binary `BulkFrame`. Chunks are 1 MiB and sent back to back, so keeping them off
+    /// the base64+JSON envelope path is the whole point; every other file message stays on `onSend`.
+    var onSendChunk: ((FileTransferMessage, Data) -> Void)?
     var onStatus: ((String) -> Void)?
     /// Fires when an incoming transfer completed and verified; carries the received files' URLs.
     var onFilesReceived: (([URL]) -> Void)?
@@ -127,7 +131,9 @@ final class FileTransferCoordinator {
             case "accept":
                 self.handleAccept(message)
             case "chunk":
-                self.handleChunk(message)
+                // Chunks now arrive as binary BulkFrames via handleChunk(_:data:); a `chunk` on
+                // the JSON path is a stale or hostile peer and is ignored.
+                break
             case "ack":
                 self.handleAck(message)
             case "fileDone":
@@ -240,13 +246,22 @@ final class FileTransferCoordinator {
                 transfer.bytesSentOfCurrentFile += Int64(data.count)
                 let cumulative = (transfer.cumulativeBytesByChunk.last ?? 0) + Int64(data.count)
                 transfer.cumulativeBytesByChunk.append(cumulative)
-                send(
-                    kind: "chunk",
-                    transferId: transfer.transferId,
-                    target: transfer.target,
-                    fileIndex: transfer.fileIndex,
-                    chunkIndex: transfer.nextChunkIndex,
-                    dataBase64: data.base64EncodedString()
+                onSendChunk?(
+                    FileTransferMessage(
+                        type: "file",
+                        origin: deviceId,
+                        target: transfer.target,
+                        kind: "chunk",
+                        transferId: transfer.transferId,
+                        files: nil,
+                        fileIndex: transfer.fileIndex,
+                        chunkIndex: transfer.nextChunkIndex,
+                        dataBase64: nil,
+                        sha256: nil,
+                        reason: nil,
+                        sentAt: Date().timeIntervalSince1970
+                    ),
+                    data
                 )
                 transfer.nextChunkIndex += 1
             } catch {
@@ -335,7 +350,15 @@ final class FileTransferCoordinator {
         send(kind: "accept", transferId: transfer.transferId, target: transfer.origin)
     }
 
-    private func handleChunk(_ message: FileTransferMessage) {
+    /// Receives a `chunk` decoded from a binary `BulkFrame`: the metadata message plus the raw
+    /// bytes, which go straight to disk with no base64 decode.
+    func handleChunk(_ message: FileTransferMessage, data: Data) {
+        queue.async {
+            self.handleChunkLocked(message, data: data)
+        }
+    }
+
+    private func handleChunkLocked(_ message: FileTransferMessage, data: Data) {
         guard let transfer = incoming[message.transferId], transfer.origin == message.origin else {
             return
         }
@@ -345,8 +368,6 @@ final class FileTransferCoordinator {
             let fileIndex = message.fileIndex,
             fileIndex == transfer.fileIndex,
             fileIndex < transfer.files.count,
-            let base64 = message.dataBase64,
-            let data = Data(base64Encoded: base64),
             !data.isEmpty,
             data.count <= Self.chunkBytes,
             transfer.bytesWrittenOfCurrentFile + Int64(data.count) <= transfer.files[fileIndex].size

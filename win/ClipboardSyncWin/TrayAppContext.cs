@@ -165,6 +165,7 @@ internal sealed class TrayAppContext : ApplicationContext
         // encrypt+send is thread-safe and must not queue behind UI-thread work.
         portForwardCoordinator.MessageReady += message => PublishTunnel(message);
         portForwardCoordinator.DataReady += PublishTunnelDataAsync;
+        fileTransferCoordinator.ChunkReady += PublishFileChunk;
         portForwardCoordinator.StatusChanged += text => OnUi(() =>
         {
             status = text;
@@ -1240,6 +1241,14 @@ internal sealed class TrayAppContext : ApplicationContext
     /// loop, so blocking on a full tunnel queue back-pressures the connection.
     private async Task HandleBinaryFrameAsync(byte[] frame)
     {
+        // A binary frame is either a port-forward "data" chunk (TunnelFrame) or a large
+        // clipboard/file payload (BulkFrame); the first wire byte says which.
+        if (BulkFrame.IsBulkFrame(frame))
+        {
+            HandleBulkFrame(frame);
+            return;
+        }
+
         TunnelFrame.Decoded decoded;
         try
         {
@@ -1257,6 +1266,78 @@ internal sealed class TrayAppContext : ApplicationContext
             return;
         }
         await portForwardCoordinator.HandleDataAsync(decoded.ConnectionId, decoded.Payload).ConfigureAwait(false);
+    }
+
+    private void HandleBulkFrame(byte[] frame)
+    {
+        BulkFrame.Decoded decoded;
+        try
+        {
+            decoded = BulkFrame.Decode(frame, config.Password);
+        }
+        catch
+        {
+            return;
+        }
+        // A clipboard image is a broadcast (empty target); a file chunk is addressed to us.
+        if (decoded.Origin == config.DeviceId
+            || (decoded.Target.Length != 0 && decoded.Target != config.DeviceId))
+        {
+            return;
+        }
+
+        switch (decoded.Kind)
+        {
+            case BulkFrame.Kind.ClipboardImage:
+            {
+                if (decoded.Target.Length != 0)
+                {
+                    return;
+                }
+                SyncMessage? meta;
+                try
+                {
+                    meta = JsonSerializer.Deserialize<SyncMessage>(decoded.Meta, MessageJsonOptions);
+                }
+                catch
+                {
+                    return;
+                }
+                if (meta?.Image is not { } metaImage)
+                {
+                    return;
+                }
+                // Rebuild the payload the existing clipboard path expects: the metadata's image
+                // with its emptied DataBase64 refilled from the raw frame bytes.
+                metaImage.DataBase64 = Convert.ToBase64String(decoded.Payload);
+                OnUi(() =>
+                {
+                    var content = ClipboardContent.FromMessage(meta);
+                    if (content is not null && clipboardMonitor.ApplyContent(content))
+                    {
+                        AddHistory(content);
+                    }
+                });
+                break;
+            }
+            case BulkFrame.Kind.FileChunk:
+            {
+                FileTransferMessage? meta;
+                try
+                {
+                    meta = JsonSerializer.Deserialize<FileTransferMessage>(decoded.Meta, MessageJsonOptions);
+                }
+                catch
+                {
+                    return;
+                }
+                if (meta is not null)
+                {
+                    fileTransferCoordinator.HandleChunk(meta, decoded.Payload);
+                }
+                break;
+            }
+        }
     }
 
     private void HandleTunnelMessage(byte[] plaintext)
@@ -1720,8 +1801,23 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private bool Publish(ClipboardContent content, bool recordHistory = true)
     {
-        var message = content.ToMessage(config.DeviceId);
-        if (!SendEncrypted(message))
+        // An image is the one large clipboard payload, so it ships as a binary BulkFrame with the
+        // pixels as raw bytes instead of base64 inside JSON. Text and the small inline-files path
+        // stay on the JSON envelope, where their size makes the binary framing pointless.
+        if (content.Kind == "image" && content.Image is { } image)
+        {
+            byte[] pixels;
+            try
+            {
+                pixels = Convert.FromBase64String(image.DataBase64);
+            }
+            catch
+            {
+                return false;
+            }
+            PublishClipboardImage(image, pixels);
+        }
+        else if (!SendEncrypted(content.ToMessage(config.DeviceId)))
         {
             return false;
         }
@@ -1732,6 +1828,66 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         return true;
+    }
+
+    /// Ships a clipboard image as a broadcast BulkFrame: the pixels ride as the binary payload and
+    /// the metadata JSON carries an empty DataBase64, so the wire copy is the raw image rather than
+    /// a ~1.33x base64 blob wrapped in two JSON layers.
+    private void PublishClipboardImage(ClipboardImagePayload image, byte[] pixels)
+    {
+        var meta = new SyncMessage
+        {
+            Type = "clipboard",
+            Origin = config.DeviceId,
+            Kind = "image",
+            Image = new ClipboardImagePayload
+            {
+                MimeType = image.MimeType,
+                FileName = image.FileName,
+                DataBase64 = "",
+                Size = image.Size
+            },
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        };
+        PublishBulk(BulkFrame.Kind.ClipboardImage, meta, target: null, pixels);
+    }
+
+    /// Ships a file-transfer chunk as a targeted BulkFrame: metadata JSON with a null DataBase64,
+    /// the chunk bytes as the binary payload.
+    private void PublishFileChunk(FileTransferMessage message, byte[] data)
+    {
+        PublishBulk(BulkFrame.Kind.FileChunk, message, message.Target, data);
+    }
+
+    private void PublishBulk<T>(BulkFrame.Kind kind, T meta, string? target, byte[] payload)
+    {
+        byte[] frame;
+        try
+        {
+            var metaBytes = JsonSerializer.SerializeToUtf8Bytes(meta, MessageJsonOptions);
+            frame = BulkFrame.Encode(kind, metaBytes, config.DeviceId, target, payload, config.Password, config.EncryptTransport);
+        }
+        catch
+        {
+            OnUi(() =>
+            {
+                status = AppText.Text("status.encryptionFailed");
+                UpdateMenu();
+            });
+            return;
+        }
+
+        if (frame.Length > ClipboardLimits.MaxWebSocketMessageBytes)
+        {
+            OnUi(() =>
+            {
+                status = AppText.Text("status.clipboardPayloadTooLarge");
+                UpdateMenu();
+            });
+            return;
+        }
+
+        _ = transport?.SendBinaryAsync(frame, target);
     }
 
     private void PublishInput(InputMessage message)

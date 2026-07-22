@@ -138,6 +138,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         coordinator.onSend = { [weak self] message in
             self?.sendBulk(message, routedTo: message.target)
         }
+        coordinator.onSendChunk = { [weak self] message, data in
+            self?.publishFileChunk(message, data: data)
+        }
         coordinator.onStatus = { [weak self] status in
             DispatchQueue.main.async {
                 self?.statusText = status
@@ -1091,8 +1094,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Runs on `bulkReceiveQueue`. A binary frame is always a port-forward `data` chunk.
+    /// Runs on `bulkReceiveQueue`. A binary frame is either a port-forward `data` chunk
+    /// (`TunnelFrame`) or a large clipboard/file payload (`BulkFrame`); the first wire byte says
+    /// which.
     private func handleBinaryFrame(_ frame: Data) {
+        if BulkFrame.isBulkFrame(frame) {
+            handleBulkFrame(frame)
+            return
+        }
         guard
             let decoded = try? TunnelFrame.decode(frame, password: wirePassword),
             decoded.origin != deviceId,
@@ -1101,6 +1110,50 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         portForwardCoordinator.handleData(connectionId: decoded.connectionId, payload: decoded.payload)
+    }
+
+    private func handleBulkFrame(_ frame: Data) {
+        guard
+            let decoded = try? BulkFrame.decode(frame, password: wirePassword),
+            decoded.origin != deviceId,
+            // A clipboard image is a broadcast (empty target); a file chunk is addressed to us.
+            decoded.target.isEmpty || decoded.target == deviceId
+        else {
+            return
+        }
+        let decoder = JSONDecoder()
+        switch decoded.kind {
+        case .clipboardImage:
+            guard
+                decoded.target.isEmpty,
+                let meta = try? decoder.decode(SyncMessage.self, from: decoded.meta),
+                let metaImage = meta.image
+            else {
+                return
+            }
+            // Rebuild the payload the existing clipboard path expects: the metadata's image with
+            // its emptied `dataBase64` refilled from the raw frame bytes.
+            let image = ClipboardImagePayload(
+                mimeType: metaImage.mimeType,
+                fileName: metaImage.fileName,
+                dataBase64: decoded.payload.base64EncodedString(),
+                size: metaImage.size
+            )
+            let content = ClipboardContent.image(image)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else {
+                    return
+                }
+                if self.clipboard.applyContent(content) {
+                    self.addHistory(content)
+                }
+            }
+        case .fileChunk:
+            guard let meta = try? decoder.decode(FileTransferMessage.self, from: decoded.meta) else {
+                return
+            }
+            fileTransferCoordinator.handleChunk(meta, data: decoded.payload)
+        }
     }
 
     /// Runs on `bulkReceiveQueue`, so it must not touch main-thread state — `deviceId` is a `let`
@@ -1665,12 +1718,80 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @discardableResult
     private func publish(_ content: ClipboardContent, recordHistory: Bool = true) -> Bool {
-        let message = content.makeMessage(origin: deviceId)
-        sendBulk(message, routedTo: nil)
+        // An image is the one large clipboard payload, so it ships as a binary BulkFrame with the
+        // pixels as raw bytes instead of base64 inside JSON. Text and the small inline-files path
+        // stay on the JSON envelope, where their size makes the binary framing pointless.
+        if case .image(let image) = content, let imageData = Data(base64Encoded: image.dataBase64) {
+            publishClipboardImage(image, data: imageData)
+        } else {
+            let message = content.makeMessage(origin: deviceId)
+            sendBulk(message, routedTo: nil)
+        }
         if recordHistory {
             addHistory(content)
         }
         return true
+    }
+
+    /// Ships a clipboard image as a broadcast `BulkFrame`: the pixels ride as the binary payload and
+    /// the metadata JSON carries an empty `dataBase64`, so the wire copy is the raw image rather
+    /// than a ~1.33× base64 blob wrapped in two JSON layers.
+    private func publishClipboardImage(_ image: ClipboardImagePayload, data: Data) {
+        let metaImage = ClipboardImagePayload(
+            mimeType: image.mimeType,
+            fileName: image.fileName,
+            dataBase64: "",
+            size: image.size
+        )
+        let metaMessage = SyncMessage(
+            type: "clipboard",
+            origin: deviceId,
+            kind: "image",
+            text: nil,
+            image: metaImage,
+            files: nil,
+            sentAt: Date().timeIntervalSince1970
+        )
+        wireQueue.async { [weak self] in
+            guard let self, let meta = try? JSONEncoder().encode(metaMessage) else {
+                return
+            }
+            self.publishBulk(kind: .clipboardImage, meta: meta, target: nil, payload: data)
+        }
+    }
+
+    /// Ships a file-transfer chunk as a targeted `BulkFrame`: metadata JSON with a nil `dataBase64`,
+    /// the chunk bytes as the binary payload.
+    private func publishFileChunk(_ message: FileTransferMessage, data: Data) {
+        wireQueue.async { [weak self] in
+            guard let self, let meta = try? JSONEncoder().encode(message) else {
+                return
+            }
+            self.publishBulk(kind: .fileChunk, meta: meta, target: message.target, payload: data)
+        }
+    }
+
+    /// Encodes and ships one `BulkFrame`. Runs on `wireQueue` (its callers hop there first) so the
+    /// AES/HMAC over a multi-megabyte payload never touches the main thread.
+    private func publishBulk(kind: BulkFrame.Kind, meta: Data, target: String?, payload: Data) {
+        do {
+            let frame = try BulkFrame.encode(
+                kind: kind,
+                meta: meta,
+                origin: deviceId,
+                target: target,
+                payload: payload,
+                password: wirePassword,
+                encrypt: wireEncrypt
+            )
+            guard frame.count <= ClipboardLimits.maxWebSocketMessageBytes else {
+                DispatchQueue.main.async { self.statusText = AppText.text("status.clipboardPayloadTooLarge") }
+                return
+            }
+            wireTransport?.sendBinary(frame, to: target)
+        } catch {
+            DispatchQueue.main.async { self.statusText = AppText.text("status.encryptionFailed") }
+        }
     }
 
     private func publishInput(_ message: InputMessage) {

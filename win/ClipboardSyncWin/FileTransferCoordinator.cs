@@ -20,6 +20,10 @@ internal sealed class FileTransferCoordinator : IDisposable
     private static readonly TimeSpan InactivityTimeout = TimeSpan.FromSeconds(30);
 
     public event Action<FileTransferMessage>? MessageReady;
+    /// Emits a "chunk" as its metadata (with DataBase64 null) plus the raw bytes, for the caller to
+    /// ship as a binary BulkFrame. Chunks are 1 MiB and sent back to back, so keeping them off the
+    /// base64+JSON envelope path is the whole point; every other file message stays on MessageReady.
+    public event Action<FileTransferMessage, byte[]>? ChunkReady;
     public event Action<string>? StatusChanged;
     /// Fires when an incoming transfer completed and verified; carries the received files' paths.
     public event Action<List<string>>? FilesReceived;
@@ -144,7 +148,8 @@ internal sealed class FileTransferCoordinator : IDisposable
                     HandleAccept(message);
                     break;
                 case "chunk":
-                    HandleChunk(message);
+                    // Chunks now arrive as binary BulkFrames via HandleChunk(message, data); a
+                    // "chunk" on the JSON path is a stale or hostile peer and is ignored.
                     break;
                 case "ack":
                     HandleAck(message);
@@ -281,13 +286,21 @@ internal sealed class FileTransferCoordinator : IDisposable
                 transfer.BytesSentOfCurrentFile += read;
                 var cumulative = (transfer.CumulativeBytesByChunk.Count > 0 ? transfer.CumulativeBytesByChunk[^1] : 0) + read;
                 transfer.CumulativeBytesByChunk.Add(cumulative);
-                Send(
-                    "chunk",
-                    transfer.TransferId,
-                    transfer.Target,
-                    fileIndex: transfer.FileIndex,
-                    chunkIndex: transfer.NextChunkIndex,
-                    dataBase64: Convert.ToBase64String(buffer, 0, read));
+                var chunk = new byte[read];
+                Array.Copy(buffer, 0, chunk, 0, read);
+                ChunkReady?.Invoke(
+                    new FileTransferMessage
+                    {
+                        Type = "file",
+                        Origin = deviceId,
+                        Target = transfer.Target,
+                        Kind = "chunk",
+                        TransferId = transfer.TransferId,
+                        FileIndex = transfer.FileIndex,
+                        ChunkIndex = transfer.NextChunkIndex,
+                        SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+                    },
+                    chunk);
                 transfer.NextChunkIndex++;
             }
             catch (Exception ex)
@@ -383,21 +396,24 @@ internal sealed class FileTransferCoordinator : IDisposable
         Send("accept", transfer.TransferId, transfer.Origin);
     }
 
-    private void HandleChunk(FileTransferMessage message)
+    /// Receives a "chunk" decoded from a binary BulkFrame: the metadata message plus the raw bytes,
+    /// which go straight to disk with no base64 decode.
+    public void HandleChunk(FileTransferMessage message, byte[] data)
+    {
+        lock (sync)
+        {
+            if (disposed)
+            {
+                return;
+            }
+            HandleChunkLocked(message, data);
+        }
+    }
+
+    private void HandleChunkLocked(FileTransferMessage message, byte[] data)
     {
         if (!incoming.TryGetValue(message.TransferId, out var transfer) || transfer.Origin != message.Origin)
         {
-            return;
-        }
-
-        byte[] data;
-        try
-        {
-            data = Convert.FromBase64String(message.DataBase64 ?? "");
-        }
-        catch
-        {
-            AbortIncoming(transfer, notifyPeer: true, failure: "protocol error");
             return;
         }
 
