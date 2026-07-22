@@ -198,6 +198,9 @@ internal sealed class TrayAppContext : ApplicationContext
         presenceTimer = new System.Windows.Forms.Timer { Interval = 5000 };
         presenceTimer.Tick += (_, _) =>
         {
+            // Keep our own screens registered (covers monitor hot-plug and display
+            // rearrangement) before the hello advertises them.
+            RegisterLocalScreen();
             SendInputHello();
             PruneStaleDevices();
         };
@@ -798,6 +801,10 @@ internal sealed class TrayAppContext : ApplicationContext
         if (screenLayoutStore.Merge(config.DeviceId, InputSharingCoordinator.CurrentScreens()))
         {
             RefreshScreenLayoutFormIfVisible();
+            if (config.Mode == SyncMode.Server)
+            {
+                BroadcastLayout();
+            }
         }
     }
 

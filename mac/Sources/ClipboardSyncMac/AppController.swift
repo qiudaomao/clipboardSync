@@ -310,6 +310,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         clipboard.start()
         registerLocalScreen()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersDidChange),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
         inputCoordinator.start()
         updateInputCoordinator()
         // Once the transport is up, tunnel frames reach `portForwardCoordinator` from
@@ -815,7 +821,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func registerLocalScreen() {
         if screenLayoutStore.merge(deviceId: deviceId, screens: InputSharingCoordinator.currentScreens()) {
             refreshScreenLayoutWindowIfVisible()
+            if config.mode == .server {
+                broadcastLayout()
+            }
         }
+    }
+
+    /// Fires when macOS display arrangement/resolution changes (System Settings rearrange,
+    /// monitor plug/unplug), so the shared layout re-syncs immediately instead of waiting for
+    /// the next app launch or layout-window open. The hello nudges the server (when we're a
+    /// client) to re-merge our fresh ScreenMetrics and rebroadcast right away.
+    @objc private func screenParametersDidChange() {
+        registerLocalScreen()
+        updateInputCoordinator(sendHello: true)
     }
 
     @objc private func showScreenLayout() {

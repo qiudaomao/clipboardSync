@@ -65,10 +65,11 @@ public:
 
     const QHash<QString, ScreenLayoutEntry> &entries() const { return entries_; }
 
-    // Merges a device's current monitor list: keeps dragged positions for known
-    // screens, places new screens beside their siblings (or right of everything
-    // for a brand-new device) preserving their real relative arrangement, and
-    // drops entries for unplugged monitors. Returns whether anything changed.
+    // Merges a device's current monitor list: re-derives the group's geometry
+    // from the machine's real local arrangement (localX/localY) anchored at the
+    // group's dragged top-left corner (or right of everything for a brand-new
+    // device), and drops entries for unplugged monitors. Returns whether
+    // anything changed.
     bool merge(const QString &deviceId, const QList<ScreenMetrics> &screens);
     bool remove(const QString &deviceId);
     void applySnapshot(const QList<ScreenLayoutEntry> &snapshot);

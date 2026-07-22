@@ -104,6 +104,25 @@ void testLayoutStore()
     require(reloaded.entries().size() == 2, "layout store persists across reloads");
     require(reloaded.entries().value(QStringLiteral("deck#0")).y == 100, "positions persist across reloads");
 
+    // A machine's own monitors re-sync to its reported local arrangement on every merge (drags
+    // move a group as one, so a merge is the only way intra-group geometry can change): a
+    // hot-plugged monitor lands at its real relative position, and a later rearrangement
+    // reshapes the group around its dragged top-left anchor.
+    require(store.merge(QStringLiteral("deck"), {{1280, 800, 1, 0, 0}, {1080, 1920, 1, 1280, 0}}),
+        "hot-plugged monitor changes the store");
+    require(store.entries().value(QStringLiteral("deck#1")).x == 0
+            && store.entries().value(QStringLiteral("deck#1")).y == 100,
+        "hot-plugged monitor lands at its real relative position");
+    require(store.merge(QStringLiteral("deck"), {{1280, 800, 1, 0, 800}, {1080, 1920, 1, 0, -1120}}),
+        "rearranged monitors change the store");
+    require(store.entries().value(QStringLiteral("deck#0")).x == -1280
+            && store.entries().value(QStringLiteral("deck#0")).y == 2020
+            && store.entries().value(QStringLiteral("deck#1")).x == -1280
+            && store.entries().value(QStringLiteral("deck#1")).y == 100,
+        "rearrangement reshapes the group around its anchor");
+    require(!store.merge(QStringLiteral("deck"), {{1280, 800, 1, 0, 800}, {1080, 1920, 1, 0, -1120}}),
+        "re-merge with unchanged arrangement is a no-op");
+
     // Unplugged monitors drop out.
     require(store.merge(QStringLiteral("mac"), {}), "unplugged screens are removed");
     require(!store.entries().contains(QStringLiteral("mac#0")), "removed screen is gone");

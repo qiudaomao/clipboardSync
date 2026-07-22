@@ -1451,10 +1451,14 @@ final class ScreenLayoutStore {
         entries = Self.load()
     }
 
-    /// Merges a device's current monitor list into the store: updates sizes for known screens
-    /// (keeping any dragged position), places newly-seen screens next to their siblings (or to
-    /// the right of everything, for a brand-new device) while preserving their real relative
-    /// arrangement, and drops entries for monitors that disappeared (unplugged). Returns whether
+    /// Merges a device's current monitor list into the store: drops entries for monitors that
+    /// disappeared (unplugged) and lays the device's screens out from their real local
+    /// arrangement (`localX`/`localY`), so the group always mirrors that machine's own display
+    /// arrangement — the canvas drags a machine's screens as one group, so intra-group geometry
+    /// is only ever correct if it's re-derived here on every merge (a machine rearranging its
+    /// monitors, or a hot-plugged one, must reshape the group). The group stays anchored at its
+    /// existing top-left corner, preserving where the user dragged the machine relative to other
+    /// machines; a brand-new device is placed to the right of everything. Returns whether
     /// anything changed.
     @discardableResult
     func merge(deviceId: String, screens: [ScreenMetrics]) -> Bool {
@@ -1467,36 +1471,26 @@ final class ScreenLayoutStore {
             changed = true
         }
 
-        let isNewDevice = priorScreenIds.isEmpty
-        let groupOffsetX = isNewDevice ? (entries.values.map { $0.x + $0.width }.max() ?? 0) : 0
+        let group = entries.values.filter { $0.deviceId == deviceId }
+        let anchorX = group.map(\.x).min() ?? (entries.values.map { $0.x + $0.width }.max() ?? 0)
+        let anchorY = group.map(\.y).min() ?? 0
         let localMinX = screens.map(\.localX).min() ?? 0
         let localMinY = screens.map(\.localY).min() ?? 0
 
         for (index, screen) in screens.enumerated() {
             let screenId = "\(deviceId)#\(index)"
-            if let existing = entries[screenId] {
-                guard existing.width != screen.width || existing.height != screen.height else {
-                    continue
-                }
-                entries[screenId] = ScreenLayoutEntry(screenId: screenId, deviceId: deviceId, x: existing.x, y: existing.y, width: screen.width, height: screen.height)
+            let entry = ScreenLayoutEntry(
+                screenId: screenId,
+                deviceId: deviceId,
+                x: anchorX + (screen.localX - localMinX),
+                y: anchorY + (screen.localY - localMinY),
+                width: screen.width,
+                height: screen.height
+            )
+            if entries[screenId] != entry {
+                entries[screenId] = entry
                 changed = true
-                continue
             }
-
-            let x: Double
-            let y: Double
-            if isNewDevice {
-                x = groupOffsetX + (screen.localX - localMinX)
-                y = screen.localY - localMinY
-            } else if let sibling = entries.values.filter({ $0.deviceId == deviceId }).max(by: { $0.x < $1.x }) {
-                x = sibling.x + sibling.width
-                y = sibling.y
-            } else {
-                x = entries.values.map { $0.x + $0.width }.max() ?? 0
-                y = 0
-            }
-            entries[screenId] = ScreenLayoutEntry(screenId: screenId, deviceId: deviceId, x: x, y: y, width: screen.width, height: screen.height)
-            changed = true
         }
 
         if changed {

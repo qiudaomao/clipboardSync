@@ -291,10 +291,14 @@ internal sealed class ScreenLayoutStore
 
     public IReadOnlyDictionary<string, ScreenLayoutEntry> Entries => entries;
 
-    /// Merges a device's current monitor list into the store: updates sizes for known screens
-    /// (keeping any dragged position), places newly-seen screens next to their siblings (or to the
-    /// right of everything, for a brand-new device) while preserving their real relative
-    /// arrangement, and drops entries for monitors that disappeared (unplugged). Returns whether
+    /// Merges a device's current monitor list into the store: drops entries for monitors that
+    /// disappeared (unplugged) and lays the device's screens out from their real local
+    /// arrangement (LocalX/LocalY), so the group always mirrors that machine's own display
+    /// arrangement - the canvas drags a machine's screens as one group, so intra-group geometry
+    /// is only ever correct if it's re-derived here on every merge (a machine rearranging its
+    /// monitors, or a hot-plugged one, must reshape the group). The group stays anchored at its
+    /// existing top-left corner, preserving where the user dragged the machine relative to other
+    /// machines; a brand-new device is placed to the right of everything. Returns whether
     /// anything changed.
     public bool Merge(string deviceId, List<ScreenMetrics> screens)
     {
@@ -308,8 +312,9 @@ internal sealed class ScreenLayoutStore
             changed = true;
         }
 
-        var isNewDevice = priorScreenIds.Count == 0;
-        var groupOffsetX = isNewDevice ? entries.Values.Select(e => e.X + e.Width).DefaultIfEmpty(0).Max() : 0;
+        var group = entries.Values.Where(e => e.DeviceId == deviceId).ToList();
+        var anchorX = group.Count > 0 ? group.Min(e => e.X) : entries.Values.Select(e => e.X + e.Width).DefaultIfEmpty(0).Max();
+        var anchorY = group.Count > 0 ? group.Min(e => e.Y) : 0;
         var localMinX = screens.Select(s => s.LocalX).DefaultIfEmpty(0).Min();
         var localMinY = screens.Select(s => s.LocalY).DefaultIfEmpty(0).Min();
 
@@ -317,37 +322,13 @@ internal sealed class ScreenLayoutStore
         {
             var screen = screens[index];
             var screenId = $"{deviceId}#{index}";
-            if (entries.TryGetValue(screenId, out var existing))
+            var x = anchorX + (screen.LocalX - localMinX);
+            var y = anchorY + (screen.LocalY - localMinY);
+            if (entries.TryGetValue(screenId, out var existing)
+                && existing.X == x && existing.Y == y
+                && existing.Width == screen.Width && existing.Height == screen.Height)
             {
-                if (existing.Width == screen.Width && existing.Height == screen.Height)
-                {
-                    continue;
-                }
-                entries[screenId] = new ScreenLayoutEntry { ScreenId = screenId, DeviceId = deviceId, X = existing.X, Y = existing.Y, Width = screen.Width, Height = screen.Height };
-                changed = true;
                 continue;
-            }
-
-            double x;
-            double y;
-            if (isNewDevice)
-            {
-                x = groupOffsetX + (screen.LocalX - localMinX);
-                y = screen.LocalY - localMinY;
-            }
-            else
-            {
-                var sibling = entries.Values.Where(e => e.DeviceId == deviceId).OrderByDescending(e => e.X).FirstOrDefault();
-                if (sibling is not null)
-                {
-                    x = sibling.X + sibling.Width;
-                    y = sibling.Y;
-                }
-                else
-                {
-                    x = entries.Values.Select(e => e.X + e.Width).DefaultIfEmpty(0).Max();
-                    y = 0;
-                }
             }
             entries[screenId] = new ScreenLayoutEntry { ScreenId = screenId, DeviceId = deviceId, X = x, Y = y, Width = screen.Width, Height = screen.Height };
             changed = true;

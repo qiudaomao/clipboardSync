@@ -104,11 +104,25 @@ bool ScreenLayoutStore::merge(const QString &deviceId, const QList<ScreenMetrics
         changed = true;
     }
 
-    const bool isNewDevice = priorScreenIds.isEmpty();
-    double groupOffsetX = 0;
-    if (isNewDevice)
+    // Anchor the device's group at its existing top-left corner (preserving where the user
+    // dragged the machine relative to other machines), or to the right of everything for a
+    // brand-new device, then lay its screens out from their real local arrangement
+    // (localX/localY). The canvas drags a machine's screens as one group, so intra-group
+    // geometry is only ever correct if it's re-derived here on every merge (a machine
+    // rearranging its monitors, or a hot-plugged one, must reshape the group).
+    bool hasGroup = false;
+    double anchorX = 0;
+    double anchorY = 0;
+    for (const auto &entry : std::as_const(entries_)) {
+        if (entry.deviceId != deviceId)
+            continue;
+        anchorX = hasGroup ? std::min(anchorX, entry.x) : entry.x;
+        anchorY = hasGroup ? std::min(anchorY, entry.y) : entry.y;
+        hasGroup = true;
+    }
+    if (!hasGroup)
         for (const auto &entry : std::as_const(entries_))
-            groupOffsetX = std::max(groupOffsetX, entry.x + entry.width);
+            anchorX = std::max(anchorX, entry.x + entry.width);
     double localMinX = 0;
     double localMinY = 0;
     if (!screens.isEmpty()) {
@@ -123,34 +137,14 @@ bool ScreenLayoutStore::merge(const QString &deviceId, const QList<ScreenMetrics
     for (int index = 0; index < screens.size(); ++index) {
         const ScreenMetrics &screen = screens.at(index);
         const QString screenId = screenIdFor(deviceId, index);
+        const ScreenLayoutEntry entry{screenId, deviceId,
+            anchorX + (screen.localX - localMinX), anchorY + (screen.localY - localMinY),
+            screen.width, screen.height};
         const auto existing = entries_.constFind(screenId);
-        if (existing != entries_.constEnd()) {
-            if (existing->width == screen.width && existing->height == screen.height)
-                continue;
-            entries_[screenId] = ScreenLayoutEntry{screenId, deviceId, existing->x, existing->y, screen.width, screen.height};
-            changed = true;
+        if (existing != entries_.constEnd() && existing->x == entry.x && existing->y == entry.y
+            && existing->width == entry.width && existing->height == entry.height)
             continue;
-        }
-
-        double x = 0;
-        double y = 0;
-        if (isNewDevice) {
-            x = groupOffsetX + (screen.localX - localMinX);
-            y = screen.localY - localMinY;
-        } else {
-            const ScreenLayoutEntry *sibling = nullptr;
-            for (const auto &entry : std::as_const(entries_))
-                if (entry.deviceId == deviceId && (!sibling || entry.x > sibling->x))
-                    sibling = &entry;
-            if (sibling) {
-                x = sibling->x + sibling->width;
-                y = sibling->y;
-            } else {
-                for (const auto &entry : std::as_const(entries_))
-                    x = std::max(x, entry.x + entry.width);
-            }
-        }
-        entries_[screenId] = ScreenLayoutEntry{screenId, deviceId, x, y, screen.width, screen.height};
+        entries_[screenId] = entry;
         changed = true;
     }
 
