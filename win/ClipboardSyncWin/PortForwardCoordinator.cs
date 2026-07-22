@@ -16,6 +16,14 @@ namespace ClipboardSyncWin;
 internal sealed class PortForwardCoordinator : IDisposable
 {
     public event Action<TunnelMessage>? MessageReady;
+    /// Carries a "data" chunk as raw bytes for the caller to put on the wire as a TunnelFrame.
+    /// "open" and "close" still go through MessageReady as JSON - they happen once per connection
+    /// and carry host/port/reason, whereas this fires for every chunk and is the whole reason the
+    /// binary path exists.
+    /// The handler must complete only once the chunk has been handed to the transport. That is
+    /// what paces the reader: without it a fast local socket is drained as fast as the kernel will
+    /// yield bytes, regardless of whether the far end can keep up.
+    public event Func<string, string, byte[], Task>? DataReady;
     public event Action<string>? StatusChanged;
     /// Fires whenever this device's own listen state changes - a rule starts listening, fails to
     /// bind, or leaves the local In set. Carries the full current set of local rule statuses so the
@@ -32,6 +40,14 @@ internal sealed class PortForwardCoordinator : IDisposable
     private HashSet<string> onlinePeers = [];
     private bool disposed;
     private const int ChunkBytes = 60 * 1024;
+    /// Ceiling on peer chunks buffered for a tunnel's local socket. Reaching it makes the writer
+    /// wait, which in turn stops the reader on the other side from draining its socket, so TCP's
+    /// own window pushes back instead of this process buffering without bound.
+    private const int MaxQueuedChunks = 16;
+    /// Largest chunk any peer may send. Deliberately above this side's own ChunkBytes: the Linux
+    /// client reads in 64 KiB units, so validating against 60 KiB would reject its traffic and tear
+    /// down every Linux-to-Windows tunnel.
+    private const int MaxInboundChunkBytes = 64 * 1024;
 
     private sealed class RuleListener
     {
@@ -48,7 +64,8 @@ internal sealed class PortForwardCoordinator : IDisposable
         /// Peer data is queued here and drained by one writer task per tunnel, which starts only
         /// once the local socket is connected - that both preserves chunk order and buffers chunks
         /// that race ahead of the "Out" side's dial.
-        public Channel<byte[]> Outgoing { get; } = Channel.CreateUnbounded<byte[]>();
+        public Channel<byte[]> Outgoing { get; } = Channel.CreateBounded<byte[]>(
+            new BoundedChannelOptions(MaxQueuedChunks) { FullMode = BoundedChannelFullMode.Wait });
     }
 
     /// Reconciles the listener set with the current rule table. Listeners exist only while the
@@ -134,9 +151,6 @@ internal sealed class PortForwardCoordinator : IDisposable
         {
             case "open":
                 HandleOpen(message);
-                break;
-            case "data":
-                HandleData(message);
                 break;
             case "close":
                 RemoveTunnel(message.ConnectionId, notifyPeer: false, reason: null);
@@ -276,6 +290,7 @@ internal sealed class PortForwardCoordinator : IDisposable
                 return;
             }
 
+            SetNoDelay(client);
             tunnel = new Tunnel
             {
                 ConnectionId = Guid.NewGuid().ToString(),
@@ -304,7 +319,7 @@ internal sealed class PortForwardCoordinator : IDisposable
         {
             ConnectionId = message.ConnectionId,
             PeerDeviceId = message.Origin,
-            Client = new TcpClient()
+            Client = new TcpClient { NoDelay = true }
         };
         lock (gate)
         {
@@ -333,31 +348,58 @@ internal sealed class PortForwardCoordinator : IDisposable
         });
     }
 
-    private void HandleData(TunnelMessage message)
+    /// Receives a decoded TunnelFrame payload.
+    public async Task HandleDataAsync(string connectionId, byte[] payload)
     {
         Tunnel? tunnel;
         lock (gate)
         {
-            tunnels.TryGetValue(message.ConnectionId, out tunnel);
+            tunnels.TryGetValue(connectionId, out tunnel);
         }
-        if (tunnel is null || message.DataBase64 is null)
+        if (tunnel is null || payload.Length == 0)
         {
+            return;
+        }
+        // Bounds what a buggy or hostile peer can make this side buffer per chunk.
+        if (payload.Length > MaxInboundChunkBytes)
+        {
+            RemoveTunnel(connectionId, notifyPeer: true, reason: "oversized tunnel chunk");
             return;
         }
 
-        byte[] payload;
         try
         {
-            payload = Convert.FromBase64String(message.DataBase64);
+            // Waits rather than dropping when the queue is full - that back-pressure is the whole
+            // point of the bounded channel.
+            await tunnel.Outgoing.Writer.WriteAsync(payload).ConfigureAwait(false);
         }
-        catch (FormatException)
+        catch (ChannelClosedException)
         {
-            return;
+            // Tunnel torn down while this chunk was in flight.
         }
-        tunnel.Outgoing.Writer.TryWrite(payload);
     }
 
     // Shared stream plumbing.
+
+    /// Forwarded traffic is overwhelmingly interactive request/response (SSH, HTTP, RDP), where
+    /// Nagle's algorithm holds a small write back waiting for more data while the peer's delayed
+    /// ACK holds the acknowledgement back waiting for a response - a mutual stall that adds ~40 ms
+    /// to every round trip. The tunnel already batches at the chunk level.
+    private static void SetNoDelay(TcpClient client)
+    {
+        try
+        {
+            client.NoDelay = true;
+        }
+        catch (SocketException)
+        {
+            // Socket already torn down; the read loop reports it.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Same.
+        }
+    }
 
     private async Task ReadLoop(Tunnel tunnel)
     {
@@ -372,7 +414,11 @@ internal sealed class PortForwardCoordinator : IDisposable
                 {
                     break;
                 }
-                Send(tunnel, "data", dataBase64: Convert.ToBase64String(buffer, 0, count));
+                var handler = DataReady;
+                if (handler is not null)
+                {
+                    await handler(tunnel.ConnectionId, tunnel.PeerDeviceId, buffer[..count]).ConfigureAwait(false);
+                }
             }
         }
         catch

@@ -25,6 +25,9 @@ int main(int argc, char **argv)
 
     PortForwardCoordinator inSide;
     PortForwardCoordinator outSide;
+    // `open`/`close` travel as JSON on messageReady; `data` chunks travel as raw bytes on
+    // dataReady, which the app encodes as a binary TunnelFrame. Both have to be relayed for a
+    // tunnel to carry anything.
     QObject::connect(&inSide, &PortForwardCoordinator::messageReady, &outSide,
         [&outSide](const QJsonObject &message, const QString &) {
             QTimer::singleShot(0, &outSide, [&outSide, message] { outSide.handle(message); });
@@ -32,6 +35,14 @@ int main(int argc, char **argv)
     QObject::connect(&outSide, &PortForwardCoordinator::messageReady, &inSide,
         [&inSide](const QJsonObject &message, const QString &) {
             QTimer::singleShot(0, &inSide, [&inSide, message] { inSide.handle(message); });
+        });
+    QObject::connect(&inSide, &PortForwardCoordinator::dataReady, &outSide,
+        [&outSide](const QString &id, const QString &, const QByteArray &payload) {
+            QTimer::singleShot(0, &outSide, [&outSide, id, payload] { outSide.handleData(id, payload); });
+        });
+    QObject::connect(&outSide, &PortForwardCoordinator::dataReady, &inSide,
+        [&inSide](const QString &id, const QString &, const QByteArray &payload) {
+            QTimer::singleShot(0, &inSide, [&inSide, id, payload] { inSide.handleData(id, payload); });
         });
     const QJsonArray rules{QJsonObject{{QStringLiteral("id"), QStringLiteral("test-rule")},
         {QStringLiteral("inDeviceId"), QStringLiteral("in-device")}, {QStringLiteral("inPort"), inputPort},
@@ -43,11 +54,35 @@ int main(int argc, char **argv)
 
     QTcpSocket client;
     const QByteArray expected("port-forward-round-trip");
+    const QByteArray afterReconfigure("still-alive-after-reconfigure");
+    // Phase 1 proves the tunnel carries data; phase 2 proves reconfiguring leaves it alone.
+    int phase = 1;
     QObject::connect(&client, &QTcpSocket::connected, &client, [&client, expected] { client.write(expected); });
-    QObject::connect(&client, &QTcpSocket::readyRead, &app, [&client, &app, expected] {
-        if (client.readAll() != expected) { qCritical("Tunnel payload mismatch"); app.exit(2); return; }
-        app.exit(0);
-    });
+    QObject::connect(&client, &QTcpSocket::readyRead, &app,
+        [&client, &app, &inSide, &outSide, &phase, rules, expected, afterReconfigure] {
+            const QByteArray received = client.readAll();
+            if (phase == 1) {
+                if (received != expected) { qCritical("Tunnel payload mismatch"); app.exit(2); return; }
+                // The app re-runs configure() whenever a peer comes online or the server
+                // broadcasts its rule table. That must not disturb a connection already in
+                // flight - it used to tear every tunnel down, killing live SSH sessions
+                // whenever any other device woke up.
+                phase = 2;
+                inSide.configure(QStringLiteral("in-device"), rules,
+                    {QStringLiteral("out-device"), QStringLiteral("late-arrival")});
+                outSide.configure(QStringLiteral("out-device"), rules,
+                    {QStringLiteral("in-device"), QStringLiteral("late-arrival")});
+                if (client.state() != QAbstractSocket::ConnectedState) {
+                    qCritical("Reconfigure closed a live tunnel");
+                    app.exit(6);
+                    return;
+                }
+                client.write(afterReconfigure);
+                return;
+            }
+            if (received != afterReconfigure) { qCritical("Tunnel payload mismatch after reconfigure"); app.exit(7); return; }
+            app.exit(0);
+        });
     QObject::connect(&inSide, &PortForwardCoordinator::errorOccurred, &app,
         [&app](const QString &error) { qCritical().noquote() << error; app.exit(3); });
     QObject::connect(&outSide, &PortForwardCoordinator::errorOccurred, &app,

@@ -1104,6 +1104,213 @@ struct EnvelopeRouting: Codable {
     let to: String?
 }
 
+extension EnvelopeRouting {
+    /// Pulls `from`/`to` out of an envelope without parsing it.
+    ///
+    /// A `JSONDecoder` pass has to unescape and allocate the envelope's `ciphertext` (or `payload`)
+    /// string, which for a file chunk is ~100 KB of base64 that a relay immediately discards. This
+    /// walks the top level instead, stepping over string values without copying them, and
+    /// materializes only the two short device ids.
+    ///
+    /// Key order is not assumed: the three clients emit these keys in different positions
+    /// (Swift/`JSONSerializer` use declaration order, Qt's `QJsonObject` sorts alphabetically), so
+    /// the routing hints can sit either side of the large value.
+    ///
+    /// Returns nil when the input isn't a JSON object or escapes appear in a key or in a routing
+    /// value — device ids are UUIDs, so that does not happen in practice. Callers treat nil as
+    /// "no routing hint", which degrades to the pre-existing broadcast fallback rather than
+    /// misrouting.
+    static func scan(_ text: String) -> EnvelopeRouting? {
+        var text = text
+        return text.withUTF8 { buffer in scan(buffer) }
+    }
+
+    private static func scan(_ buf: UnsafeBufferPointer<UInt8>) -> EnvelopeRouting? {
+        let quote = UInt8(ascii: "\""), backslash = UInt8(ascii: "\\")
+        let openBrace = UInt8(ascii: "{"), closeBrace = UInt8(ascii: "}")
+        let openBracket = UInt8(ascii: "["), closeBracket = UInt8(ascii: "]")
+        let colon = UInt8(ascii: ":"), comma = UInt8(ascii: ",")
+        let count = buf.count
+        var index = 0
+
+        func skipWhitespace() {
+            while index < count, buf[index] == 0x20 || buf[index] == 0x09 || buf[index] == 0x0A || buf[index] == 0x0D {
+                index += 1
+            }
+        }
+
+        /// Offset of the next `byte` at or after `from`, via `memchr` — the envelope's one large
+        /// value is ~100 KB of base64 that this has to step over, and a byte-at-a-time loop there
+        /// costs more than everything else combined.
+        func nextIndex(of byte: UInt8, from: Int) -> Int? {
+            guard from < count, let base = buf.baseAddress else {
+                return nil
+            }
+            guard let hit = memchr(base + from, Int32(byte), count - from) else {
+                return nil
+            }
+            return UnsafeRawPointer(hit) - UnsafeRawPointer(base)
+        }
+
+        /// `buf[index]` must be the opening quote. Leaves `index` just past the closing quote and
+        /// returns the content range.
+        ///
+        /// Finding the real closing quote costs one `memchr` plus an O(1) look backwards: a quote
+        /// is escaped exactly when an odd number of backslashes immediately precede it. That
+        /// matters because the envelope's one large value is ~100 KB of base64 this has to step
+        /// over, and a second forward search for backslashes would double the work.
+        ///
+        /// `escaped` reports whether the content holds any escape at all, which needs its own
+        /// bounded search — so it is only computed when `wantEscaped` is set. Callers that merely
+        /// skip a value do not care, and those are exactly the large ones.
+        func scanString(wantEscaped: Bool) -> (range: Range<Int>, escaped: Bool)? {
+            guard index < count, buf[index] == quote else {
+                return nil
+            }
+            index += 1
+            let start = index
+
+            var searchFrom = index
+            var end = 0
+            while true {
+                guard let closing = nextIndex(of: quote, from: searchFrom) else {
+                    return nil
+                }
+                var runStart = closing
+                while runStart > start, buf[runStart - 1] == backslash {
+                    runStart -= 1
+                }
+                if (closing - runStart) % 2 != 0 {
+                    // Odd run of backslashes: this quote is escaped and does not close the string.
+                    searchFrom = closing + 1
+                    continue
+                }
+                end = closing
+                index = closing + 1
+                break
+            }
+
+            var escaped = false
+            if wantEscaped, let escape = nextIndex(of: backslash, from: start), escape < end {
+                escaped = true
+            }
+            return (start..<end, escaped)
+        }
+
+        func skipValue() -> Bool {
+            skipWhitespace()
+            guard index < count else {
+                return false
+            }
+            switch buf[index] {
+            case quote:
+                return scanString(wantEscaped: false) != nil
+            case openBrace, openBracket:
+                var depth = 0
+                while index < count {
+                    let byte = buf[index]
+                    if byte == quote {
+                        guard scanString(wantEscaped: false) != nil else {
+                            return false
+                        }
+                        continue
+                    }
+                    if byte == openBrace || byte == openBracket {
+                        depth += 1
+                    } else if byte == closeBrace || byte == closeBracket {
+                        depth -= 1
+                        if depth == 0 {
+                            index += 1
+                            return true
+                        }
+                    }
+                    index += 1
+                }
+                return false
+            default:
+                // Number, true, false, or null: runs until the next structural byte.
+                while index < count, buf[index] != comma, buf[index] != closeBrace {
+                    index += 1
+                }
+                return true
+            }
+        }
+
+        func matches(_ range: Range<Int>, _ literal: StaticString) -> Bool {
+            guard range.count == literal.utf8CodeUnitCount else {
+                return false
+            }
+            let bytes = literal.utf8Start
+            for offset in 0..<range.count where buf[range.lowerBound + offset] != bytes[offset] {
+                return false
+            }
+            return true
+        }
+
+        skipWhitespace()
+        guard index < count, buf[index] == openBrace else {
+            return nil
+        }
+        index += 1
+
+        var from: String?
+        var to: String?
+        while true {
+            skipWhitespace()
+            guard index < count else {
+                return nil
+            }
+            if buf[index] == closeBrace {
+                break
+            }
+            if buf[index] == comma {
+                index += 1
+                continue
+            }
+            guard let key = scanString(wantEscaped: true), !key.escaped else {
+                return nil
+            }
+            skipWhitespace()
+            guard index < count, buf[index] == colon else {
+                return nil
+            }
+            index += 1
+
+            let isFrom = matches(key.range, "from")
+            let isTo = !isFrom && matches(key.range, "to")
+            guard isFrom || isTo else {
+                guard skipValue() else {
+                    return nil
+                }
+                continue
+            }
+
+            skipWhitespace()
+            guard index < count else {
+                return nil
+            }
+            guard buf[index] == quote else {
+                // `null` or an unexpected type: no hint, but the envelope is still well-formed.
+                guard skipValue() else {
+                    return nil
+                }
+                continue
+            }
+            guard let value = scanString(wantEscaped: true), !value.escaped else {
+                return nil
+            }
+            let decoded = String(decoding: UnsafeBufferPointer(rebasing: buf[value.range]), as: UTF8.self)
+            if isFrom {
+                from = decoded
+            } else {
+                to = decoded
+            }
+        }
+
+        return EnvelopeRouting(from: from, to: to)
+    }
+}
+
 struct MessageHeader: Codable {
     let type: String
     let origin: String?

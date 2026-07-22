@@ -164,6 +164,7 @@ internal sealed class TrayAppContext : ApplicationContext
         // Like input, tunnel traffic is sent straight from the coordinator's worker threads;
         // encrypt+send is thread-safe and must not queue behind UI-thread work.
         portForwardCoordinator.MessageReady += message => PublishTunnel(message);
+        portForwardCoordinator.DataReady += PublishTunnelDataAsync;
         portForwardCoordinator.StatusChanged += text => OnUi(() =>
         {
             status = text;
@@ -1197,6 +1198,67 @@ internal sealed class TrayAppContext : ApplicationContext
         _ = SendEncrypted(message, realtime: true, routedTo: message.Target);
     }
 
+    /// Puts one forwarded TCP chunk on the wire as a binary TunnelFrame - no base64, no JSON and
+    /// no UTF-8 round trip, unlike the envelope path every other message takes.
+    private async Task PublishTunnelDataAsync(string connectionId, string target, byte[] payload)
+    {
+        byte[] frame;
+        try
+        {
+            frame = TunnelFrame.Encode(connectionId, config.DeviceId, target, payload, config.Password, config.EncryptTransport);
+        }
+        catch
+        {
+            OnUi(() =>
+            {
+                status = AppText.Text("status.encryptionFailed");
+                UpdateMenu();
+            });
+            return;
+        }
+
+        if (frame.Length > ClipboardLimits.MaxWebSocketMessageBytes)
+        {
+            OnUi(() =>
+            {
+                status = AppText.Text("status.clipboardPayloadTooLarge");
+                UpdateMenu();
+            });
+            return;
+        }
+
+        var active = transport;
+        if (active is not null)
+        {
+            // Awaited, not fire-and-forget: completing only once the frame reaches the transport
+            // is what paces the tunnel's reader.
+            await active.SendBinaryAsync(frame, target).ConfigureAwait(false);
+        }
+    }
+
+    /// A binary frame is always a port-forward "data" chunk. Awaited by the transport's receive
+    /// loop, so blocking on a full tunnel queue back-pressures the connection.
+    private async Task HandleBinaryFrameAsync(byte[] frame)
+    {
+        TunnelFrame.Decoded decoded;
+        try
+        {
+            decoded = TunnelFrame.Decode(frame, config.Password);
+        }
+        catch
+        {
+            // Wrong password, tampering, or a malformed frame: drop it silently, exactly as the
+            // envelope path does for a payload it cannot authenticate.
+            return;
+        }
+
+        if (decoded.Origin == config.DeviceId || decoded.Target != config.DeviceId)
+        {
+            return;
+        }
+        await portForwardCoordinator.HandleDataAsync(decoded.ConnectionId, decoded.Payload).ConfigureAwait(false);
+    }
+
     private void HandleTunnelMessage(byte[] plaintext)
     {
         TunnelMessage? message;
@@ -1510,6 +1572,7 @@ internal sealed class TrayAppContext : ApplicationContext
         // Each connection reads on its own task, so input frames arriving on the dedicated
         // channel are decrypted in parallel with (never behind) bulk clipboard/file frames.
         transport.MessageReceived += (payload, _) => HandleMessage(payload);
+        transport.BinaryReceived += HandleBinaryFrameAsync;
         transport.PeerCountChanged += count => OnUi(() =>
         {
             var previousCount = peerCount;

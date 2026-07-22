@@ -16,7 +16,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private let shouldShowInitialSetup = !AppConfig.hasSavedConfiguration
     private var config = AppConfig.load()
-    private var transport: Transport?
+    /// Main-thread handle on the live transport. Every assignment mirrors into `wireTransport` so
+    /// the wire queues can send without hopping back to main.
+    private var transport: Transport? {
+        didSet { wireTransport = transport }
+    }
 
     /// The input event tap runs on the main run loop, so multi-megabyte base64/AES work on the
     /// main thread freezes the relayed mouse for its whole duration. Bulk payloads (clipboard
@@ -56,6 +60,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             wireEncryptLock.lock()
             defer { wireEncryptLock.unlock() }
             _wireEncrypt = newValue
+        }
+    }
+    /// Snapshot of `transport` readable from the wire queues; `transport` itself is main-thread
+    /// state. Bulk frames are handed straight to the transport from `wireQueue` — hopping back to
+    /// main just to call `send` would put every port-forward chunk and file chunk behind AppKit
+    /// menu drawing and the input event tap, which is exactly what `wireQueue` exists to avoid.
+    private let wireTransportLock = NSLock()
+    private var _wireTransport: Transport?
+    private var wireTransport: Transport? {
+        get {
+            wireTransportLock.lock()
+            defer { wireTransportLock.unlock() }
+            return _wireTransport
+        }
+        set {
+            wireTransportLock.lock()
+            defer { wireTransportLock.unlock() }
+            _wireTransport = newValue
         }
     }
     private var isSyncPaused = false
@@ -137,6 +159,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let coordinator = PortForwardCoordinator()
         coordinator.onSend = { [weak self] message in
             self?.publishTunnel(message)
+        }
+        coordinator.onSendData = { [weak self] connectionId, target, payload, completion in
+            guard let self else {
+                // Nothing will ship the chunk, but the coordinator still has to be released from
+                // its flow-control accounting or the tunnel would stall forever.
+                completion()
+                return
+            }
+            self.publishTunnelData(
+                connectionId: connectionId,
+                target: target,
+                payload: payload,
+                completion: completion
+            )
         }
         coordinator.onStatus = { [weak self] status in
             DispatchQueue.main.async {
@@ -271,6 +307,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         registerLocalScreen()
         inputCoordinator.start()
         updateInputCoordinator()
+        // Once the transport is up, tunnel frames reach `portForwardCoordinator` from
+        // `bulkReceiveQueue` rather than from main. A `lazy var` has no synchronisation, so force
+        // it to initialise here while main is still its only accessor.
+        _ = portForwardCoordinator
         restartTransport()
         startPresenceHeartbeat()
         if shouldShowInitialSetup {
@@ -1014,9 +1054,61 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sendBulk(message, routedTo: message.target)
     }
 
+    /// Puts one forwarded TCP chunk on the wire as a binary `TunnelFrame`. Runs the encode and the
+    /// AES/HMAC on `wireQueue` — same as `sendBulk` — but with no base64, no JSON and no UTF-8
+    /// round trip in between.
+    private func publishTunnelData(
+        connectionId: String,
+        target: String,
+        payload: Data,
+        completion: @escaping () -> Void
+    ) {
+        wireQueue.async { [weak self] in
+            guard let self else {
+                completion()
+                return
+            }
+            // Released on every path — a dropped completion would pause that tunnel's reader
+            // permanently.
+            defer { completion() }
+            do {
+                let frame = try TunnelFrame.encode(
+                    connectionId: connectionId,
+                    origin: self.deviceId,
+                    target: target,
+                    payload: payload,
+                    password: self.wirePassword,
+                    encrypt: self.wireEncrypt
+                )
+                guard frame.count <= ClipboardLimits.maxWebSocketMessageBytes else {
+                    DispatchQueue.main.async { self.statusText = AppText.text("status.clipboardPayloadTooLarge") }
+                    return
+                }
+                self.wireTransport?.sendBinary(frame, to: target)
+            } catch {
+                DispatchQueue.main.async { self.statusText = AppText.text("status.encryptionFailed") }
+            }
+        }
+    }
+
+    /// Runs on `bulkReceiveQueue`. A binary frame is always a port-forward `data` chunk.
+    private func handleBinaryFrame(_ frame: Data) {
+        guard
+            let decoded = try? TunnelFrame.decode(frame, password: wirePassword),
+            decoded.origin != deviceId,
+            decoded.target == deviceId
+        else {
+            return
+        }
+        portForwardCoordinator.handleData(connectionId: decoded.connectionId, payload: decoded.payload)
+    }
+
+    /// Runs on `bulkReceiveQueue`, so it must not touch main-thread state — `deviceId` is a `let`
+    /// and `PortForwardCoordinator` serialises on its own queue. `jsonDecoder` is shared with the
+    /// main thread and JSONDecoder is not documented thread-safe, so use a local one.
     private func handleTunnelMessage(_ data: Data) {
         guard
-            let message = try? jsonDecoder.decode(TunnelMessage.self, from: data),
+            let message = try? JSONDecoder().decode(TunnelMessage.self, from: data),
             message.type == "tunnel",
             message.origin != deviceId,
             message.target == deviceId
@@ -1525,6 +1617,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.handleMessage(message)
             }
         }
+        nextTransport.onBinaryMessage = { [weak self] frame in
+            guard let self else {
+                return
+            }
+            // Tunnel chunks share the bulk lane with file chunks so a forward can't reorder
+            // itself against them, and so neither can stall the input lane.
+            self.bulkReceiveQueue.async {
+                self.handleBinaryFrame(frame)
+            }
+        }
         nextTransport.onPeerCount = { [weak self] count in
             DispatchQueue.main.async {
                 guard let self else {
@@ -1728,9 +1830,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return
             }
 
-            DispatchQueue.main.async {
-                self.transport?.send(payload, to: routedTo, realtime: false)
-            }
+            self.wireTransport?.send(payload, to: routedTo, realtime: false)
         }
     }
 
@@ -1770,9 +1870,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.handleInputMessage(data)
             }
         case "tunnel":
-            DispatchQueue.main.async { [weak self] in
-                self?.handleTunnelMessage(data)
-            }
+            // Stays on the receive queue: `PortForwardCoordinator.handle` hops to its own queue
+            // anyway, so bouncing through main first would only park every forwarded chunk behind
+            // the UI and the input event tap.
+            handleTunnelMessage(data)
         case "file":
             handleFileMessage(data)
         default:

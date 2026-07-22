@@ -7,6 +7,16 @@ import Network
 /// this device, it dials `127.0.0.1:<outPort>` and streams both directions until either end closes.
 final class PortForwardCoordinator {
     var onSend: ((TunnelMessage) -> Void)?
+    /// Carries a `data` chunk as raw bytes for the caller to put on the wire as a `TunnelFrame`.
+    /// `open` and `close` still go through `onSend` as JSON — they happen once per connection and
+    /// carry host/port/reason, whereas this fires for every chunk and is the whole reason the
+    /// binary path exists.
+    ///
+    /// The caller must invoke `completion` once the chunk has been handed to the transport. That
+    /// is what paces the reader: without it a fast local socket is drained as fast as the kernel
+    /// will yield bytes, regardless of whether the far end can keep up, and the backlog grows in
+    /// memory with nothing to bound it.
+    var onSendData: ((_ connectionId: String, _ target: String, _ payload: Data, _ completion: @escaping () -> Void) -> Void)?
     var onStatus: ((String) -> Void)?
     /// Fires (on the coordinator's queue) whenever this device's own listen state changes — a rule
     /// starts listening, fails to bind, or leaves the local In set. Carries the full current set of
@@ -22,6 +32,28 @@ final class PortForwardCoordinator {
     private var transportReady = false
     private var onlinePeers: Set<String> = []
     private static let chunkBytes = 60 * 1024
+    /// Largest chunk any peer may send. Deliberately above this side's own `chunkBytes`: the Linux
+    /// client reads in 64 KiB units, so validating against 60 KiB would reject its traffic and
+    /// tear down every Linux-to-macOS tunnel.
+    private static let maxInboundChunkBytes = 64 * 1024
+    /// Ceiling on bytes read from a tunnel's local socket but not yet handed to the transport.
+    /// Reaching it stops reading until the backlog drains, which lets TCP's own window push back
+    /// on whatever is writing into the forwarded port instead of buffering it here.
+    private static let maxInFlightBytes = 512 * 1024
+    /// Ceiling on peer data buffered while the "Out" side is still dialling. A peer that never
+    /// completes its connection must not be able to grow this without bound.
+    private static let maxPendingBytes = 512 * 1024
+
+    /// TCP parameters for every tunnel socket. Forwarded traffic is overwhelmingly interactive
+    /// request/response (SSH, HTTP, RDP), where Nagle's algorithm holds a small write back waiting
+    /// for more data while the peer's delayed ACK holds the acknowledgement back waiting for a
+    /// response — a mutual stall that shows up as ~40 ms added to every round trip. The tunnel
+    /// already batches at the chunk level, so coalescing in the kernel buys nothing.
+    private static func tunnelParameters() -> NWParameters {
+        let tcp = NWProtocolTCP.Options()
+        tcp.noDelay = true
+        return NWParameters(tls: nil, tcp: tcp)
+    }
 
     private struct RuleListener {
         var rule: PortForwardRule
@@ -36,6 +68,12 @@ final class PortForwardCoordinator {
         /// arrives before then (the "Out" dial racing the first "In" chunks) waits here.
         var isReady = false
         var pendingPayloads: [Data] = []
+        var pendingBytes = 0
+        /// Bytes read from the local socket and passed to `onSendData` but not yet acknowledged.
+        var inFlightBytes = 0
+        /// Set when `inFlightBytes` hit the ceiling and the read loop stopped re-arming itself; a
+        /// send completion that brings the backlog back under the ceiling restarts it.
+        var readPaused = false
 
         init(connectionId: String, peerDeviceId: String, connection: NWConnection) {
             self.connectionId = connectionId
@@ -99,13 +137,36 @@ final class PortForwardCoordinator {
             switch message.kind {
             case "open":
                 self.handleOpen(message)
-            case "data":
-                self.handleData(message)
             case "close":
                 self.removeTunnel(message.connectionId, notifyPeer: false, reason: nil)
             default:
+                // `data` no longer arrives as JSON; see `handleData(connectionId:payload:)`.
                 break
             }
+        }
+    }
+
+    /// Receives a decoded `TunnelFrame` payload.
+    func handleData(connectionId: String, payload: Data) {
+        queue.async {
+            guard let tunnel = self.tunnels[connectionId], !payload.isEmpty else {
+                return
+            }
+            // Bounds what a buggy or hostile peer can make this side buffer per chunk.
+            guard payload.count <= Self.maxInboundChunkBytes else {
+                self.removeTunnel(connectionId, notifyPeer: true, reason: "oversized tunnel chunk")
+                return
+            }
+            guard tunnel.isReady else {
+                guard tunnel.pendingBytes + payload.count <= Self.maxPendingBytes else {
+                    self.removeTunnel(connectionId, notifyPeer: true, reason: "tunnel backlog overflow")
+                    return
+                }
+                tunnel.pendingPayloads.append(payload)
+                tunnel.pendingBytes += payload.count
+                return
+            }
+            self.write(payload, to: tunnel)
         }
     }
 
@@ -153,11 +214,11 @@ final class PortForwardCoordinator {
             let listener: NWListener
             if rule.inAllowLan {
                 // All interfaces (0.0.0.0): reachable from other machines on the LAN.
-                listener = try NWListener(using: .tcp, on: nwPort)
+                listener = try NWListener(using: Self.tunnelParameters(), on: nwPort)
             } else {
                 // Loopback only: pinning the listener's required local endpoint to 127.0.0.1 keeps
                 // the forwarded port unreachable from anywhere but this machine.
-                let parameters = NWParameters.tcp
+                let parameters = Self.tunnelParameters()
                 parameters.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: nwPort)
                 listener = try NWListener(using: parameters)
             }
@@ -239,26 +300,10 @@ final class PortForwardCoordinator {
         }
 
         let host = message.host.flatMap { $0.isEmpty ? nil : $0 } ?? "127.0.0.1"
-        let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: .tcp)
+        let connection = NWConnection(host: NWEndpoint.Host(host), port: nwPort, using: Self.tunnelParameters())
         let tunnel = Tunnel(connectionId: message.connectionId, peerDeviceId: message.origin, connection: connection)
         tunnels[message.connectionId] = tunnel
         start(tunnel)
-    }
-
-    private func handleData(_ message: TunnelMessage) {
-        guard
-            let tunnel = tunnels[message.connectionId],
-            let base64 = message.dataBase64,
-            let payload = Data(base64Encoded: base64)
-        else {
-            return
-        }
-
-        guard tunnel.isReady else {
-            tunnel.pendingPayloads.append(payload)
-            return
-        }
-        write(payload, to: tunnel)
     }
 
     // MARK: - Shared stream plumbing
@@ -274,6 +319,7 @@ final class PortForwardCoordinator {
                     tunnel.isReady = true
                     let pending = tunnel.pendingPayloads
                     tunnel.pendingPayloads = []
+                    tunnel.pendingBytes = 0
                     for payload in pending {
                         self.write(payload, to: tunnel)
                     }
@@ -295,11 +341,36 @@ final class PortForwardCoordinator {
             }
 
             if let data, !data.isEmpty {
-                self.send(kind: "data", tunnel: tunnel, dataBase64: data.base64EncodedString())
+                tunnel.inFlightBytes += data.count
+                let sentBytes = data.count
+                self.onSendData?(tunnel.connectionId, tunnel.peerDeviceId, data) { [weak self, weak tunnel] in
+                    self?.queue.async {
+                        guard
+                            let self,
+                            let tunnel,
+                            self.tunnels[tunnel.connectionId] === tunnel
+                        else {
+                            return
+                        }
+                        tunnel.inFlightBytes -= sentBytes
+                        if tunnel.readPaused, tunnel.inFlightBytes < Self.maxInFlightBytes {
+                            tunnel.readPaused = false
+                            self.startReading(tunnel)
+                        }
+                    }
+                }
             }
 
             if error != nil || isComplete {
                 self.removeTunnel(tunnel.connectionId, notifyPeer: true, reason: nil)
+                return
+            }
+
+            // Stop pulling from the socket while the backlog is over the ceiling. Not re-arming
+            // the receive is what makes TCP's window close on the far side, so the process writing
+            // into the forwarded port slows down instead of this one growing without bound.
+            guard tunnel.inFlightBytes < Self.maxInFlightBytes else {
+                tunnel.readPaused = true
                 return
             }
 

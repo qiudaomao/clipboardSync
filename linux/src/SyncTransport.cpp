@@ -1,10 +1,12 @@
 #include "SyncTransport.h"
 
+#include "EnvelopeRouting.h"
+#include "TunnelFrame.h"
+
 #include <QAbstractSocket>
 #include <QHostAddress>
 #include <QDateTime>
-#include <QJsonDocument>
-#include <QJsonObject>
+#include <QTcpSocket>
 #include <QTimer>
 #include <QUrl>
 #include <QWebSocket>
@@ -14,6 +16,20 @@
 
 namespace {
 constexpr qint64 MaxMessageBytes = 16 * 1024 * 1024;
+
+/// Disables Nagle on the TCP socket underneath a QWebSocket. Nagle would hold a small frame back
+/// waiting for more bytes while the peer's delayed ACK waits for a response — worth ~40 ms on
+/// every interactive round trip through a port-forward tunnel or an input event. Frames are
+/// already batched by the sender, so kernel coalescing buys nothing.
+///
+/// QWebSocket exposes no socket-option API, so this reaches the QTcpSocket it parents. That is an
+/// implementation detail of QtWebSockets: if a future Qt stops parenting the socket, `findChild`
+/// returns null and this degrades to the previous (Nagle-enabled) behaviour rather than breaking.
+void disableNagle(QWebSocket *socket)
+{
+    if (auto *tcp = socket->findChild<QTcpSocket *>())
+        tcp->setSocketOption(QAbstractSocket::LowDelayOption, 1);
+}
 }
 
 SyncTransport::SyncTransport(QObject *parent) : QObject(parent)
@@ -72,11 +88,14 @@ void SyncTransport::startClient()
     client_->setMaxAllowedIncomingFrameSize(MaxMessageBytes);
     client_->setMaxAllowedIncomingMessageSize(MaxMessageBytes);
     connect(client_, &QWebSocket::connected, this, [this] {
+        // The underlying QTcpSocket only exists once the connection is up.
+        disableNagle(client_);
         clientLastPong_ = QDateTime::currentMSecsSinceEpoch();
         emit peerCountChanged(1);
         emit statusChanged(QStringLiteral("Connected to %1:%2").arg(config_.host).arg(config_.port));
     });
     connect(client_, &QWebSocket::textMessageReceived, this, &SyncTransport::messageReceived);
+    connect(client_, &QWebSocket::binaryMessageReceived, this, &SyncTransport::binaryReceived);
     connect(client_, &QWebSocket::pong, this, [this](quint64, const QByteArray &) {
         clientLastPong_ = QDateTime::currentMSecsSinceEpoch();
     });
@@ -123,21 +142,63 @@ void SyncTransport::acceptPendingConnection()
         attachSocket(server_->nextPendingConnection());
 }
 
+void SyncTransport::sendBinary(const QByteArray &frame, const QString &to)
+{
+    if (frame.size() > MaxMessageBytes) {
+        emit errorOccurred(QStringLiteral("Refused outgoing WebSocket frame larger than 16 MiB"));
+        return;
+    }
+    if (client_ && client_->state() == QAbstractSocket::ConnectedState) {
+        client_->sendBinaryMessage(frame);
+        return;
+    }
+    for (auto it = peers_.cbegin(); it != peers_.cend(); ++it) {
+        if (to.isEmpty() || it.value().isEmpty() || it.value() == to)
+            it.key()->sendBinaryMessage(frame);
+    }
+}
+
+bool SyncTransport::isRelayOnly(const QString &to) const
+{
+    return !to.isEmpty() && !config_.deviceId.isEmpty() && to != config_.deviceId;
+}
+
 void SyncTransport::attachSocket(QWebSocket *socket)
 {
     socket->setMaxAllowedIncomingFrameSize(MaxMessageBytes);
     socket->setMaxAllowedIncomingMessageSize(MaxMessageBytes);
+    disableNagle(socket);
     peers_.insert(socket, QString());
     connect(socket, &QWebSocket::textMessageReceived, this, [this, socket](const QString &message) {
-        const QJsonObject envelope = QJsonDocument::fromJson(message.toUtf8()).object();
-        const QString from = envelope.value(QStringLiteral("from")).toString();
-        if (!from.isEmpty())
-            peers_[socket] = from;
-        emit messageReceived(message);
-        const QString to = envelope.value(QStringLiteral("to")).toString();
+        // Envelope routing hints are plaintext, so the relay can learn which connection belongs to
+        // which device (`from`) and deliver targeted traffic (`to`) to just that peer. Scanning for
+        // the two hints avoids parsing — and copying — the ~100 KB base64 body that a relayed
+        // tunnel or file chunk carries.
+        const EnvelopeRouting routing = scanEnvelopeRouting(message);
+        if (!routing.from.isEmpty())
+            peers_[socket] = routing.from;
+        // A message addressed to some other device is pure relay traffic. Emitting it would run a
+        // full AES-GCM decrypt of that same ~100 KB body only for the receiver-side target filter
+        // to drop it — on a busy forward that is the relay's single largest cost. An absent hint
+        // still goes through, so broadcasts are unaffected.
+        if (!isRelayOnly(routing.to))
+            emit messageReceived(message);
         for (auto it = peers_.cbegin(); it != peers_.cend(); ++it) {
-            if (it.key() != socket && (to.isEmpty() || it.value().isEmpty() || it.value() == to))
+            if (it.key() != socket
+                && (routing.to.isEmpty() || it.value().isEmpty() || it.value() == routing.to))
                 it.key()->sendTextMessage(message);
+        }
+    });
+    connect(socket, &QWebSocket::binaryMessageReceived, this, [this, socket](const QByteArray &frame) {
+        // A binary frame is a port-forward `data` frame; its target sits in the plaintext header,
+        // so the relay routes it without being able to read the payload. Same early-out as the
+        // text path: a frame for another device is never handed to the local app.
+        const QString target = TunnelFrame::peekTarget(frame);
+        if (!isRelayOnly(target))
+            emit binaryReceived(frame);
+        for (auto it = peers_.cbegin(); it != peers_.cend(); ++it) {
+            if (it.key() != socket && (target.isEmpty() || it.value().isEmpty() || it.value() == target))
+                it.key()->sendBinaryMessage(frame);
         }
     });
     connect(socket, &QWebSocket::disconnected, this, [this, socket] {
@@ -150,7 +211,11 @@ void SyncTransport::attachSocket(QWebSocket *socket)
 
 void SyncTransport::send(const QString &message, const QString &to)
 {
-    if (message.toUtf8().size() > MaxMessageBytes) {
+    // A UTF-16 code unit never expands past three UTF-8 bytes, so the size cap can be ruled out
+    // arithmetically for every realistic frame. Measuring it as `message.toUtf8().size()` used to
+    // allocate and encode a second full copy of every clipboard, file and tunnel frame — on top of
+    // the copy `sendTextMessage` makes — purely to compare against a limit nothing was near.
+    if (message.size() > MaxMessageBytes / 3 && message.toUtf8().size() > MaxMessageBytes) {
         emit errorOccurred(QStringLiteral("Refused outgoing WebSocket message larger than 16 MiB"));
         return;
     }

@@ -9,6 +9,7 @@
 #include "ScreenLayoutDialog.h"
 #include "SleepPreventionController.h"
 #include "SyncTransport.h"
+#include "TunnelFrame.h"
 #include "UpdateController.h"
 #include "X11InputBackend.h"
 
@@ -142,6 +143,8 @@ void AppController::start()
     connect(files_, &FileTransferCoordinator::errorOccurred, this, &AppController::reportError);
     connect(portForward_, &PortForwardCoordinator::messageReady, this,
         [this](const QJsonObject &message, const QString &target) { publishEncrypted(message, true, target); });
+    connect(portForward_, &PortForwardCoordinator::dataReady, this, &AppController::publishTunnelData);
+    connect(transport_, &SyncTransport::binaryReceived, this, &AppController::handleBinaryFrame);
     connect(portForward_, &PortForwardCoordinator::statusChanged, this, &AppController::updateStatus);
     connect(portForward_, &PortForwardCoordinator::errorOccurred, this, &AppController::reportError);
     connect(updates_, &UpdateController::checkFailed, this, &AppController::reportError);
@@ -492,6 +495,9 @@ void AppController::restartSync()
     try {
         transport_->start(config_);
         files_->cancelAll();
+        // The transport just restarted, so every peer — and every tunnel to one — is gone.
+        // configure() reconciles in place and would otherwise leave dead tunnels behind.
+        portForward_->stop();
         portForward_->configure(config_.deviceId, config_.portForwardRules, knownDeviceIds());
         pauseAction_->setText(QStringLiteral("Pause Sync"));
     } catch (const std::exception &error) {
@@ -593,6 +599,29 @@ void AppController::publishEncrypted(QJsonObject message, bool realtime, const Q
     } catch (const std::exception &error) {
         reportError(QStringLiteral("Could not encode outgoing message: %1").arg(QString::fromUtf8(error.what())));
     }
+}
+
+void AppController::publishTunnelData(const QString &connectionId, const QString &target, const QByteArray &payload)
+{
+    if (config_.paused || !config_.isComplete()) return;
+    try {
+        transport_->sendBinary(
+            TunnelFrame::encode(connectionId, config_.deviceId, target, payload,
+                config_.password, config_.encryptTransport),
+            target);
+    } catch (const std::exception &error) {
+        reportError(QStringLiteral("Could not encode tunnel data: %1").arg(QString::fromUtf8(error.what())));
+    }
+}
+
+void AppController::handleBinaryFrame(const QByteArray &frame)
+{
+    const TunnelFrame::Decoded decoded = TunnelFrame::decode(frame, config_.password);
+    // Wrong password, tampering, or a malformed frame: drop it silently, exactly as the envelope
+    // path does for a payload it cannot authenticate.
+    if (!decoded.valid || decoded.origin == config_.deviceId || decoded.target != config_.deviceId)
+        return;
+    portForward_->handleData(decoded.connectionId, decoded.payload);
 }
 
 void AppController::announcePresence()

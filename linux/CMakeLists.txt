@@ -22,6 +22,8 @@ add_executable(clipboard-sync
     src/ClipboardService.h
     src/CryptoBox.cpp
     src/CryptoBox.h
+    src/EnvelopeRouting.cpp
+    src/EnvelopeRouting.h
     src/FileTransferCoordinator.cpp
     src/FileTransferCoordinator.h
     src/InputBackend.h
@@ -41,6 +43,8 @@ add_executable(clipboard-sync
     src/SleepPreventionController.h
     src/SyncTransport.cpp
     src/SyncTransport.h
+    src/TunnelFrame.cpp
+    src/TunnelFrame.h
     src/UpdateController.cpp
     src/UpdateController.h
     src/X11InputBackend.cpp
@@ -73,6 +77,26 @@ add_executable(protocol-tests tests/CryptoBoxTests.cpp src/CryptoBox.cpp src/Cry
 target_link_libraries(protocol-tests PRIVATE Qt6::Core OpenSSL::Crypto)
 target_include_directories(protocol-tests PRIVATE src)
 add_test(NAME protocol-tests COMMAND protocol-tests)
+
+add_executable(envelope-routing-tests
+    tests/EnvelopeRoutingTests.cpp
+    src/EnvelopeRouting.cpp
+    src/EnvelopeRouting.h
+)
+target_link_libraries(envelope-routing-tests PRIVATE Qt6::Core)
+target_include_directories(envelope-routing-tests PRIVATE src)
+add_test(NAME envelope-routing-tests COMMAND envelope-routing-tests)
+
+add_executable(tunnel-frame-tests
+    tests/TunnelFrameTests.cpp
+    src/TunnelFrame.cpp
+    src/TunnelFrame.h
+    src/CryptoBox.cpp
+    src/CryptoBox.h
+)
+target_link_libraries(tunnel-frame-tests PRIVATE Qt6::Core OpenSSL::Crypto)
+target_include_directories(tunnel-frame-tests PRIVATE src)
+add_test(NAME tunnel-frame-tests COMMAND tunnel-frame-tests)
 
 add_executable(file-transfer-tests
     tests/FileTransferTests.cpp

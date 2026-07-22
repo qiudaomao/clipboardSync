@@ -104,6 +104,58 @@ enum CryptoBox {
         return try AES.GCM.open(sealedBox, using: key)
     }
 
+    // MARK: - Raw framing primitives
+    //
+    // These skip the JSON envelope entirely: no base64 of the plaintext, no base64 of the
+    // ciphertext, no JSON encode/decode. `TunnelFrame` uses them to put port-forward payloads on
+    // the wire as raw bytes. They share the cached realtime/signed keys with the envelope paths,
+    // so there is no extra PBKDF2 work.
+
+    /// AES-GCM over raw bytes, with `aad` (the frame header) authenticated but not encrypted, so a
+    /// relay cannot rewrite the connection id or routing fields without the tag failing.
+    static func sealRaw(
+        _ plaintext: Data,
+        authenticating aad: Data,
+        password: String
+    ) throws -> (nonce: Data, tag: Data, ciphertext: Data) {
+        let nonceData = randomData(count: nonceBytes)
+        let key = try cachedKey(password: password, salt: realtimeSalt)
+        let nonce = try AES.GCM.Nonce(data: nonceData)
+        let sealedBox = try AES.GCM.seal(plaintext, using: key, nonce: nonce, authenticating: aad)
+        return (nonceData, sealedBox.tag, sealedBox.ciphertext)
+    }
+
+    static func openRaw(
+        nonce nonceData: Data,
+        tag: Data,
+        ciphertext: Data,
+        authenticating aad: Data,
+        password: String
+    ) throws -> Data {
+        guard tag.count == tagBytes, nonceData.count == nonceBytes else {
+            throw CryptoError.invalidEnvelope
+        }
+        let key = try cachedKey(password: password, salt: realtimeSalt)
+        let nonce = try AES.GCM.Nonce(data: nonceData)
+        let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
+        return try AES.GCM.open(sealedBox, using: key, authenticating: aad)
+    }
+
+    /// HMAC-SHA256 for the authenticated-plaintext mode, keyed the same way as `sign`.
+    static func macRaw(_ data: Data, password: String) throws -> Data {
+        let key = try cachedKey(password: password, salt: signedSalt)
+        return Data(HMAC<SHA256>.authenticationCode(for: data, using: key))
+    }
+
+    static func isValidMacRaw(_ mac: Data, authenticating data: Data, password: String) throws -> Bool {
+        let key = try cachedKey(password: password, salt: signedSalt)
+        return HMAC<SHA256>.isValidAuthenticationCode(mac, authenticating: data, using: key)
+    }
+
+    static var macByteCount: Int { SHA256.byteCount }
+    static var nonceByteCount: Int { nonceBytes }
+    static var tagByteCount: Int { tagBytes }
+
     private static func cachedKey(password: String, salt: Data) throws -> SymmetricKey {
         let cacheKey = "\(password)\u{0}\(salt.base64EncodedString())"
         if let key = keyCacheQueue.sync(execute: { cachedKeys[cacheKey] }) {

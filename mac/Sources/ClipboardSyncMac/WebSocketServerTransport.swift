@@ -5,6 +5,7 @@ import Network
 final class WebSocketServerTransport: Transport {
     var onStatus: ((String) -> Void)?
     var onMessage: ((String, Bool) -> Void)?
+    var onBinaryMessage: ((Data) -> Void)?
     var onPeerCount: ((Int) -> Void)?
 
     private let port: Int
@@ -27,7 +28,12 @@ final class WebSocketServerTransport: Transport {
                     return
                 }
 
-                let listener = try NWListener(using: .tcp, on: nwPort)
+                // Nagle would hold a small frame back waiting for more bytes while the peer's
+                // delayed ACK waits for a response — worth ~40 ms on every interactive round trip
+                // through a tunnel or an input event. Frames are already batched by the sender.
+                let tcp = NWProtocolTCP.Options()
+                tcp.noDelay = true
+                let listener = try NWListener(using: NWParameters(tls: nil, tcp: tcp), on: nwPort)
                 listener.newConnectionHandler = { [weak self] connection in
                     self?.accept(connection)
                 }
@@ -70,6 +76,27 @@ final class WebSocketServerTransport: Transport {
         }
     }
 
+    func sendBinary(_ frame: Data, to deviceId: String?) {
+        queue.async {
+            self.deliverBinary(frame, to: deviceId, excluding: nil)
+        }
+    }
+
+    /// True when `to` names a device that definitely isn't this one, so the frame is only passing
+    /// through. Deliberately conservative: an absent hint, an empty hint, or an unknown local
+    /// device id all return false, so the frame is still handled locally.
+    private func isRelayOnly(_ to: String?) -> Bool {
+        guard
+            let to,
+            !to.isEmpty,
+            let localDeviceId,
+            !localDeviceId.isEmpty
+        else {
+            return false
+        }
+        return to != localDeviceId
+    }
+
     private func accept(_ connection: NWConnection) {
         let peer = ServerPeer(connection: connection, queue: queue)
         let peerId = ObjectIdentifier(peer)
@@ -81,15 +108,36 @@ final class WebSocketServerTransport: Transport {
             // Envelope routing hints are plaintext, so the relay can learn which connection
             // belongs to which device (`from`) and deliver targeted traffic (`to`) to just that
             // peer instead of broadcasting file chunks and tunnel data to everyone.
-            let routing = try? JSONDecoder().decode(EnvelopeRouting.self, from: Data(text.utf8))
+            let routing = EnvelopeRouting.scan(text)
             if let from = routing?.from, !from.isEmpty {
                 peer?.deviceId = from
             }
             let viaInputChannel = peer?.isInputChannel == true
-            self.onMessage?(text, viaInputChannel)
+            // A message addressed to some other device is pure relay traffic. Handing it to
+            // `onMessage` would run a full AES-GCM decrypt of a ~100 KB tunnel or file chunk only
+            // for the receiver-side target filter to drop it — on a busy forward that is the
+            // relay's single largest cost. Anything unaddressed still goes through, so broadcasts
+            // and older peers that omit the hint are unaffected.
+            if !self.isRelayOnly(routing?.to) {
+                self.onMessage?(text, viaInputChannel)
+            }
             // Relay on the same class of channel the message arrived on, so one peer's input
             // frames reach the next peer's input connection instead of its bulk stream.
             self.deliver(text, to: routing?.to, preferInput: viaInputChannel, excluding: peer)
+        }
+        peer.onBinary = { [weak self, weak peer] frame in
+            guard let self else {
+                return
+            }
+            // A binary frame is a port-forward `data` frame; its target sits in the plaintext
+            // header, so the relay routes it without being able to read the payload. Same
+            // early-out as the text path: a frame for another device is never handed to the
+            // local app.
+            let target = TunnelFrame.peekTarget(frame)
+            if !self.isRelayOnly(target) {
+                self.onBinaryMessage?(frame)
+            }
+            self.deliverBinary(frame, to: target, excluding: peer)
         }
         peer.onReady = { [weak self] in
             self?.pushStatus()
@@ -133,6 +181,28 @@ final class WebSocketServerTransport: Transport {
         }
     }
 
+    /// Binary counterpart of `deliver`. Tunnel frames are always addressed, so there is no
+    /// input-channel preference to make — they belong on the data connection either way.
+    private func deliverBinary(_ frame: Data, to deviceId: String?, excluding excluded: ServerPeer?) {
+        if let deviceId, !deviceId.isEmpty {
+            if deviceId == localDeviceId {
+                return
+            }
+            let candidates = peers.values.filter { $0.deviceId == deviceId && $0.isReady && $0 !== excluded }
+            if let target = candidates.first(where: { !$0.isInputChannel }) ?? candidates.first {
+                target.sendBinary(frame)
+                return
+            }
+            if peers.values.contains(where: { $0.deviceId == deviceId && $0.isReady }) {
+                // The only matching connection is the excluded source itself; don't broadcast.
+                return
+            }
+        }
+        for peer in peers.values where peer !== excluded && peer.isReady && !peer.isInputChannel {
+            peer.sendBinary(frame)
+        }
+    }
+
     private func pushStatus() {
         // Input-channel connections are auxiliary; a device's presence is its data connection.
         let readyPeerCount = peers.values.filter { $0.isReady && !$0.isInputChannel }.count
@@ -144,6 +214,7 @@ final class WebSocketServerTransport: Transport {
 private final class ServerPeer {
     var onReady: (() -> Void)?
     var onText: ((String) -> Void)?
+    var onBinary: ((Data) -> Void)?
     var onClose: (() -> Void)?
     /// The device id this connection last announced via an envelope's `from` hint, once known.
     var deviceId: String?
@@ -193,6 +264,13 @@ private final class ServerPeer {
             return
         }
         sendFrame(opcode: 0x1, payload: Data(text.utf8))
+    }
+
+    func sendBinary(_ frame: Data) {
+        guard isReady else {
+            return
+        }
+        sendFrame(opcode: 0x2, payload: frame)
     }
 
     private func receiveHandshake() {
@@ -391,6 +469,8 @@ private final class ServerPeer {
     private func deliver(opcode: UInt8, payload: Data) {
         if opcode == 0x1, let text = String(data: payload, encoding: .utf8) {
             onText?(text)
+        } else if opcode == 0x2 {
+            onBinary?(payload)
         }
     }
 

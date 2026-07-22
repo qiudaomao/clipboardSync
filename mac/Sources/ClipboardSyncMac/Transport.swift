@@ -16,6 +16,9 @@ protocol Transport: AnyObject {
     /// Delivers a received payload; the flag is true when it arrived on the dedicated input
     /// channel, letting the app process it on a fast path that never waits on bulk decryption.
     var onMessage: ((String, Bool) -> Void)? { get set }
+    /// Delivers a received binary frame. Only port-forward `data` frames use this — see
+    /// `TunnelFrame` for why they bypass the JSON envelope.
+    var onBinaryMessage: ((Data) -> Void)? { get set }
     var onPeerCount: ((Int) -> Void)? { get set }
 
     func start()
@@ -26,6 +29,9 @@ protocol Transport: AnyObject {
     /// same hint carried inside the message envelope. `realtime` prefers the dedicated input
     /// channel when one is established, falling back to the data connection when it isn't.
     func send(_ message: String, to deviceId: String?, realtime: Bool)
+    /// Binary counterpart of `send`, always on the data connection. Routing works the same way,
+    /// except a relay reads the target out of the frame header instead of a JSON envelope.
+    func sendBinary(_ frame: Data, to deviceId: String?)
 }
 
 extension Transport {

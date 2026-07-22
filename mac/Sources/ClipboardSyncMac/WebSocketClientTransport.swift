@@ -3,12 +3,17 @@ import Foundation
 final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDelegate {
     var onStatus: ((String) -> Void)?
     var onMessage: ((String, Bool) -> Void)?
+    var onBinaryMessage: ((Data) -> Void)?
     var onPeerCount: ((Int) -> Void)?
 
     private let host: String
     private let port: Int
     private var session: URLSession?
     private var task: URLSessionWebSocketTask?
+    /// Guards the three fields `send` reads (`task`, `inputTask`, `inputChannelReady`) so it can be
+    /// called from a sender's wire queue while the main thread reconnects. Everything else in this
+    /// class stays on main or the URLSession delegate queue as before.
+    private let channelLock = NSLock()
     private var shouldRun = false
     private var reconnectScheduled = false
     private let keepAliveInterval: TimeInterval = 10
@@ -43,18 +48,41 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         stopKeepAlive()
         task?.cancel(with: .goingAway, reason: nil)
         session?.invalidateAndCancel()
+        channelLock.lock()
         task = nil
+        channelLock.unlock()
         session = nil
         closeInputChannel()
         onPeerCount?(0)
         onStatus?(AppText.text("status.stopped"))
     }
 
+    /// Callable from any thread: bulk frames (clipboard, file chunks, tunnel data) are handed over
+    /// straight from the sender's wire queue so they never queue behind the main run loop. The
+    /// lock covers only picking the channel — `URLSessionWebSocketTask.send` is itself thread-safe,
+    /// so it runs outside.
     func send(_ message: String, to deviceId: String?, realtime: Bool) {
         // A client has a single connection per channel to its server; the server relays targeted
         // messages using the routing hint inside the envelope itself.
+        channelLock.lock()
         let channelTask = realtime && inputChannelReady ? inputTask : task
+        channelLock.unlock()
+
         channelTask?.send(.string(message)) { [weak self] error in
+            if let error {
+                self?.onStatus?(AppText.format("status.sendFailed", error.localizedDescription))
+            }
+        }
+    }
+
+    /// Binary frames are bulk traffic, so they always take the data connection — the input channel
+    /// exists to keep small realtime frames out from behind exactly this kind of payload.
+    func sendBinary(_ frame: Data, to deviceId: String?) {
+        channelLock.lock()
+        let channelTask = task
+        channelLock.unlock()
+
+        channelTask?.send(.data(frame)) { [weak self] error in
             if let error {
                 self?.onStatus?(AppText.format("status.sendFailed", error.localizedDescription))
             }
@@ -74,7 +102,9 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         // exceed that, and hitting the cap kills the connection instead of delivering the message.
         task.maximumMessageSize = ClipboardLimits.maxWebSocketMessageBytes
         self.session = session
+        channelLock.lock()
         self.task = task
+        channelLock.unlock()
         task.resume()
         receiveLoop()
     }
@@ -94,17 +124,21 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         let task = session.webSocketTask(with: url, protocols: [TransportChannels.inputSubprotocol])
         task.maximumMessageSize = ClipboardLimits.maxWebSocketMessageBytes
         inputSession = session
+        channelLock.lock()
         inputTask = task
+        channelLock.unlock()
         task.resume()
         inputReceiveLoop()
     }
 
     private func closeInputChannel() {
-        inputChannelReady = false
         inputReconnectScheduled = false
         inputTask?.cancel(with: .goingAway, reason: nil)
         inputSession?.invalidateAndCancel()
+        channelLock.lock()
+        inputChannelReady = false
         inputTask = nil
+        channelLock.unlock()
         inputSession = nil
     }
 
@@ -142,7 +176,9 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
                 if self.shouldRun {
                     self.receiveLoop()
                 }
-            case .success(.data):
+            case .success(.data(let data)):
+                // Port-forward `data` frames arrive here rather than as JSON; see `TunnelFrame`.
+                self.onBinaryMessage?(data)
                 if self.shouldRun {
                     self.receiveLoop()
                 }
@@ -201,7 +237,9 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
         stopKeepAlive()
         task?.cancel(with: .goingAway, reason: nil)
         session?.invalidateAndCancel()
+        channelLock.lock()
         task = nil
+        channelLock.unlock()
         session = nil
         closeInputChannel()
 
@@ -272,7 +310,9 @@ final class WebSocketClientTransport: NSObject, Transport, URLSessionWebSocketDe
                 return
             }
             if `protocol` == TransportChannels.inputSubprotocol {
+                channelLock.lock()
                 inputChannelReady = true
+                channelLock.unlock()
             } else {
                 // The server accepted the socket but didn't echo the subprotocol: it predates the
                 // input channel. Close and don't retry — the data connection carries everything.

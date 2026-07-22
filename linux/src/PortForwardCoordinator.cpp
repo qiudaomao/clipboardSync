@@ -7,13 +7,35 @@
 #include <QTcpSocket>
 #include <QUuid>
 
+namespace {
+/// Matches the other platforms' chunk size, and bounds what a peer can ask this side to buffer.
+constexpr qsizetype MaxChunkBytes = 64 * 1024;
+/// Ceiling on bytes Qt may buffer from a tunnel socket before it stops reading. Qt honours this by
+/// leaving data in the kernel, which closes the TCP window and makes whatever is writing into the
+/// forwarded port slow down — real back-pressure rather than growth in this process.
+constexpr int MaxReadBufferBytes = 512 * 1024;
+/// Ceiling on bytes queued towards a slow local target. Qt's write buffer is unbounded, so without
+/// this a peer that sends faster than the target accepts would grow it without limit.
+constexpr qint64 MaxWriteBufferBytes = 4 * 1024 * 1024;
+}
+
 PortForwardCoordinator::PortForwardCoordinator(QObject *parent) : QObject(parent) {}
 
 void PortForwardCoordinator::configure(const QString &deviceId, const QJsonArray &rules, const QSet<QString> &onlinePeers)
 {
-    stop();
-    deviceId_ = deviceId;
+    // Reconciles the listener set in place. This used to begin with stop(), which closed every
+    // live tunnel — and because the app re-runs configure() whenever a peer comes online or the
+    // server broadcasts its rule table, any other device waking up killed every forwarded
+    // connection mid-stream. Callers that genuinely want a clean slate (a transport restart) call
+    // stop() themselves.
+    if (deviceId_ != deviceId) {
+        // A new identity invalidates every listener and tunnel opened under the old one.
+        stop();
+        deviceId_ = deviceId;
+    }
     onlinePeers_ = onlinePeers;
+
+    QHash<QString, QJsonObject> desired;
     for (const QJsonValue &value : rules) {
         const QJsonObject rule = value.toObject();
         if (!rule.value(QStringLiteral("enabled")).toBool(true)
@@ -25,18 +47,48 @@ void PortForwardCoordinator::configure(const QString &deviceId, const QJsonArray
             emit errorOccurred(QStringLiteral("Invalid port-forward rule %1").arg(id));
             continue;
         }
-        auto *server = new QTcpServer(this);
-        const QHostAddress address = rule.value(QStringLiteral("inAllowLan")).toBool()
-            ? QHostAddress::Any : QHostAddress::LocalHost;
-        if (!server->listen(address, static_cast<quint16>(port))) {
-            emit errorOccurred(QStringLiteral("Port forward %1 failed to listen: %2").arg(id, server->errorString()));
-            server->deleteLater();
-            continue;
-        }
-        listeners_.insert(id, server);
-        connect(server, &QTcpServer::newConnection, this, [this, server, rule] { acceptConnection(server, rule); });
-        emit statusChanged(QStringLiteral("Forward listening on %1:%2").arg(address.toString()).arg(port));
+        desired.insert(id, rule);
     }
+
+    // Close listeners whose rule was removed, disabled, moved to another device, or edited — an
+    // edited port, host or LAN setting needs a fresh bind. Tunnels already running through them
+    // are left to drain, matching the other platforms.
+    const QList<QString> existing = listeners_.keys();
+    for (const QString &id : existing) {
+        const auto wanted = desired.constFind(id);
+        if (wanted == desired.constEnd() || *wanted != listeners_.value(id).rule)
+            stopListener(id);
+    }
+
+    for (auto it = desired.cbegin(); it != desired.cend(); ++it) {
+        if (!listeners_.contains(it.key()))
+            startListener(it.key(), it.value());
+    }
+}
+
+void PortForwardCoordinator::startListener(const QString &id, const QJsonObject &rule)
+{
+    const int port = rule.value(QStringLiteral("inPort")).toInt();
+    auto *server = new QTcpServer(this);
+    const QHostAddress address = rule.value(QStringLiteral("inAllowLan")).toBool()
+        ? QHostAddress::Any : QHostAddress::LocalHost;
+    if (!server->listen(address, static_cast<quint16>(port))) {
+        emit errorOccurred(QStringLiteral("Port forward %1 failed to listen: %2").arg(id, server->errorString()));
+        server->deleteLater();
+        return;
+    }
+    listeners_.insert(id, {rule, server});
+    connect(server, &QTcpServer::newConnection, this, [this, server, rule] { acceptConnection(server, rule); });
+    emit statusChanged(QStringLiteral("Forward listening on %1:%2").arg(address.toString()).arg(port));
+}
+
+void PortForwardCoordinator::stopListener(const QString &id)
+{
+    const Listener listener = listeners_.take(id);
+    if (!listener.server)
+        return;
+    listener.server->close();
+    listener.server->deleteLater();
 }
 
 void PortForwardCoordinator::acceptConnection(QTcpServer *server, const QJsonObject &rule)
@@ -59,11 +111,22 @@ void PortForwardCoordinator::handle(const QJsonObject &message)
     const QString id = message.value(QStringLiteral("connectionId")).toString();
     if (kind == QStringLiteral("open")) { openTunnel(message); return; }
     if (kind == QStringLiteral("close")) { closeTunnel(id, false); return; }
-    if (kind != QStringLiteral("data") || !tunnels_.contains(id)) return;
-    const QByteArray bytes = QByteArray::fromBase64(message.value(QStringLiteral("dataBase64")).toString().toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
-    if (bytes.isEmpty() || bytes.size() > 64 * 1024) { closeTunnel(id, true, QStringLiteral("invalid tunnel data")); return; }
-    QTcpSocket *socket = tunnels_.value(id).socket;
-    if (socket->write(bytes) != bytes.size()) closeTunnel(id, true, socket->errorString());
+    // `data` no longer arrives as JSON; see handleData().
+}
+
+void PortForwardCoordinator::handleData(const QString &connectionId, const QByteArray &payload)
+{
+    if (!tunnels_.contains(connectionId)) return;
+    if (payload.isEmpty() || payload.size() > MaxChunkBytes) {
+        closeTunnel(connectionId, true, QStringLiteral("invalid tunnel data"));
+        return;
+    }
+    QTcpSocket *socket = tunnels_.value(connectionId).socket;
+    if (socket->bytesToWrite() > MaxWriteBufferBytes) {
+        closeTunnel(connectionId, true, QStringLiteral("tunnel backlog overflow"));
+        return;
+    }
+    if (socket->write(payload) != payload.size()) closeTunnel(connectionId, true, socket->errorString());
 }
 
 void PortForwardCoordinator::openTunnel(const QJsonObject &message)
@@ -80,14 +143,19 @@ void PortForwardCoordinator::openTunnel(const QJsonObject &message)
 
 void PortForwardCoordinator::attachTunnel(const QString &id, const QString &peer, QTcpSocket *socket)
 {
+    // Forwarded traffic is overwhelmingly interactive request/response (SSH, HTTP, RDP), where
+    // Nagle's algorithm holds a small write back waiting for more data while the peer's delayed
+    // ACK holds the acknowledgement back waiting for a response — a mutual stall that adds ~40 ms
+    // to every round trip. The tunnel already batches at the chunk level.
+    socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
+    socket->setReadBufferSize(MaxReadBufferBytes);
     tunnels_.insert(id, {peer, socket});
     connect(socket, &QTcpSocket::readyRead, this, [this, id] {
         if (!tunnels_.contains(id)) return;
         QTcpSocket *active = tunnels_.value(id).socket;
         while (active->bytesAvailable() > 0) {
-            const QByteArray bytes = active->read(64 * 1024);
-            if (!bytes.isEmpty()) sendTunnel(QStringLiteral("data"), id, tunnels_.value(id).peer,
-                {{QStringLiteral("dataBase64"), QString::fromLatin1(bytes.toBase64())}});
+            const QByteArray bytes = active->read(MaxChunkBytes);
+            if (!bytes.isEmpty()) emit dataReady(id, tunnels_.value(id).peer, bytes);
         }
     });
     connect(socket, &QTcpSocket::disconnected, this, [this, id] { closeTunnel(id, true); });
@@ -122,6 +190,6 @@ void PortForwardCoordinator::closeTunnel(const QString &id, bool notify, const Q
 void PortForwardCoordinator::stop()
 {
     const auto ids = tunnels_.keys(); for (const QString &id : ids) closeTunnel(id, false);
-    for (QTcpServer *server : listeners_) { server->close(); server->deleteLater(); }
-    listeners_.clear();
+    const QList<QString> listenerIds = listeners_.keys();
+    for (const QString &id : listenerIds) stopListener(id);
 }

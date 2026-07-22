@@ -132,6 +132,86 @@ QJsonObject CryptoBox::encrypt(const QByteArray &plaintext, const QString &passw
     };
 }
 
+QByteArray CryptoBox::sealRaw(const QByteArray &plaintext, const QByteArray &aad, const QString &password,
+    QByteArray &nonce, QByteArray &tag)
+{
+    nonce = randomBytes(RawNonceBytes);
+    tag = QByteArray(RawTagBytes, Qt::Uninitialized);
+    const QByteArray key = deriveKey(password, RealtimeSalt);
+    QByteArray ciphertext(plaintext.size() + RawTagBytes, Qt::Uninitialized);
+    int written = 0;
+    int finalWritten = 0;
+    int aadWritten = 0;
+
+    CipherContext context(EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free);
+    if (!context || EVP_EncryptInit_ex(context.get(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1
+        || EVP_CIPHER_CTX_ctrl(context.get(), EVP_CTRL_GCM_SET_IVLEN, nonce.size(), nullptr) != 1
+        || EVP_EncryptInit_ex(context.get(), nullptr, nullptr,
+            reinterpret_cast<const unsigned char *>(key.constData()),
+            reinterpret_cast<const unsigned char *>(nonce.constData())) != 1
+        // A null output buffer feeds the header in as additional authenticated data.
+        || EVP_EncryptUpdate(context.get(), nullptr, &aadWritten,
+            reinterpret_cast<const unsigned char *>(aad.constData()), aad.size()) != 1
+        || EVP_EncryptUpdate(context.get(), reinterpret_cast<unsigned char *>(ciphertext.data()), &written,
+            reinterpret_cast<const unsigned char *>(plaintext.constData()), plaintext.size()) != 1
+        || EVP_EncryptFinal_ex(context.get(), reinterpret_cast<unsigned char *>(ciphertext.data()) + written, &finalWritten) != 1
+        || EVP_CIPHER_CTX_ctrl(context.get(), EVP_CTRL_GCM_GET_TAG, tag.size(), tag.data()) != 1) {
+        throw std::runtime_error("AES-GCM encryption failed");
+    }
+    ciphertext.resize(written + finalWritten);
+    return ciphertext;
+}
+
+QByteArray CryptoBox::openRaw(const QByteArray &nonce, const QByteArray &tag, const QByteArray &ciphertext,
+    const QByteArray &aad, const QString &password)
+{
+    if (nonce.size() != RawNonceBytes || tag.size() != RawTagBytes)
+        throw std::runtime_error("Malformed tunnel frame");
+
+    const QByteArray key = deriveKey(password, RealtimeSalt);
+    QByteArray plaintext(ciphertext.size(), Qt::Uninitialized);
+    QByteArray mutableTag = tag;
+    int written = 0;
+    int finalWritten = 0;
+    int aadWritten = 0;
+
+    CipherContext context(EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free);
+    if (!context || EVP_DecryptInit_ex(context.get(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1
+        || EVP_CIPHER_CTX_ctrl(context.get(), EVP_CTRL_GCM_SET_IVLEN, nonce.size(), nullptr) != 1
+        || EVP_DecryptInit_ex(context.get(), nullptr, nullptr,
+            reinterpret_cast<const unsigned char *>(key.constData()),
+            reinterpret_cast<const unsigned char *>(nonce.constData())) != 1
+        || EVP_DecryptUpdate(context.get(), nullptr, &aadWritten,
+            reinterpret_cast<const unsigned char *>(aad.constData()), aad.size()) != 1
+        || EVP_DecryptUpdate(context.get(), reinterpret_cast<unsigned char *>(plaintext.data()), &written,
+            reinterpret_cast<const unsigned char *>(ciphertext.constData()), ciphertext.size()) != 1
+        || EVP_CIPHER_CTX_ctrl(context.get(), EVP_CTRL_GCM_SET_TAG, mutableTag.size(), mutableTag.data()) != 1
+        || EVP_DecryptFinal_ex(context.get(), reinterpret_cast<unsigned char *>(plaintext.data()) + written, &finalWritten) != 1) {
+        throw std::runtime_error("AES-GCM authentication failed");
+    }
+    plaintext.resize(written + finalWritten);
+    return plaintext;
+}
+
+QByteArray CryptoBox::macRaw(const QByteArray &data, const QString &password)
+{
+    const QByteArray key = deriveKey(password, SignedSalt);
+    unsigned char mac[EVP_MAX_MD_SIZE];
+    unsigned int macLength = 0;
+    if (!HMAC(EVP_sha256(), key.constData(), key.size(),
+            reinterpret_cast<const unsigned char *>(data.constData()), data.size(), mac, &macLength))
+        throw std::runtime_error("HMAC signing failed");
+    return {reinterpret_cast<char *>(mac), static_cast<qsizetype>(macLength)};
+}
+
+bool CryptoBox::isValidMacRaw(const QByteArray &mac, const QByteArray &data, const QString &password)
+{
+    const QByteArray expected = macRaw(data, password);
+    if (expected.size() != mac.size())
+        return false;
+    return CRYPTO_memcmp(expected.constData(), mac.constData(), expected.size()) == 0;
+}
+
 QByteArray CryptoBox::decrypt(const QJsonObject &envelope, const QString &password)
 {
     const int version = envelope.value(QStringLiteral("version")).toInt();

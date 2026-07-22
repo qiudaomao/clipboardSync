@@ -8,7 +8,6 @@ using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -32,6 +31,11 @@ internal interface ISyncTransport : IDisposable
     /// Delivers a received payload; the flag is true when it arrived on the dedicated input
     /// channel, letting the app process it on a path that never waits on bulk work.
     event Action<string, bool>? MessageReceived;
+    /// Delivers a received binary frame. Only port-forward "data" frames use this - see
+    /// <see cref="TunnelFrame"/> for why they bypass the JSON envelope. Awaited by the receive
+    /// loop, so a handler that blocks on a full tunnel queue stops this connection being drained -
+    /// that is the inbound half of the port-forward back-pressure.
+    event Func<byte[], Task>? BinaryReceived;
     event Action<int>? PeerCountChanged;
 
     void Start();
@@ -42,6 +46,11 @@ internal interface ISyncTransport : IDisposable
     /// same hint carried inside the message envelope. <c>realtime</c> prefers the dedicated input
     /// channel when one is established, falling back to the data connection when it isn't.
     Task SendAsync(string message, string? to = null, bool realtime = false);
+
+    /// Binary counterpart of <see cref="SendAsync"/>, always on the data connection. Routing works
+    /// the same way, except a relay reads the target out of the frame header instead of a JSON
+    /// envelope. Only port-forward "data" frames use this - see <see cref="TunnelFrame"/>.
+    Task SendBinaryAsync(byte[] frame, string? to = null);
 }
 
 internal sealed class ClientTransport : ISyncTransport
@@ -62,6 +71,7 @@ internal sealed class ClientTransport : ISyncTransport
 
     public event Action<string>? StatusChanged;
     public event Action<string, bool>? MessageReceived;
+    public event Func<byte[], Task>? BinaryReceived;
     public event Action<int>? PeerCountChanged;
 
     public ClientTransport(string host, int port)
@@ -257,6 +267,31 @@ internal sealed class ClientTransport : ISyncTransport
         }
     }
 
+    /// Binary frames are bulk traffic, so they always take the data connection - the input channel
+    /// exists to keep small realtime frames out from behind exactly this kind of payload.
+    public async Task SendBinaryAsync(byte[] frame, string? to = null)
+    {
+        var activeSocket = socket;
+        if (activeSocket?.State != WebSocketState.Open)
+        {
+            return;
+        }
+
+        await sendLock.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await activeSocket.SendAsync(frame, WebSocketMessageType.Binary, true, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            StatusChanged?.Invoke(AppText.Text("status.sendFailed"));
+        }
+        finally
+        {
+            sendLock.Release();
+        }
+    }
+
     private async Task ReceiveLoopAsync(ClientWebSocket ws, CancellationToken token, bool viaInputChannel = false)
     {
         var buffer = new byte[8192];
@@ -278,16 +313,26 @@ internal sealed class ClientTransport : ISyncTransport
                 }
             } while (!result.EndOfMessage);
 
-            if (result.MessageType == WebSocketMessageType.Text)
+            try
             {
-                try
+                if (result.MessageType == WebSocketMessageType.Text)
                 {
                     MessageReceived?.Invoke(Encoding.UTF8.GetString(message.ToArray()), viaInputChannel);
                 }
-                catch
+                else if (result.MessageType == WebSocketMessageType.Binary)
                 {
-                    StatusChanged?.Invoke(AppText.Text("status.messageHandlerFailed"));
+                    // Port-forward "data" frames arrive here rather than as JSON; see TunnelFrame.
+                    // Awaited so a congested tunnel stops this socket being drained.
+                    var binaryHandler = BinaryReceived;
+                    if (binaryHandler is not null)
+                    {
+                        await binaryHandler(message.ToArray()).ConfigureAwait(false);
+                    }
                 }
+            }
+            catch
+            {
+                StatusChanged?.Invoke(AppText.Text("status.messageHandlerFailed"));
             }
         }
     }
@@ -295,12 +340,6 @@ internal sealed class ClientTransport : ISyncTransport
 
 internal sealed class ServerTransport : ISyncTransport
 {
-    private static readonly JsonSerializerOptions RoutingJsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true
-    };
-
     private readonly int port;
     private readonly ConcurrentDictionary<Guid, ServerPeer> peers = new();
     private CancellationTokenSource? cts;
@@ -312,6 +351,7 @@ internal sealed class ServerTransport : ISyncTransport
 
     public event Action<string>? StatusChanged;
     public event Action<string, bool>? MessageReceived;
+    public event Func<byte[], Task>? BinaryReceived;
     public event Action<int>? PeerCountChanged;
 
     public ServerTransport(int port)
@@ -355,6 +395,11 @@ internal sealed class ServerTransport : ISyncTransport
         return DeliverAsync(message, to, excludedPeer: null, preferInput: realtime);
     }
 
+    public Task SendBinaryAsync(byte[] frame, string? to = null)
+    {
+        return DeliverBinaryAsync(frame, to, excludedPeer: null);
+    }
+
     public void Dispose()
     {
         Stop();
@@ -383,17 +428,50 @@ internal sealed class ServerTransport : ISyncTransport
                     {
                         peer.DeviceId = routing!.From;
                     }
-                    try
+                    // A message addressed to some other device is pure relay traffic. Handing it
+                    // to MessageReceived would run a full AES-GCM decrypt of a ~100 KB tunnel or
+                    // file chunk only for the receiver-side target filter to drop it - on a busy
+                    // forward that is the relay's single largest cost. Anything unaddressed still
+                    // goes through, so broadcasts and older peers that omit the hint are
+                    // unaffected.
+                    if (!IsRelayOnly(routing?.To))
                     {
-                        MessageReceived?.Invoke(text, peer.IsInputChannel);
-                    }
-                    catch
-                    {
-                        StatusChanged?.Invoke(AppText.Text("status.messageHandlerFailed"));
+                        try
+                        {
+                            MessageReceived?.Invoke(text, peer.IsInputChannel);
+                        }
+                        catch
+                        {
+                            StatusChanged?.Invoke(AppText.Text("status.messageHandlerFailed"));
+                        }
                     }
                     // Relay on the same class of channel the message arrived on, so one peer's
                     // input frames reach the next peer's input connection, not its bulk stream.
                     await DeliverAsync(text, routing?.To, id, preferInput: peer.IsInputChannel).ConfigureAwait(false);
+                };
+                peer.BinaryReceived += async frame =>
+                {
+                    // A binary frame is a port-forward "data" frame; its target sits in the
+                    // plaintext header, so the relay routes it without being able to read the
+                    // payload. Same early-out as the text path: a frame for another device is
+                    // never handed to the local app.
+                    var target = TunnelFrame.PeekTarget(frame);
+                    if (!IsRelayOnly(target))
+                    {
+                        try
+                        {
+                            var binaryHandler = BinaryReceived;
+                            if (binaryHandler is not null)
+                            {
+                                await binaryHandler(frame).ConfigureAwait(false);
+                            }
+                        }
+                        catch
+                        {
+                            StatusChanged?.Invoke(AppText.Text("status.messageHandlerFailed"));
+                        }
+                    }
+                    await DeliverBinaryAsync(frame, target, id).ConfigureAwait(false);
                 };
                 peer.Ready += PushStatus;
                 peer.Closed += () =>
@@ -419,13 +497,19 @@ internal sealed class ServerTransport : ISyncTransport
     {
         try
         {
-            return JsonSerializer.Deserialize<EnvelopeRouting>(message, RoutingJsonOptions);
+            return EnvelopeRouting.Scan(message);
         }
         catch
         {
             return null;
         }
     }
+
+    /// True when <c>to</c> names a device that definitely isn't this one, so the frame is only
+    /// passing through. Deliberately conservative: an absent hint, an empty hint, or an unknown
+    /// local device id all return false, so the frame is still handled locally.
+    private bool IsRelayOnly(string? to)
+        => !string.IsNullOrEmpty(to) && !string.IsNullOrEmpty(LocalDeviceId) && to != LocalDeviceId;
 
     /// Sends the message to the one ready peer registered under the <c>to</c> device id, or to
     /// every ready peer (except <c>excludedPeer</c>) when the target is absent or not (yet)
@@ -494,6 +578,61 @@ internal sealed class ServerTransport : ISyncTransport
         }
     }
 
+    /// Binary counterpart of <see cref="DeliverAsync"/>. Tunnel frames are always addressed, so
+    /// there is no input-channel preference to make - they belong on the data connection either way.
+    private async Task DeliverBinaryAsync(byte[] frame, string? to, Guid? excludedPeer)
+    {
+        if (!string.IsNullOrEmpty(to))
+        {
+            if (to == LocalDeviceId)
+            {
+                return;
+            }
+            var target = peers
+                .Where(item => item.Value.DeviceId == to && item.Value.IsReady && !item.Value.IsInputChannel
+                    && !(excludedPeer.HasValue && item.Key == excludedPeer.Value))
+                .Select(item => item.Value)
+                .FirstOrDefault();
+            if (target is not null)
+            {
+                try
+                {
+                    await target.SendBinaryAsync(frame).ConfigureAwait(false);
+                }
+                catch
+                {
+                    target.Close();
+                }
+                return;
+            }
+            if (peers.Any(item => item.Value.DeviceId == to && item.Value.IsReady))
+            {
+                // The only matching connection is the excluded source itself; don't broadcast.
+                return;
+            }
+        }
+
+        foreach (var item in peers)
+        {
+            if (excludedPeer.HasValue && item.Key == excludedPeer.Value)
+            {
+                continue;
+            }
+            if (!item.Value.IsReady || item.Value.IsInputChannel)
+            {
+                continue;
+            }
+            try
+            {
+                await item.Value.SendBinaryAsync(frame).ConfigureAwait(false);
+            }
+            catch
+            {
+                item.Value.Close();
+            }
+        }
+    }
+
     private void PushStatus()
     {
         // Input-channel connections are auxiliary; a device's presence is its data connection.
@@ -522,11 +661,24 @@ internal sealed class ServerPeer
     public string? DeviceId { get; set; }
     public event Action? Ready;
     public event Func<string, Task>? TextReceived;
+    public event Func<byte[], Task>? BinaryReceived;
     public event Action? Closed;
 
     public ServerPeer(TcpClient client)
     {
         this.client = client;
+        // Nagle would hold a small frame back waiting for more bytes while the peer's delayed ACK
+        // waits for a response - worth ~40 ms on every interactive round trip through a tunnel or
+        // an input event. Frames are already batched by the sender, so kernel coalescing buys
+        // nothing. (ClientWebSocket's own sockets already run with NoDelay via SocketsHttpHandler.)
+        try
+        {
+            client.NoDelay = true;
+        }
+        catch (SocketException)
+        {
+            // A socket that died between accept and here; the read loop reports it.
+        }
         stream = client.GetStream();
     }
 
@@ -554,6 +706,10 @@ internal sealed class ServerPeer
                 {
                     await TextReceived.Invoke(frame.Text).ConfigureAwait(false);
                 }
+                else if (frame.Binary is not null && BinaryReceived is not null)
+                {
+                    await BinaryReceived.Invoke(frame.Binary).ConfigureAwait(false);
+                }
             }
         }
         catch
@@ -576,6 +732,23 @@ internal sealed class ServerPeer
         try
         {
             await SendFrameAsync(0x1, Encoding.UTF8.GetBytes(text), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            Close();
+        }
+    }
+
+    public async Task SendBinaryAsync(byte[] frame)
+    {
+        if (closed || !IsReady)
+        {
+            return;
+        }
+
+        try
+        {
+            await SendFrameAsync(0x2, frame, CancellationToken.None).ConfigureAwait(false);
         }
         catch
         {
@@ -733,7 +906,9 @@ internal sealed class ServerPeer
                 }
                 if (fin)
                 {
-                    return opcode == 0x1 ? new FrameResult(false, Encoding.UTF8.GetString(payload)) : FrameResult.Empty;
+                    return opcode == 0x1
+                        ? new FrameResult(false, Encoding.UTF8.GetString(payload))
+                        : new FrameResult(false, null, payload);
                 }
                 fragmentOpcode = opcode;
                 fragmentBuffer = new MemoryStream();
@@ -756,7 +931,9 @@ internal sealed class ServerPeer
                 var message = fragmentBuffer.ToArray();
                 fragmentOpcode = null;
                 fragmentBuffer = null;
-                return firstOpcode == 0x1 ? new FrameResult(false, Encoding.UTF8.GetString(message)) : FrameResult.Empty;
+                return firstOpcode == 0x1
+                    ? new FrameResult(false, Encoding.UTF8.GetString(message))
+                    : new FrameResult(false, null, message);
             default:
                 return FrameResult.Close;
         }
@@ -865,7 +1042,7 @@ internal sealed class ServerPeer
         return Convert.ToBase64String(SHA1.HashData(input));
     }
 
-    private readonly record struct FrameResult(bool Closed, string? Text)
+    private readonly record struct FrameResult(bool Closed, string? Text, byte[]? Binary = null)
     {
         public static FrameResult Close => new(true, null);
         public static FrameResult Empty => new(false, null);

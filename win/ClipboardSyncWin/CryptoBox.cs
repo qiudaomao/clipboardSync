@@ -115,6 +115,67 @@ internal static class CryptoBox
         return plaintext;
     }
 
+    // Raw framing primitives.
+    //
+    // These skip the JSON envelope entirely: no base64 of the plaintext, no base64 of the
+    // ciphertext, no JSON encode/decode. TunnelFrame uses them to put port-forward payloads on the
+    // wire as raw bytes. They share the cached realtime/signed keys with the envelope paths, so
+    // there is no extra PBKDF2 work.
+
+    public const int RawNonceBytes = NonceBytes;
+    public const int RawTagBytes = TagBytes;
+    public const int RawMacBytes = 32;
+
+    /// AES-GCM over raw bytes, with associatedData (the frame header) authenticated but not
+    /// encrypted, so a relay cannot rewrite the connection id or routing fields without the tag
+    /// failing.
+    public static void SealRaw(
+        ReadOnlySpan<byte> plaintext,
+        ReadOnlySpan<byte> associatedData,
+        string password,
+        Span<byte> nonce,
+        Span<byte> tag,
+        Span<byte> ciphertext)
+    {
+        RandomNumberGenerator.Fill(nonce);
+        var key = DeriveCachedKey(password, RealtimeSalt);
+        using var aes = new AesGcm(key, TagBytes);
+        aes.Encrypt(nonce, plaintext, ciphertext, tag, associatedData);
+    }
+
+    /// Throws CryptographicException when the tag does not verify.
+    public static byte[] OpenRaw(
+        ReadOnlySpan<byte> nonce,
+        ReadOnlySpan<byte> tag,
+        ReadOnlySpan<byte> ciphertext,
+        ReadOnlySpan<byte> associatedData,
+        string password)
+    {
+        if (nonce.Length != NonceBytes || tag.Length != TagBytes)
+        {
+            throw new CryptographicException("Malformed tunnel frame.");
+        }
+        var key = DeriveCachedKey(password, RealtimeSalt);
+        var plaintext = new byte[ciphertext.Length];
+        using var aes = new AesGcm(key, TagBytes);
+        aes.Decrypt(nonce, ciphertext, tag, plaintext, associatedData);
+        return plaintext;
+    }
+
+    /// HMAC-SHA256 for the authenticated-plaintext mode, keyed the same way as Sign.
+    public static byte[] MacRaw(ReadOnlySpan<byte> data, string password)
+    {
+        var key = DeriveCachedKey(password, SignedSalt);
+        var mac = new byte[RawMacBytes];
+        HMACSHA256.HashData(key, data, mac);
+        return mac;
+    }
+
+    public static bool IsValidMacRaw(ReadOnlySpan<byte> mac, ReadOnlySpan<byte> data, string password)
+    {
+        return CryptographicOperations.FixedTimeEquals(MacRaw(data, password), mac);
+    }
+
     private static byte[] DeriveCachedKey(string password, byte[] salt)
     {
         var cacheKey = $"{password}\0{Convert.ToBase64String(salt)}";

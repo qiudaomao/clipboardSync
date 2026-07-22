@@ -183,13 +183,6 @@ internal sealed class SignedEnvelope
     public string? To { get; set; }
 }
 
-/// Just the routing hints of an encrypted envelope, for relays that must not (and cannot) decrypt.
-internal sealed class EnvelopeRouting
-{
-    public string? From { get; set; }
-    public string? To { get; set; }
-}
-
 internal sealed class MessageHeader
 {
     public string Type { get; set; } = "";
