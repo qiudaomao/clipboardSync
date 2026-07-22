@@ -1,5 +1,8 @@
 # Releasing a macOS Update
 
+> Prefer **[release_all.md](release_all.md)** when shipping macOS + Windows + Linux together.
+> This file is the macOS-only deep dive (Sparkle, notarization, appcast format).
+
 Steps to cut a new macOS release, notarize it, and publish it through Sparkle 2 auto-update.
 
 Release artifacts (the zipped app and `appcast.xml`) live in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo (`git@github.com:qiudaomao/clipboardSyncRelease.git`), not in this repo. The app's `SUFeedURL` in `mac/App/Info.plist` points at `appcast.xml` there.
@@ -140,7 +143,12 @@ the entries the mirror appcast still references.
 
 ## 8. Publish the self-hosted mirror
 
-Run `./push.sh`. It downloads the newest mac/win release assets, rewrites `appcast.xml` /
-`win-appcast.xml` so their enclosures point at `https://clipboardsync.fuzhuo.me/downloads/`,
-uploads everything together with the landing page, and verifies each public URL serves with the
-right size — the updaters use this server as their first fallback when GitHub is unreachable.
+Run `./push.sh`. By default the **mirror host pulls large assets from GitHub** (or
+`GH_PROXY`), skips files that already match size+sha256, rewrites appcast enclosures to
+`https://clipboardsync.fuzhuo.me/downloads/`, scp’s only the small appcasts + landing page,
+then verifies with remote `sha256sum` and a public HTTP HEAD — no full re-download.
+
+- `./push.sh --retry` — skip assets already correct on the server.
+- `./push.sh --verify-only` — hash + HEAD only.
+- `./push.sh --scp` — force laptop download + scp (fallback).
+- See [release_all.md](release_all.md) §5 for the full efficiency notes.

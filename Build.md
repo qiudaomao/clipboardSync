@@ -73,7 +73,7 @@ One-time setup, from Xcode after the Sparkle package has resolved (Xcode places 
 2. Paste the public key into `SUPublicEDKey` in `mac/App/Info.plist` (replacing `REPLACE_WITH_GENERATED_ED25519_PUBLIC_KEY`).
 3. Never commit the private key; only the public key belongs in the repo.
 
-See [release_update.md](release_update.md) for the full per-release procedure.
+For a full macOS + Windows + Linux release, see [release_all.md](release_all.md). macOS-only details are in [release_update.md](release_update.md).
 
 ## Run Windows
 
@@ -93,7 +93,7 @@ Input Sharing is off by default. Enable it from Configure or the tray menu, choo
 
 The Windows app checks for updates via [NetSparkleUpdater](https://github.com/NetSparkleUpdater/NetSparkle). It points at `win-appcast.xml` in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo and expects installer-only releases named like `ClipboardSyncWinSetup-v0.1.0.exe`. The tray menu exposes both an on-demand update check and a native update-history window backed by the same primary and fallback feeds.
 
-Use `build-windows-installer.ps1` to publish a small framework-dependent build and package it with Inno Setup 6. Users must have the .NET 8 Desktop Runtime (x64); if it is missing, the .NET app host shows Microsoft's runtime install guidance when the app launches. See [release_windows.md](release_windows.md) for the full per-release procedure.
+Use `build-windows-installer.ps1` to publish a small framework-dependent build and package it with Inno Setup 6. Users must have the .NET 8 Desktop Runtime (x64); if it is missing, the .NET app host shows Microsoft's runtime install guidance when the app launches. For a full cross-platform release, see [release_all.md](release_all.md); Windows-only details are in [release_windows.md](release_windows.md).
 
 ## Notes
 

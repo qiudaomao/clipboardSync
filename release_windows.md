@@ -1,5 +1,8 @@
 # Releasing a Windows Update
 
+> Prefer **[release_all.md](release_all.md)** when shipping macOS + Windows + Linux together.
+> This file is the Windows-only deep dive (NetSparkle, Inno Setup, appcast generation).
+
 Steps to cut a Windows release and publish it through NetSparkle auto-update.
 
 Release artifacts and `win-appcast.xml` live in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo (`git@github.com:qiudaomao/clipboardSyncRelease.git`), not in this repo.
