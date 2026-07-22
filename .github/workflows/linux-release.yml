@@ -21,12 +21,10 @@ on:
 jobs:
   flatpak:
     strategy:
+      fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
     runs-on: ubuntu-24.04
-    container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.9
-      options: --privileged
     steps:
       - uses: actions/checkout@v4
       - name: Set up QEMU for aarch64
@@ -34,12 +32,13 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
-      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40
+      - name: Build and verify Flatpak bundle
+        run: ./build-linux-flatpak.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
         with:
-          bundle: clipboardSyncLinux-${{ matrix.arch }}.flatpak
-          manifest-path: linux/packaging/io.github.qiudaomao.clipboardsync.yml
-          arch: ${{ matrix.arch }}
-          upload-artifact: true
+          name: clipboard-sync-linux-${{ matrix.arch }}
+          path: artifacts/linux/clipboardSyncLinux-${{ matrix.arch }}.flatpak
+          if-no-files-found: error
 
   publish:
     needs: flatpak
