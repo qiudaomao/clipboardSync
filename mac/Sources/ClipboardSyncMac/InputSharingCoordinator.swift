@@ -32,6 +32,13 @@ final class InputSharingCoordinator {
     private var receivingRemote = false
     private var receivingScreenId: String?
     private var remotePressedMouseButtons: Set<String> = []
+    // Synthesized CGEvents carry no click count on their own, and macOS only recognises a
+    // double-click when the second down/up pair arrives with `mouseEventClickState` >= 2 — the
+    // controller's raw hook sends independent clicks, so consecutive-click state is rebuilt here.
+    private var remoteClickState: Int64 = 1
+    private var lastRemoteClickButton: String?
+    private var lastRemoteClickTime = Date.distantPast
+    private var lastRemoteClickPoint = CGPoint.zero
     private var remotePressedSourceModifierKeys: Set<String> = []
     private var remotePressedModifierKeys: Set<String> = []
     private var eventTap: CFMachPort?
@@ -816,7 +823,9 @@ final class InputSharingCoordinator {
         }
         let point = pointFor(normalizedX: x, normalizedY: y)
         if let eventType = remoteDragEventType {
-            postMouseEvent(type: eventType, button: remoteDragButton, at: point)
+            // Drags inherit the initiating click's count, matching real events — a double-click-
+            // and-drag selects by word only when its drag events also report clickState 2.
+            postMouseEvent(type: eventType, button: remoteDragButton, at: point, clickState: remoteClickState)
         } else {
             postMouseEvent(type: .mouseMoved, button: .left, at: point)
         }
@@ -852,8 +861,20 @@ final class InputSharingCoordinator {
                 activateWindowUnderRemoteClick(at: point)
             }
             remotePressedMouseButtons.insert(buttonName)
+            let now = Date()
+            if buttonName == lastRemoteClickButton,
+               now.timeIntervalSince(lastRemoteClickTime) <= NSEvent.doubleClickInterval,
+               abs(point.x - lastRemoteClickPoint.x) <= 5,
+               abs(point.y - lastRemoteClickPoint.y) <= 5 {
+                remoteClickState += 1
+            } else {
+                remoteClickState = 1
+            }
+            lastRemoteClickButton = buttonName
+            lastRemoteClickTime = now
+            lastRemoteClickPoint = point
         }
-        postMouseEvent(type: eventType, button: button, at: point)
+        postMouseEvent(type: eventType, button: button, at: point, clickState: remoteClickState)
         if mouse.action == "up" {
             remotePressedMouseButtons.remove(buttonName)
         }
@@ -1076,9 +1097,12 @@ final class InputSharingCoordinator {
         return nil
     }
 
-    private func postMouseEvent(type: CGEventType, button: CGMouseButton, at point: CGPoint) {
+    private func postMouseEvent(type: CGEventType, button: CGMouseButton, at point: CGPoint, clickState: Int64 = 0) {
         guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button) else {
             return
+        }
+        if clickState > 0 {
+            event.setIntegerValueField(.mouseEventClickState, value: clickState)
         }
         CGWarpMouseCursorPosition(point)
         post(event)

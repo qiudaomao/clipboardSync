@@ -100,6 +100,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusActionMenuItem = NSMenuItem()
     private var startStopItem = NSMenuItem()
     private var launchAtLoginItem = NSMenuItem()
+    /// Cached mirror of `SMAppService.mainApp.status` — see `refreshLaunchAtLoginState()`.
+    private var launchAtLoginEnabled = false
     private var sleepPreventionItem = NSMenuItem()
     private var sleepPreventionStatusItem = NSMenuItem()
     private var lowBatterySleepPreventionItem = NSMenuItem()
@@ -597,7 +599,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusActionMenuItem.title = AppText.text(needsSetup ? "menu.completeSetup" : "menu.reconnect")
         inputSharingItem.state = config.inputSharingEnabled ? .on : .off
         startStopItem.title = AppText.text(isSyncPaused || transport == nil ? "menu.resumeSync" : "menu.pauseSync")
-        launchAtLoginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        launchAtLoginItem.state = launchAtLoginEnabled ? .on : .off
+        refreshLaunchAtLoginState()
         for (duration, item) in sleepPreventionItems {
             item.state = sleepPreventionController.selection == duration ? .on : .off
         }
@@ -1436,13 +1439,32 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             if SMAppService.mainApp.status == .enabled {
                 try SMAppService.mainApp.unregister()
+                launchAtLoginEnabled = false
             } else {
                 try SMAppService.mainApp.register()
+                launchAtLoginEnabled = true
             }
         } catch {
             NSLog("Failed to toggle launch at login: \(error.localizedDescription)")
         }
         updateMenu()
+    }
+
+    /// `SMAppService.status` is a synchronous XPC round-trip to the ServiceManagement daemon.
+    /// `updateMenu()` runs on every peer hello (every 5s), and the input-sharing event tap lives
+    /// on the same main run loop, so querying it inline stalled remote mouse capture. The menu
+    /// reads this cached flag instead, and the real status is re-fetched off the main thread.
+    private func refreshLaunchAtLoginState() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let enabled = SMAppService.mainApp.status == .enabled
+            DispatchQueue.main.async {
+                guard let self, self.launchAtLoginEnabled != enabled else {
+                    return
+                }
+                self.launchAtLoginEnabled = enabled
+                self.launchAtLoginItem.state = enabled ? .on : .off
+            }
+        }
     }
 
     @objc private func setSleepPrevention(_ sender: NSMenuItem) {

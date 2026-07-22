@@ -8,6 +8,28 @@ namespace ClipboardSyncWin;
 
 internal static class NetworkAddress
 {
+    // GetAllNetworkInterfaces + GetIPProperties are slow IP-helper queries (tens to hundreds of
+    // milliseconds with VPN/virtual adapters) and the presence heartbeat asks for the address
+    // every 5 seconds, so the result is cached until the OS reports a network change.
+    private static readonly object CacheGate = new();
+    private static string? cachedLanAddress;
+    private static bool hasCachedLanAddress;
+
+    static NetworkAddress()
+    {
+        NetworkChange.NetworkAddressChanged += (_, _) => InvalidateCache();
+        NetworkChange.NetworkAvailabilityChanged += (_, _) => InvalidateCache();
+    }
+
+    private static void InvalidateCache()
+    {
+        lock (CacheGate)
+        {
+            hasCachedLanAddress = false;
+            cachedLanAddress = null;
+        }
+    }
+
     public static string HostAddress()
     {
         return LocalLanIPv4Address() ?? Dns.GetHostName();
@@ -32,6 +54,25 @@ internal static class NetworkAddress
     }
 
     public static string? LocalLanIPv4Address()
+    {
+        lock (CacheGate)
+        {
+            if (hasCachedLanAddress)
+            {
+                return cachedLanAddress;
+            }
+        }
+
+        var address = LookUpLanIPv4Address();
+        lock (CacheGate)
+        {
+            cachedLanAddress = address;
+            hasCachedLanAddress = true;
+        }
+        return address;
+    }
+
+    private static string? LookUpLanIPv4Address()
     {
         var interfaces = NetworkInterface.GetAllNetworkInterfaces()
             .Where(item =>

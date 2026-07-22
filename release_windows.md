@@ -4,7 +4,7 @@ Steps to cut a Windows release and publish it through NetSparkle auto-update.
 
 Release artifacts and `win-appcast.xml` live in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo (`git@github.com:qiudaomao/clipboardSyncRelease.git`), not in this repo.
 
-The current Windows release target is `v0.1.25`, matching the app version `0.1.25`.
+The current Windows release target is `v0.1.27`, matching the app version `0.1.27`.
 
 ## Publishing from macOS
 
@@ -72,7 +72,8 @@ Keep the private key outside the repo. Every update installer must be signed wit
 
 ## 2. Bump the version
 
-Edit `win/ClipboardSyncWin/ClipboardSyncWin.csproj`:
+Edit both `win/ClipboardSyncWin/ClipboardSyncWin.csproj` and
+`win/ClipboardSyncInputService/ClipboardSyncInputService.csproj`:
 
 - `Version`
 - `AssemblyVersion`
@@ -84,7 +85,7 @@ Use numeric .NET versions in the project file, for example `0.1.10`. Use the `v`
 Commit the version bump before building and publishing artifacts:
 
 ```powershell
-git add win/ClipboardSyncWin/ClipboardSyncWin.csproj release_windows.md
+git add win/ClipboardSyncWin/ClipboardSyncWin.csproj win/ClipboardSyncInputService/ClipboardSyncInputService.csproj release_windows.md
 git commit -m "Bump Windows version to v0.1.10"
 ```
 

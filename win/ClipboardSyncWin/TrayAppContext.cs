@@ -2214,10 +2214,15 @@ internal sealed class TrayAppContext : ApplicationContext
         {
             return;
         }
+        // Resolved before taking the lock: interface enumeration can take hundreds of
+        // milliseconds, and the receive thread needs this same lock to inject every remote
+        // mouse event — computing it under the lock froze the cursor on each heartbeat.
+        var deviceName = Environment.MachineName;
+        var deviceAddress = NetworkAddress.LocalLanIPv4Address();
         InputMessage hello;
         lock (inputCoordinatorLock)
         {
-            hello = inputCoordinator.MakeHello(Environment.MachineName, NetworkAddress.LocalLanIPv4Address());
+            hello = inputCoordinator.MakeHello(deviceName, deviceAddress);
         }
         PublishInput(hello);
     }
