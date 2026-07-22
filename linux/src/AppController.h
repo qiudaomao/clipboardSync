@@ -67,6 +67,11 @@ private:
     void announcePresence();
     void sendFilesFromClipboard();
     void showPortForward();
+    /// Persists, restarts, and publishes a committed rule table, first asking about any remote
+    /// update that landed since `baseline`. Advances `baseline` past a commit the user accepted, so
+    /// a second commit from the same editing session does not re-ask about changes already merged.
+    /// Returns whether the table was committed.
+    bool commitPortForwardRules(const QJsonArray &rules, QByteArray &baseline);
     void publishPortForwards();
     bool launchAtLoginEnabled() const;
     void setLaunchAtLogin(bool enabled);

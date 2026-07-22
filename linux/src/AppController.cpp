@@ -715,20 +715,30 @@ void AppController::announcePresence()
 
 void AppController::showPortForward()
 {
-    const QByteArray baseline = QJsonDocument(config_.portForwardRules).toJson(QJsonDocument::Compact);
+    QByteArray baseline = QJsonDocument(config_.portForwardRules).toJson(QJsonDocument::Compact);
     QHash<QString, QString> peerNames;
     for (auto it = devices_.cbegin(); it != devices_.cend(); ++it)
         peerNames.insert(it.key(), deviceDisplayName(it.key()));
     PortForwardDialog dialog(config_.portForwardRules, peerNames, config_.deviceId, window_);
+    connect(&dialog, &PortForwardDialog::rulesApplied, this, [this, &baseline](const QJsonArray &rules) {
+        commitPortForwardRules(rules, baseline);
+    });
     if (dialog.exec() != QDialog::Accepted) return;
+    commitPortForwardRules(dialog.rules(), baseline);
+}
+
+bool AppController::commitPortForwardRules(const QJsonArray &rules, QByteArray &baseline)
+{
     const QByteArray current = QJsonDocument(config_.portForwardRules).toJson(QJsonDocument::Compact);
     if (current != baseline && QMessageBox::question(window_, QStringLiteral("Rules changed remotely"),
         QStringLiteral("The server updated port-forward rules while this window was open. Apply your local draft over the newer rules?")) != QMessageBox::Yes)
-        return;
-    config_.portForwardRules = dialog.rules();
+        return false;
+    config_.portForwardRules = rules;
     config_.save();
     portForward_->configure(config_.deviceId, config_.portForwardRules, knownDeviceIds());
     publishPortForwards();
+    baseline = QJsonDocument(config_.portForwardRules).toJson(QJsonDocument::Compact);
+    return true;
 }
 
 void AppController::publishPortForwards()

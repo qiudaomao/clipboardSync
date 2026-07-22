@@ -9,8 +9,9 @@ namespace ClipboardSyncWin;
 /// The "Port Forward" dialog: a table of forward rules, each mapping In (a device + listen port) to
 /// Out (another device + host + port), with an optional note. Each row shows a live status light
 /// (green listening / red failed with the reason on hover / gray disabled or offline) and an
-/// enable/disable toggle. All edits are drafts committed together on Save. Modeless, like
-/// ScreenLayoutForm, so the tray context can push live status while it stays open.
+/// enable/disable toggle. All edits are drafts committed together on Apply (dialog stays open) or
+/// Save (dialog closes). Modeless, like ScreenLayoutForm, so the tray context can push live status
+/// while it stays open.
 internal sealed class PortForwardForm : Form
 {
     public sealed record DeviceOption(string Id, string Title);
@@ -25,12 +26,13 @@ internal sealed class PortForwardForm : Form
     /// A rule's display status, computed by the tray context and handed to the dialog to render.
     public readonly record struct RuleStatus(StatusLight Light, string Tooltip);
 
-    /// Raised when the rule table should be applied after Save.
+    /// Raised when the rule table should be applied after Apply or Save.
     public event Action<List<PortForwardRule>>? RulesApplied;
 
     private List<DeviceOption> devices;
     private readonly FlowLayoutPanel rowsPanel;
     private readonly Label emptyLabel;
+    private readonly Label appliedLabel;
     private readonly List<RuleRow> rows = [];
     private Dictionary<string, RuleStatus> statuses = [];
     private bool hasDraftChanges;
@@ -89,12 +91,25 @@ internal sealed class PortForwardForm : Form
         };
         var okButton = new Button { Text = AppText.Text("settings.save"), AutoSize = true };
         var closeButton = new Button { Text = AppText.Text("settings.cancel"), DialogResult = DialogResult.Cancel, AutoSize = true };
+        var applyButton = new Button { Text = AppText.Text("forward.apply"), AutoSize = true };
         var addButton = new Button { Text = AppText.Text("forward.add"), AutoSize = true };
+        // The dialog stays open after Apply, so the commit needs to say so rather than being
+        // implied by the window disappearing.
+        appliedLabel = new Label
+        {
+            Text = "",
+            AutoSize = true,
+            ForeColor = SystemColors.GrayText,
+            Margin = new Padding(0, 9, 8, 0)
+        };
         okButton.Click += (_, _) => Save();
         closeButton.Click += (_, _) => Close();
+        applyButton.Click += (_, _) => Apply();
         addButton.Click += (_, _) => AddRule();
         buttons.Controls.Add(okButton);
         buttons.Controls.Add(closeButton);
+        buttons.Controls.Add(applyButton);
+        buttons.Controls.Add(appliedLabel);
         var addHost = new FlowLayoutPanel
         {
             Dock = DockStyle.Bottom,
@@ -214,8 +229,16 @@ internal sealed class PortForwardForm : Form
             Note = "",
             Enabled = true
         });
-        hasDraftChanges = true;
+        MarkDraftChanged();
         UpdateEmptyState();
+    }
+
+    /// Records a pending edit and retires any stale Apply acknowledgement, which no longer
+    /// describes what the rows now hold.
+    private void MarkDraftChanged()
+    {
+        hasDraftChanges = true;
+        appliedLabel.Text = "";
     }
 
     private void AddRow(PortForwardRule rule)
@@ -226,10 +249,10 @@ internal sealed class PortForwardForm : Form
             rowsPanel.Controls.Remove(row);
             rows.Remove(row);
             row.Dispose();
-            hasDraftChanges = true;
+            MarkDraftChanged();
             UpdateEmptyState();
         };
-        row.DraftChanged += () => hasDraftChanges = true;
+        row.DraftChanged += () => MarkDraftChanged();
         row.ApplyStatus(statuses.TryGetValue(rule.Id, out var status) ? status : null);
         rows.Add(row);
         rowsPanel.Controls.Add(row);
@@ -252,15 +275,25 @@ internal sealed class PortForwardForm : Form
 
     private void Save()
     {
-        if (ApplyRules(close: true))
+        if (ApplyRules())
         {
             Close();
         }
     }
 
+    /// Commits the draft without dismissing the dialog, so a long editing session can be applied in
+    /// steps and each rule's status light checked before moving on.
+    private void Apply()
+    {
+        if (ApplyRules())
+        {
+            appliedLabel.Text = AppText.Text("forward.applied");
+        }
+    }
+
     /// Validates every row and, if all pass, raises RulesApplied. Returns whether the rules were
     /// applied; on failure it shows the reason and leaves the dialog untouched.
-    private bool ApplyRules(bool close)
+    private bool ApplyRules()
     {
         var result = new List<PortForwardRule>();
         var listenKeys = new HashSet<string>();

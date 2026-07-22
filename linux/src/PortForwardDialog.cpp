@@ -53,9 +53,10 @@ PortForwardDialog::PortForwardDialog(const QJsonArray &rules,
     });
     auto *tools = new QHBoxLayout;
     tools->addWidget(add); tools->addWidget(remove); tools->addStretch();
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Apply | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, this, &PortForwardDialog::validateAndAccept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, &PortForwardDialog::applyWithoutClosing);
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(table_); layout->addLayout(tools); layout->addWidget(buttons);
 }
@@ -97,6 +98,26 @@ QString PortForwardDialog::selectedDeviceId(int row, int column) const
 void PortForwardDialog::validateAndAccept()
 {
     QJsonArray candidate;
+    if (!collectRules(candidate)) return;
+    result_ = candidate;
+    accept();
+}
+
+// Commits the draft while the dialog stays open, so a long editing session can be applied in steps.
+// `result_` moves with it, so a Save that follows re-commits the same table.
+void PortForwardDialog::applyWithoutClosing()
+{
+    QJsonArray candidate;
+    if (!collectRules(candidate)) return;
+    result_ = candidate;
+    emit rulesApplied(result_);
+}
+
+// Validates every row into `out`. Returns false and explains the first failure, leaving `out`
+// untouched, so a rejected draft never reaches the coordinator.
+bool PortForwardDialog::collectRules(QJsonArray &out)
+{
+    QJsonArray candidate;
     QSet<QString> listenKeys;
     for (int row = 0; row < table_->rowCount(); ++row) {
         bool inOk = false, outOk = false;
@@ -105,13 +126,13 @@ void PortForwardDialog::validateAndAccept()
         const QString host = table_->item(row, OutHost)->text().trimmed();
         if (!inOk || !outOk || inPort < 1 || inPort > 65535 || outPort < 1 || outPort > 65535 || host.isEmpty()) {
             QMessageBox::warning(this, QStringLiteral("Invalid rule"), QStringLiteral("Row %1 has an invalid port or empty destination host.").arg(row + 1));
-            return;
+            return false;
         }
         const QString inDevice = selectedDeviceId(row, InDevice);
         const QString listenKey = inDevice + u':' + QString::number(inPort);
         if (listenKeys.contains(listenKey)) {
             QMessageBox::warning(this, QStringLiteral("Duplicate listener"), QStringLiteral("Rows cannot listen on the same device and port."));
-            return;
+            return false;
         }
         listenKeys.insert(listenKey);
         QString id = table_->item(row, Note)->data(Qt::UserRole).toString();
@@ -122,8 +143,8 @@ void PortForwardDialog::validateAndAccept()
             {QStringLiteral("outPort"), outPort}, {QStringLiteral("note"), table_->item(row, Note)->text().trimmed()},
             {QStringLiteral("enabled"), qobject_cast<QCheckBox *>(table_->cellWidget(row, Enabled))->isChecked()}});
     }
-    result_ = candidate;
-    accept();
+    out = candidate;
+    return true;
 }
 
 QJsonArray PortForwardDialog::rules() const { return result_; }

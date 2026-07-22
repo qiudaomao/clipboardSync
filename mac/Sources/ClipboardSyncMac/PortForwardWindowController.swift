@@ -3,7 +3,8 @@ import AppKit
 /// The "Port Forward" panel: a table of forward rules, each mapping In (a device + listen port)
 /// to Out (another device + host + port), with an optional note. Each row shows a live status
 /// light (green listening / red failed with the reason on hover / gray disabled or offline) and an
-/// enable/disable toggle. All edits are drafts committed together on Save.
+/// enable/disable toggle. All edits are drafts committed together on Apply (panel stays open) or
+/// Save (panel closes).
 final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
     var onSave: (([PortForwardRule]) -> Void)?
     var onWindowClosed: (() -> Void)?
@@ -30,6 +31,10 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
     private var rowViews: [RuleRowView] = []
     private var statuses: [String: RuleStatus] = [:]
     private var hasDraftChanges = false
+    /// Whether `validationLabel` currently holds an Apply acknowledgement rather than an error, so
+    /// the next edit can retire it without also clearing a still-relevant validation or conflict
+    /// message.
+    private var isShowingAppliedConfirmation = false
 
     private let rowsStack = NSStackView()
     private let emptyLabel = NSTextField(labelWithString: AppText.text("forward.empty"))
@@ -71,8 +76,7 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
         for rule in rules {
             addRow(for: rule)
         }
-        validationLabel.stringValue = ""
-        validationLabel.isHidden = true
+        clearMessage()
         hasDraftChanges = false
         updateEmptyState()
 
@@ -160,7 +164,6 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
         addButton.imagePosition = .imageLeading
 
         validationLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        validationLabel.textColor = .systemRed
         validationLabel.isHidden = true
 
         let saveButton = NSButton(title: AppText.text("settings.save"), target: self, action: #selector(save))
@@ -173,7 +176,11 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
         cancelButton.bezelStyle = .rounded
         cancelButton.controlSize = .large
 
-        let buttonStack = NSStackView(views: [addButton, NSView(), validationLabel, cancelButton, saveButton])
+        let applyButton = NSButton(title: AppText.text("forward.apply"), target: self, action: #selector(apply))
+        applyButton.bezelStyle = .rounded
+        applyButton.controlSize = .large
+
+        let buttonStack = NSStackView(views: [addButton, NSView(), validationLabel, applyButton, cancelButton, saveButton])
         buttonStack.orientation = .horizontal
         buttonStack.alignment = .centerY
         buttonStack.spacing = 8
@@ -235,11 +242,11 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
             }
             row.removeFromSuperview()
             self.rowViews.removeAll { $0 === row }
-            self.hasDraftChanges = true
+            self.markDraftChanged()
             self.updateEmptyState()
         }
         row.onDraftChanged = { [weak self] in
-            self?.hasDraftChanges = true
+            self?.markDraftChanged()
         }
         row.applyStatus(statuses[rule.id])
         rowViews.append(row)
@@ -263,7 +270,7 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
             note: "",
             enabled: true
         ))
-        hasDraftChanges = true
+        markDraftChanged()
         updateEmptyState()
         window?.makeFirstResponder(rowViews.last?.inPortField)
     }
@@ -295,11 +302,13 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
             rules.append(rule)
         }
 
-        validationLabel.isHidden = true
+        clearMessage()
         hasDraftChanges = false
         onSave?(rules)
         if closeWindow {
             close()
+        } else {
+            showAppliedConfirmation()
         }
         return true
     }
@@ -308,13 +317,44 @@ final class PortForwardWindowController: NSWindowController, NSWindowDelegate {
         applyRules(close: true)
     }
 
+    /// Commits the draft without dismissing the panel, so a long editing session can be applied in
+    /// steps and each rule's status light checked before moving on.
+    @objc private func apply() {
+        applyRules(close: false)
+    }
+
     @objc private func cancel() {
         close()
     }
 
+    private func markDraftChanged() {
+        hasDraftChanges = true
+        if isShowingAppliedConfirmation {
+            clearMessage()
+        }
+    }
+
     private func showValidation(_ message: String) {
         validationLabel.stringValue = message
+        validationLabel.textColor = .systemRed
         validationLabel.isHidden = false
+        isShowingAppliedConfirmation = false
+    }
+
+    /// Acknowledges Apply in the same slot the validation errors use, but in a non-alarming color:
+    /// the window stays open, so the commit needs to say so rather than being implied by the panel
+    /// disappearing.
+    private func showAppliedConfirmation() {
+        validationLabel.stringValue = AppText.text("forward.applied")
+        validationLabel.textColor = .secondaryLabelColor
+        validationLabel.isHidden = false
+        isShowingAppliedConfirmation = true
+    }
+
+    private func clearMessage() {
+        validationLabel.stringValue = ""
+        validationLabel.isHidden = true
+        isShowingAppliedConfirmation = false
     }
 }
 
