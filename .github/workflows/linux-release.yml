@@ -34,7 +34,7 @@ jobs:
         uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
-      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@v6
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40
         with:
           bundle: clipboardSyncLinux-${{ matrix.arch }}.flatpak
           manifest-path: linux/packaging/io.github.qiudaomao.clipboardsync.yml
