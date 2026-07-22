@@ -104,6 +104,8 @@ add_executable(bulk-frame-tests
     tests/BulkFrameTests.cpp
     src/BulkFrame.cpp
     src/BulkFrame.h
+    src/TunnelFrame.cpp
+    src/TunnelFrame.h
     src/CryptoBox.cpp
     src/CryptoBox.h
 )
