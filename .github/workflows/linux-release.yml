@@ -1,9 +1,10 @@
 name: Linux Release
 
-# Builds the flatpak for x86_64 (native) and aarch64 (qemu-emulated; this repo
-# is private, so GitHub's free arm64 runners are not available) and uploads the
-# single-file bundles to the public qiudaomao/clipboardSyncRelease repo, where
-# push.sh picks them up for the self-hosted download mirror.
+# Builds the x86_64 Flatpak on a GitHub-hosted runner and uploads it to the
+# public qiudaomao/clipboardSyncRelease repo, where push.sh picks it up for the
+# self-hosted download mirror. Build the aarch64 bundle on a native ARM host
+# with `./build-linux-flatpak.sh aarch64 -u v<version>`: QEMU on a hosted x86
+# runner cannot create the user namespace required by Flatpak's bwrap sandbox.
 #
 # Required secret: RELEASE_TOKEN — a PAT with "contents: write" on
 # qiudaomao/clipboardSyncRelease (the default GITHUB_TOKEN cannot upload to
@@ -20,24 +21,15 @@ on:
 
 jobs:
   flatpak:
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86_64, aarch64]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Set up QEMU for aarch64
-        if: matrix.arch == 'aarch64'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
       - name: Build and verify Flatpak bundle
-        run: ./build-linux-flatpak.sh ${{ matrix.arch }}
+        run: ./build-linux-flatpak.sh x86_64
       - uses: actions/upload-artifact@v4
         with:
-          name: clipboard-sync-linux-${{ matrix.arch }}
-          path: artifacts/linux/clipboardSyncLinux-${{ matrix.arch }}.flatpak
+          name: clipboard-sync-linux-x86_64
+          path: artifacts/linux/clipboardSyncLinux-x86_64.flatpak
           if-no-files-found: error
 
   publish:
