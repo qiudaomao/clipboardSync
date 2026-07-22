@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SystemConfiguration
 
 enum ClipboardLimits {
     static let maxFileBytes = 10 * 1024 * 1024
@@ -1870,9 +1871,23 @@ enum DeviceIdentity {
         return created
     }
 
-    static var displayName: String {
-        Host.current().localizedName ?? Host.current().name ?? ProcessInfo.processInfo.hostName
-    }
+    /// Cached: this is read from the 5s presence heartbeat on the main run loop, which also hosts
+    /// the input-sharing event tap. `Host.current()` resolves the name via synchronous DNS and can
+    /// block for hundreds of milliseconds, freezing remote mouse movement on every heartbeat, so
+    /// only non-blocking sources may be used here.
+    static let displayName: String = {
+        if let name = SCDynamicStoreCopyComputerName(nil, nil) as String? {
+            return name
+        }
+        var buffer = [CChar](repeating: 0, count: 256)
+        if gethostname(&buffer, buffer.count) == 0 {
+            let name = String(cString: buffer)
+            if !name.isEmpty {
+                return name
+            }
+        }
+        return "Mac"
+    }()
 
     static var address: String? {
         NetworkAddress.localLANIPv4Address()
