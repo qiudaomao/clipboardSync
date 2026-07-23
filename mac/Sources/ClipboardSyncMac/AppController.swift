@@ -83,6 +83,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var isSyncPaused = false
     private var peerCount = 0
     private var presenceTimer: Timer?
+    private var screenParametersDebounceTimer: Timer?
     private static let presenceHeartbeatInterval: TimeInterval = 5
     private static let presenceStaleTimeout: TimeInterval = 15
     private var isLocalLayoutWindowOpen = false
@@ -828,12 +829,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Fires when macOS display arrangement/resolution changes (System Settings rearrange,
-    /// monitor plug/unplug), so the shared layout re-syncs immediately instead of waiting for
-    /// the next app launch or layout-window open. The hello nudges the server (when we're a
-    /// client) to re-merge our fresh ScreenMetrics and rebroadcast right away.
+    /// monitor plug/unplug), so the shared layout re-syncs instead of waiting for the next app
+    /// launch or layout-window open. Sleep/wake fires this several times with transient
+    /// configurations (screens briefly missing or re-origined), so the merge is debounced until
+    /// the configuration has been quiet for a moment — only the settled state should reshape the
+    /// shared layout and be broadcast. The hello nudges the server (when we're a client) to
+    /// re-merge our fresh ScreenMetrics and rebroadcast right away.
     @objc private func screenParametersDidChange() {
-        registerLocalScreen()
-        updateInputCoordinator(sendHello: true)
+        screenParametersDebounceTimer?.invalidate()
+        let timer = Timer(timeInterval: 2.0, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.registerLocalScreen()
+            self.updateInputCoordinator(sendHello: true)
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        screenParametersDebounceTimer = timer
     }
 
     @objc private func showScreenLayout() {

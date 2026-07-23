@@ -1479,11 +1479,25 @@ final class ScreenLayoutStore {
             changed = true
         }
 
-        let group = entries.values.filter { $0.deviceId == deviceId }
-        let anchorX = group.map(\.x).min() ?? (entries.values.map { $0.x + $0.width }.max() ?? 0)
-        let anchorY = group.map(\.y).min() ?? 0
         let localMinX = screens.map(\.localX).min() ?? 0
         let localMinY = screens.map(\.localY).min() ?? 0
+
+        // Anchor on the lowest-index screen that survives this merge — not the group's bounding
+        // corner. A transient configuration (macOS sleep/wake briefly reports screens missing or
+        // re-origined) changes which screen sits at the bounding corner, so a bounding anchor
+        // makes the group drift a little on every wake; a surviving screen keeps its canvas
+        // position instead, so re-merging the settled configuration lands exactly where it was.
+        let anchorX: Double
+        let anchorY: Double
+        if let (existing, screen) = (0..<screens.count)
+            .compactMap({ index in entries["\(deviceId)#\(index)"].map { ($0, screens[index]) } })
+            .first {
+            anchorX = existing.x - (screen.localX - localMinX)
+            anchorY = existing.y - (screen.localY - localMinY)
+        } else {
+            anchorX = entries.values.map { $0.x + $0.width }.max() ?? 0
+            anchorY = 0
+        }
 
         for (index, screen) in screens.enumerated() {
             let screenId = "\(deviceId)#\(index)"

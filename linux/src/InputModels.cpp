@@ -104,25 +104,6 @@ bool ScreenLayoutStore::merge(const QString &deviceId, const QList<ScreenMetrics
         changed = true;
     }
 
-    // Anchor the device's group at its existing top-left corner (preserving where the user
-    // dragged the machine relative to other machines), or to the right of everything for a
-    // brand-new device, then lay its screens out from their real local arrangement
-    // (localX/localY). The canvas drags a machine's screens as one group, so intra-group
-    // geometry is only ever correct if it's re-derived here on every merge (a machine
-    // rearranging its monitors, or a hot-plugged one, must reshape the group).
-    bool hasGroup = false;
-    double anchorX = 0;
-    double anchorY = 0;
-    for (const auto &entry : std::as_const(entries_)) {
-        if (entry.deviceId != deviceId)
-            continue;
-        anchorX = hasGroup ? std::min(anchorX, entry.x) : entry.x;
-        anchorY = hasGroup ? std::min(anchorY, entry.y) : entry.y;
-        hasGroup = true;
-    }
-    if (!hasGroup)
-        for (const auto &entry : std::as_const(entries_))
-            anchorX = std::max(anchorX, entry.x + entry.width);
     double localMinX = 0;
     double localMinY = 0;
     if (!screens.isEmpty()) {
@@ -133,6 +114,31 @@ bool ScreenLayoutStore::merge(const QString &deviceId, const QList<ScreenMetrics
             localMinY = std::min(localMinY, screen.localY);
         }
     }
+
+    // Lay the device's screens out from their real local arrangement (localX/localY): the canvas
+    // drags a machine's screens as one group, so intra-group geometry is only ever correct if
+    // it's re-derived here on every merge (a machine rearranging its monitors, or a hot-plugged
+    // one, must reshape the group). Anchor on the lowest-index screen that survives this merge —
+    // not the group's bounding corner. A transient configuration (sleep/wake briefly reports
+    // screens missing or re-origined) changes which screen sits at the bounding corner, so a
+    // bounding anchor makes the group drift a little on every wake; a surviving screen keeps its
+    // canvas position instead, so re-merging the settled configuration lands exactly where it
+    // was. A brand-new device is placed to the right of everything.
+    double anchorX = 0;
+    double anchorY = 0;
+    bool anchored = false;
+    for (int index = 0; index < screens.size(); ++index) {
+        const auto existing = entries_.constFind(screenIdFor(deviceId, index));
+        if (existing == entries_.constEnd())
+            continue;
+        anchorX = existing->x - (screens.at(index).localX - localMinX);
+        anchorY = existing->y - (screens.at(index).localY - localMinY);
+        anchored = true;
+        break;
+    }
+    if (!anchored)
+        for (const auto &entry : std::as_const(entries_))
+            anchorX = std::max(anchorX, entry.x + entry.width);
 
     for (int index = 0; index < screens.size(); ++index) {
         const ScreenMetrics &screen = screens.at(index);

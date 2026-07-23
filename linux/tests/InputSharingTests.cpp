@@ -116,12 +116,24 @@ void testLayoutStore()
     require(store.merge(QStringLiteral("deck"), {{1280, 800, 1, 0, 800}, {1080, 1920, 1, 0, -1120}}),
         "rearranged monitors change the store");
     require(store.entries().value(QStringLiteral("deck#0")).x == -1280
-            && store.entries().value(QStringLiteral("deck#0")).y == 2020
+            && store.entries().value(QStringLiteral("deck#0")).y == 100
             && store.entries().value(QStringLiteral("deck#1")).x == -1280
-            && store.entries().value(QStringLiteral("deck#1")).y == 100,
-        "rearrangement reshapes the group around its anchor");
+            && store.entries().value(QStringLiteral("deck#1")).y == -1820,
+        "rearrangement reshapes the group while the anchor screen keeps its position");
     require(!store.merge(QStringLiteral("deck"), {{1280, 800, 1, 0, 800}, {1080, 1920, 1, 0, -1120}}),
         "re-merge with unchanged arrangement is a no-op");
+
+    // Sleep/wake reports transient configurations (a monitor briefly missing, local origins
+    // reset); once the settled configuration is merged again the group must land exactly where
+    // it was, not drift.
+    require(store.merge(QStringLiteral("deck"), {{1280, 800, 1, 0, 0}}), "transient single-monitor state merges");
+    require(store.merge(QStringLiteral("deck"), {{1280, 800, 1, 0, 800}, {1080, 1920, 1, 0, -1120}}),
+        "settled configuration merges back");
+    require(store.entries().value(QStringLiteral("deck#0")).x == -1280
+            && store.entries().value(QStringLiteral("deck#0")).y == 100
+            && store.entries().value(QStringLiteral("deck#1")).x == -1280
+            && store.entries().value(QStringLiteral("deck#1")).y == -1820,
+        "group returns to its exact pre-sleep position");
 
     // Unplugged monitors drop out.
     require(store.merge(QStringLiteral("mac"), {}), "unplugged screens are removed");

@@ -312,11 +312,29 @@ internal sealed class ScreenLayoutStore
             changed = true;
         }
 
-        var group = entries.Values.Where(e => e.DeviceId == deviceId).ToList();
-        var anchorX = group.Count > 0 ? group.Min(e => e.X) : entries.Values.Select(e => e.X + e.Width).DefaultIfEmpty(0).Max();
-        var anchorY = group.Count > 0 ? group.Min(e => e.Y) : 0;
         var localMinX = screens.Select(s => s.LocalX).DefaultIfEmpty(0).Min();
         var localMinY = screens.Select(s => s.LocalY).DefaultIfEmpty(0).Min();
+
+        // Anchor on the lowest-index screen that survives this merge - not the group's bounding
+        // corner. A transient configuration (sleep/resume briefly reports screens missing or
+        // re-origined) changes which screen sits at the bounding corner, so a bounding anchor
+        // makes the group drift a little on every wake; a surviving screen keeps its canvas
+        // position instead, so re-merging the settled configuration lands exactly where it was.
+        double anchorX;
+        double anchorY;
+        var survivorIndex = Enumerable.Range(0, screens.Count).Cast<int?>()
+            .FirstOrDefault(i => entries.ContainsKey($"{deviceId}#{i}"));
+        if (survivorIndex is { } survivor)
+        {
+            var existing = entries[$"{deviceId}#{survivor}"];
+            anchorX = existing.X - (screens[survivor].LocalX - localMinX);
+            anchorY = existing.Y - (screens[survivor].LocalY - localMinY);
+        }
+        else
+        {
+            anchorX = entries.Values.Select(e => e.X + e.Width).DefaultIfEmpty(0).Max();
+            anchorY = 0;
+        }
 
         for (var index = 0; index < screens.Count; index++)
         {
