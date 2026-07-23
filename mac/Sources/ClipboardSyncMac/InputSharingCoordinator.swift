@@ -181,6 +181,15 @@ final class InputSharingCoordinator {
             removeEventTap()
             cancelPendingMouseMove()
         }
+        // A controller that vanishes mid-session (app quit, network drop) never sends its
+        // capture "end", so any modifiers it left pressed have to be released here when
+        // receiving stops being possible — otherwise they stay held system-wide.
+        if !canReceiveRemoteInput {
+            releaseRemoteModifiers()
+            receivingRemote = false
+            receivingScreenId = nil
+            remotePressedMouseButtons.removeAll()
+        }
         updateStatus()
     }
 
@@ -954,11 +963,30 @@ final class InputSharingCoordinator {
         guard let keyCode = Self.canonicalToMacKey[key.key] else {
             return
         }
+        // The controller stamps every key message with its live modifier snapshot, so treat it
+        // as authoritative rather than unioning it with our own bookkeeping: a modifier keyup
+        // the controller's hook missed (secure desktop, hook timeout) or a message lost to a
+        // disconnect would otherwise leave the injected modifier held here until the next
+        // capture hand-off.
+        remotePressedSourceModifierKeys = Set(key.modifiers)
+        reconcileRemoteModifierState()
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: key.action == "down") else {
             return
         }
-        let modifiers = mappedModifiers(remotePressedSourceModifierKeys.union(key.modifiers))
-        event.flags = Self.flags(from: Array(modifiers))
+        // Hardware arrow/nav key events carry implicit maskSecondaryFn (+ maskNumericPad for
+        // arrows), and WindowServer's symbolic hotkeys only match when they're present — the
+        // Spaces switch is registered as Control+Fn+Arrow, so a bare Control+Arrow never fires
+        // it. Keep those implicit bits (whether contributed by the CGEvent constructor or added
+        // here) instead of overwriting the flags with just the four plain modifier masks.
+        var flags = Self.flags(from: Array(mappedModifiers(remotePressedSourceModifierKeys)))
+        flags.formUnion(event.flags.intersection([.maskSecondaryFn, .maskNumericPad]))
+        if Self.secondaryFnKeys.contains(key.key) {
+            flags.insert(.maskSecondaryFn)
+        }
+        if Self.arrowKeys.contains(key.key) {
+            flags.insert(.maskNumericPad)
+        }
+        event.flags = flags
         post(event)
     }
 
@@ -1282,6 +1310,8 @@ final class InputSharingCoordinator {
 
     private static let modifierKeyOrder = ["Shift", "Control", "Alt", "Meta"]
     private static let modifierKeys = Set(modifierKeyOrder)
+    private static let arrowKeys: Set<String> = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
+    private static let secondaryFnKeys: Set<String> = arrowKeys.union(["Home", "End", "PageUp", "PageDown", "Delete"])
 
     private var hasAccessibilityPermission: Bool {
         AXIsProcessTrusted()
