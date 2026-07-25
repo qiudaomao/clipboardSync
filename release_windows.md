@@ -7,7 +7,7 @@ Steps to cut a Windows release and publish it through NetSparkle auto-update.
 
 Release artifacts and `win-appcast.xml` live in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo (`git@github.com:qiudaomao/clipboardSyncRelease.git`), not in this repo.
 
-The current Windows release target is `v0.1.31`, matching the app version `0.1.31`.
+The current Windows release target is `v0.1.32`, matching the app version `0.1.32`.
 
 ## Publishing from macOS
 
