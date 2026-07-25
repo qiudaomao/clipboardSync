@@ -85,6 +85,96 @@ internal sealed class KeyboardModifierMap
     }
 }
 
+/// <summary>
+/// A weekly, hour-granular sleep-prevention schedule: 7 days x 24 hours of blocks. Day 0 is Monday
+/// (ISO-8601 week order) and hour <c>h</c> covers the local-time range <c>[h:00, h+1:00)</c>.
+/// Persisted as a 168-character string of "0"/"1" so the stored value stays readable and identical
+/// across macOS, Windows, and Linux.
+/// </summary>
+internal sealed class SleepTimePlan
+{
+    public const int DayCount = 7;
+    public const int HourCount = 24;
+    public const int BlockCount = DayCount * HourCount;
+
+    private readonly bool[] blocks = new bool[BlockCount];
+
+    public SleepTimePlan()
+    {
+    }
+
+    /// <summary>
+    /// Fails rather than silently repairing: a stored plan of the wrong shape means the saved
+    /// configuration is corrupt, and quietly padding it would enforce hours the user never chose.
+    /// </summary>
+    public static SleepTimePlan FromStorageValue(string storageValue)
+    {
+        ArgumentNullException.ThrowIfNull(storageValue);
+        if (storageValue.Length != BlockCount)
+        {
+            throw new InvalidDataException(
+                $"A saved sleep time plan must hold {BlockCount} blocks but holds {storageValue.Length}.");
+        }
+
+        var plan = new SleepTimePlan();
+        for (var index = 0; index < BlockCount; index++)
+        {
+            plan.blocks[index] = storageValue[index] switch
+            {
+                '0' => false,
+                '1' => true,
+                _ => throw new InvalidDataException(
+                    $"A saved sleep time plan contains the unsupported block value '{storageValue[index]}'.")
+            };
+        }
+        return plan;
+    }
+
+    public string StorageValue => string.Create(BlockCount, blocks, static (span, source) =>
+    {
+        for (var index = 0; index < source.Length; index++)
+        {
+            span[index] = source[index] ? '1' : '0';
+        }
+    });
+
+    public bool IsEmpty => Array.TrueForAll(blocks, block => !block);
+
+    public int PreventedHourCount => blocks.Count(block => block);
+
+    public bool IsPrevented(int day, int hour) => blocks[Index(day, hour)];
+
+    public void SetPrevented(bool prevented, int day, int hour) => blocks[Index(day, hour)] = prevented;
+
+    /// <summary>Whether the block covering <paramref name="local"/> asks for sleep prevention.</summary>
+    public bool IsPreventing(DateTime local) => IsPrevented(DayIndex(local.DayOfWeek), local.Hour);
+
+    /// <summary>Maps <see cref="DayOfWeek"/>'s Sunday-first order onto 0 = Monday ... 6 = Sunday.</summary>
+    public static int DayIndex(DayOfWeek dayOfWeek) => ((int)dayOfWeek + 6) % DayCount;
+
+    public SleepTimePlan Clone()
+    {
+        var copy = new SleepTimePlan();
+        Array.Copy(blocks, copy.blocks, BlockCount);
+        return copy;
+    }
+
+    public bool Matches(SleepTimePlan other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        return blocks.AsSpan().SequenceEqual(other.blocks);
+    }
+
+    private static int Index(int day, int hour)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(day);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(day, DayCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(hour);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(hour, HourCount);
+        return day * HourCount + hour;
+    }
+}
+
 internal sealed class AppConfig
 {
     public SyncMode Mode { get; set; } = SyncMode.Client;
@@ -101,6 +191,10 @@ internal sealed class AppConfig
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
     public SleepPreventionDuration SleepPreventionDuration { get; set; }
     public DateTimeOffset? SleepPreventionUntil { get; set; }
+    /// Stored as the plan's raw 168-character block string so config.json stays human-readable and
+    /// byte-identical to the macOS and Linux value. Use <see cref="SleepTimePlan.FromStorageValue"/>
+    /// to work with it.
+    public string SleepPreventionTimePlan { get; set; } = new SleepTimePlan().StorageValue;
     public bool DisableSleepPreventionBelow20PercentOnBattery { get; set; }
 
     public void Normalize()
@@ -129,6 +223,9 @@ internal sealed class AppConfig
         {
             throw new InvalidDataException("A timed sleep-prevention setting must include an expiration.");
         }
+        // Throws on a malformed plan rather than resetting it, so a corrupt file is reported instead
+        // of silently discarding the user's schedule.
+        SleepPreventionTimePlan = SleepTimePlan.FromStorageValue(SleepPreventionTimePlan).StorageValue;
     }
 
     public AppConfig Clone()
@@ -148,6 +245,7 @@ internal sealed class AppConfig
             DeviceId = DeviceId,
             SleepPreventionDuration = SleepPreventionDuration,
             SleepPreventionUntil = SleepPreventionUntil,
+            SleepPreventionTimePlan = SleepPreventionTimePlan,
             DisableSleepPreventionBelow20PercentOnBattery = DisableSleepPreventionBelow20PercentOnBattery
         };
     }

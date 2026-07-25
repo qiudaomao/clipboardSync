@@ -27,6 +27,7 @@
 		C00000000000000000000021 /* PortForwardWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000020 /* PortForwardWindowController.swift */; };
 		C00000000000000000000031 /* FileTransferCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00000000000000000000030 /* FileTransferCoordinator.swift */; };
 		D00000000000000000000002 /* SleepPreventionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000001 /* SleepPreventionController.swift */; };
+		D00000000000000000000004 /* TimePlanWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000003 /* TimePlanWindowController.swift */; };
 		E00000000000000000000002 /* TunnelFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000001 /* TunnelFrame.swift */; };
 		E00000000000000000000004 /* BulkFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000003 /* BulkFrame.swift */; };
 /* End PBXBuildFile section */
@@ -53,6 +54,7 @@
 		C00000000000000000000020 /* PortForwardWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortForwardWindowController.swift; sourceTree = "<group>"; };
 		C00000000000000000000030 /* FileTransferCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTransferCoordinator.swift; sourceTree = "<group>"; };
 		D00000000000000000000001 /* SleepPreventionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SleepPreventionController.swift; sourceTree = "<group>"; };
+		D00000000000000000000003 /* TimePlanWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimePlanWindowController.swift; sourceTree = "<group>"; };
 		E00000000000000000000001 /* TunnelFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelFrame.swift; sourceTree = "<group>"; };
 		E00000000000000000000003 /* BulkFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BulkFrame.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -92,6 +94,7 @@
 				A00000000000000000000008 /* main.swift */,
 				A00000000000000000000009 /* AppController.swift */,
 				D00000000000000000000001 /* SleepPreventionController.swift */,
+				D00000000000000000000003 /* TimePlanWindowController.swift */,
 				A0000000000000000000000A /* ClipboardCoordinator.swift */,
 				C00000000000000000000030 /* FileTransferCoordinator.swift */,
 				A0000000000000000000000B /* Models.swift */,
@@ -200,6 +203,7 @@
 				A0000000000000000000000F /* main.swift in Sources */,
 				A00000000000000000000010 /* AppController.swift in Sources */,
 				D00000000000000000000002 /* SleepPreventionController.swift in Sources */,
+				D00000000000000000000004 /* TimePlanWindowController.swift in Sources */,
 				A00000000000000000000011 /* ClipboardCoordinator.swift in Sources */,
 				C00000000000000000000031 /* FileTransferCoordinator.swift in Sources */,
 				A00000000000000000000012 /* Models.swift in Sources */,

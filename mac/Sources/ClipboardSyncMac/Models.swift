@@ -21,10 +21,11 @@ enum SleepPreventionDuration: String, Codable, CaseIterable {
     case fourHours
     case sixHours
     case eightHours
+    case timePlan
 
     var hours: Int? {
         switch self {
-        case .disabled, .forever:
+        case .disabled, .forever, .timePlan:
             return nil
         case .oneHour:
             return 1
@@ -59,6 +60,106 @@ enum SleepPreventionDuration: String, Codable, CaseIterable {
             return "sleep.sixHours"
         case .eightHours:
             return "sleep.eightHours"
+        case .timePlan:
+            return "sleep.timePlan"
+        }
+    }
+}
+
+/// A weekly, hour-granular sleep-prevention schedule: 7 days x 24 hours of blocks.
+/// Day 0 is Monday (ISO-8601 week order) and hour `h` covers the local-time range
+/// `[h:00, h+1:00)`. Persisted as a 168-character string of "0"/"1" so the stored
+/// value stays readable and identical across macOS, Windows, and Linux.
+struct SleepTimePlan: Codable, Equatable {
+    static let dayCount = 7
+    static let hourCount = 24
+    static let blockCount = dayCount * hourCount
+
+    static let empty = SleepTimePlan()
+
+    private var blocks: [Bool]
+
+    init() {
+        blocks = Array(repeating: false, count: Self.blockCount)
+    }
+
+    /// Fails rather than silently repairing: a stored plan of the wrong shape means the
+    /// saved configuration is corrupt, and quietly padding it would enforce hours the user
+    /// never chose.
+    init(storageValue: String) throws {
+        let characters = Array(storageValue)
+        guard characters.count == Self.blockCount else {
+            throw SleepTimePlanError.invalidLength(characters.count)
+        }
+        blocks = try characters.map { character in
+            switch character {
+            case "0":
+                return false
+            case "1":
+                return true
+            default:
+                throw SleepTimePlanError.invalidCharacter(character)
+            }
+        }
+    }
+
+    var storageValue: String {
+        String(blocks.map { $0 ? "1" : "0" })
+    }
+
+    var isEmpty: Bool {
+        !blocks.contains(true)
+    }
+
+    func isPrevented(day: Int, hour: Int) -> Bool {
+        blocks[Self.index(day: day, hour: hour)]
+    }
+
+    mutating func setPrevented(_ prevented: Bool, day: Int, hour: Int) {
+        blocks[Self.index(day: day, hour: hour)] = prevented
+    }
+
+    /// Whether the block covering `date` in the local calendar asks for sleep prevention.
+    func isPreventing(at date: Date, calendar: Calendar = .current) -> Bool {
+        let components = calendar.dateComponents([.weekday, .hour], from: date)
+        guard let weekday = components.weekday, let hour = components.hour else {
+            preconditionFailure("The local calendar returned no weekday or hour for \(date)")
+        }
+        return isPrevented(day: Self.dayIndex(weekday: weekday), hour: hour)
+    }
+
+    /// Maps Foundation's 1 = Sunday ... 7 = Saturday onto 0 = Monday ... 6 = Sunday.
+    static func dayIndex(weekday: Int) -> Int {
+        (weekday + 5) % dayCount
+    }
+
+    private static func index(day: Int, hour: Int) -> Int {
+        precondition((0..<dayCount).contains(day), "Time-plan day \(day) is out of range")
+        precondition((0..<hourCount).contains(hour), "Time-plan hour \(hour) is out of range")
+        return day * hourCount + hour
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        try self.init(storageValue: container.decode(String.self))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(storageValue)
+    }
+}
+
+enum SleepTimePlanError: LocalizedError {
+    case invalidLength(Int)
+    case invalidCharacter(Character)
+
+    var errorDescription: String? {
+        switch self {
+        case let .invalidLength(count):
+            return "A saved sleep time plan must hold \(SleepTimePlan.blockCount) blocks but holds \(count)."
+        case let .invalidCharacter(character):
+            return "A saved sleep time plan contains the unsupported block value '\(character)'."
         }
     }
 }
@@ -171,6 +272,8 @@ enum AppText {
             "sleep.fourHours": "4 hour",
             "sleep.sixHours": "6 hour",
             "sleep.eightHours": "8 hour",
+            "sleep.timePlan": "Time Plan",
+            "sleep.editTimePlan": "Edit Time Plan…",
             "sleep.disableBelow20OnBattery": "Disable below 20% battery (on battery power)",
             "sleep.statusOff": "Status: Off",
             "sleep.statusForever": "Status: On — Forever",
@@ -179,8 +282,29 @@ enum AppText {
             "sleep.statusRemainingMinutes": "Status: %d min remaining",
             "sleep.statusPausedRemainingHoursMinutes": "Status: Paused — %d h %d min remaining",
             "sleep.statusPausedRemainingMinutes": "Status: Paused — %d min remaining",
+            "sleep.statusTimePlanOn": "Status: On — Time Plan",
+            "sleep.statusTimePlanOff": "Status: Off — outside the Time Plan",
+            "sleep.statusTimePlanEmpty": "Status: Off — Time Plan has no selected hours",
+            "sleep.statusPausedTimePlan": "Status: Paused — Time Plan",
             "sleep.errorTitle": "Could Not Update Sleep Prevention",
             "sleep.errorMessage": "Clipboard Sync could not update system sleep prevention:\n\n%@",
+            "timeplan.title": "Sleep Prevention Time Plan",
+            "timeplan.subtitle": "Each block is one hour of the week in this device's local time. Click a block to switch it, or drag to switch a rectangle of blocks. Changes are saved as they are applied.",
+            "timeplan.legendPrevent": "Prevent sleep",
+            "timeplan.legendAllow": "Allow sleep",
+            "timeplan.clearAll": "Clear All",
+            "timeplan.selectAll": "Select All",
+            "timeplan.workHours": "Workdays 9–18",
+            "timeplan.saved": "Saved",
+            "timeplan.done": "Done",
+            "timeplan.selectedHours": "%d of 168 hours prevent sleep",
+            "timeplan.day.0": "Mon",
+            "timeplan.day.1": "Tue",
+            "timeplan.day.2": "Wed",
+            "timeplan.day.3": "Thu",
+            "timeplan.day.4": "Fri",
+            "timeplan.day.5": "Sat",
+            "timeplan.day.6": "Sun",
             "forward.title": "Port Forward",
             "forward.subtitle": "Forward a TCP port on one device to a port on another. Connections to In are tunneled over the encrypted sync connection and delivered to Out.",
             "forward.in": "In (listen)",
@@ -366,6 +490,8 @@ enum AppText {
             "sleep.fourHours": "4 小时",
             "sleep.sixHours": "6 小时",
             "sleep.eightHours": "8 小时",
+            "sleep.timePlan": "时间计划",
+            "sleep.editTimePlan": "编辑时间计划…",
             "sleep.disableBelow20OnBattery": "电池供电且电量低于 20% 时禁用",
             "sleep.statusOff": "状态：未启用",
             "sleep.statusForever": "状态：已启用 — 永久",
@@ -374,8 +500,29 @@ enum AppText {
             "sleep.statusRemainingMinutes": "状态：剩余 %d 分钟",
             "sleep.statusPausedRemainingHoursMinutes": "状态：已暂停 — 剩余 %d 小时 %d 分钟",
             "sleep.statusPausedRemainingMinutes": "状态：已暂停 — 剩余 %d 分钟",
+            "sleep.statusTimePlanOn": "状态：已启用 — 时间计划",
+            "sleep.statusTimePlanOff": "状态：未启用 — 不在时间计划内",
+            "sleep.statusTimePlanEmpty": "状态：未启用 — 时间计划未选择任何时段",
+            "sleep.statusPausedTimePlan": "状态：已暂停 — 时间计划",
             "sleep.errorTitle": "无法更新睡眠防止设置",
             "sleep.errorMessage": "Clipboard Sync 无法更新系统睡眠防止设置：\n\n%@",
+            "timeplan.title": "睡眠防止时间计划",
+            "timeplan.subtitle": "每个方块代表本设备本地时间中一周里的一小时。点按方块可切换，拖动可切换一个矩形区域。更改会即时保存。",
+            "timeplan.legendPrevent": "防止睡眠",
+            "timeplan.legendAllow": "允许睡眠",
+            "timeplan.clearAll": "全部清除",
+            "timeplan.selectAll": "全部选择",
+            "timeplan.workHours": "工作日 9–18 点",
+            "timeplan.saved": "已保存",
+            "timeplan.done": "完成",
+            "timeplan.selectedHours": "168 小时中有 %d 小时防止睡眠",
+            "timeplan.day.0": "周一",
+            "timeplan.day.1": "周二",
+            "timeplan.day.2": "周三",
+            "timeplan.day.3": "周四",
+            "timeplan.day.4": "周五",
+            "timeplan.day.5": "周六",
+            "timeplan.day.6": "周日",
             "forward.title": "端口转发",
             "forward.subtitle": "将一台设备的 TCP 端口转发到另一台设备的端口。连接到“入口”的流量会经加密同步连接隧道送达“出口”。",
             "forward.in": "入口（监听）",
@@ -561,6 +708,8 @@ enum AppText {
             "sleep.fourHours": "4시간",
             "sleep.sixHours": "6시간",
             "sleep.eightHours": "8시간",
+            "sleep.timePlan": "시간 계획",
+            "sleep.editTimePlan": "시간 계획 편집…",
             "sleep.disableBelow20OnBattery": "배터리 사용 중 20% 미만이면 비활성화",
             "sleep.statusOff": "상태: 꺼짐",
             "sleep.statusForever": "상태: 켜짐 — 무기한",
@@ -569,8 +718,29 @@ enum AppText {
             "sleep.statusRemainingMinutes": "상태: %d분 남음",
             "sleep.statusPausedRemainingHoursMinutes": "상태: 일시 중지 — %d시간 %d분 남음",
             "sleep.statusPausedRemainingMinutes": "상태: 일시 중지 — %d분 남음",
+            "sleep.statusTimePlanOn": "상태: 켜짐 — 시간 계획",
+            "sleep.statusTimePlanOff": "상태: 꺼짐 — 시간 계획 시간대가 아님",
+            "sleep.statusTimePlanEmpty": "상태: 꺼짐 — 시간 계획에 선택된 시간이 없음",
+            "sleep.statusPausedTimePlan": "상태: 일시 중지 — 시간 계획",
             "sleep.errorTitle": "잠자기 방지 설정을 업데이트할 수 없음",
             "sleep.errorMessage": "Clipboard Sync에서 시스템 잠자기 방지 설정을 업데이트하지 못했습니다.\n\n%@",
+            "timeplan.title": "잠자기 방지 시간 계획",
+            "timeplan.subtitle": "각 블록은 이 기기의 현지 시간 기준으로 한 주 중 한 시간입니다. 블록을 클릭하면 전환되고, 드래그하면 사각형 영역이 전환됩니다. 변경 사항은 즉시 저장됩니다.",
+            "timeplan.legendPrevent": "잠자기 방지",
+            "timeplan.legendAllow": "잠자기 허용",
+            "timeplan.clearAll": "모두 지우기",
+            "timeplan.selectAll": "모두 선택",
+            "timeplan.workHours": "평일 9–18시",
+            "timeplan.saved": "저장됨",
+            "timeplan.done": "완료",
+            "timeplan.selectedHours": "168시간 중 %d시간이 잠자기를 방지함",
+            "timeplan.day.0": "월",
+            "timeplan.day.1": "화",
+            "timeplan.day.2": "수",
+            "timeplan.day.3": "목",
+            "timeplan.day.4": "금",
+            "timeplan.day.5": "토",
+            "timeplan.day.6": "일",
             "forward.title": "포트 포워딩",
             "forward.subtitle": "한 기기의 TCP 포트를 다른 기기의 포트로 전달합니다. In으로 들어온 연결은 암호화된 동기화 연결을 통해 Out으로 전달됩니다.",
             "forward.in": "In (수신)",
@@ -756,6 +926,8 @@ enum AppText {
             "sleep.fourHours": "4 時間",
             "sleep.sixHours": "6 時間",
             "sleep.eightHours": "8 時間",
+            "sleep.timePlan": "タイムプラン",
+            "sleep.editTimePlan": "タイムプランを編集…",
             "sleep.disableBelow20OnBattery": "バッテリー使用時に 20% 未満なら無効化",
             "sleep.statusOff": "状態：オフ",
             "sleep.statusForever": "状態：オン — 無期限",
@@ -764,8 +936,29 @@ enum AppText {
             "sleep.statusRemainingMinutes": "状態：残り %d 分",
             "sleep.statusPausedRemainingHoursMinutes": "状態：一時停止 — 残り %d 時間 %d 分",
             "sleep.statusPausedRemainingMinutes": "状態：一時停止 — 残り %d 分",
+            "sleep.statusTimePlanOn": "状態：オン — タイムプラン",
+            "sleep.statusTimePlanOff": "状態：オフ — タイムプランの時間帯外",
+            "sleep.statusTimePlanEmpty": "状態：オフ — タイムプランに選択された時間がありません",
+            "sleep.statusPausedTimePlan": "状態：一時停止 — タイムプラン",
             "sleep.errorTitle": "スリープ防止設定を更新できません",
             "sleep.errorMessage": "Clipboard Sync はシステムのスリープ防止設定を更新できませんでした。\n\n%@",
+            "timeplan.title": "スリープ防止タイムプラン",
+            "timeplan.subtitle": "各ブロックはこのデバイスのローカル時間での 1 週間のうちの 1 時間です。ブロックをクリックすると切り替わり、ドラッグすると矩形範囲を切り替えられます。変更は即時に保存されます。",
+            "timeplan.legendPrevent": "スリープを防止",
+            "timeplan.legendAllow": "スリープを許可",
+            "timeplan.clearAll": "すべて消去",
+            "timeplan.selectAll": "すべて選択",
+            "timeplan.workHours": "平日 9–18 時",
+            "timeplan.saved": "保存しました",
+            "timeplan.done": "完了",
+            "timeplan.selectedHours": "168 時間中 %d 時間がスリープを防止します",
+            "timeplan.day.0": "月",
+            "timeplan.day.1": "火",
+            "timeplan.day.2": "水",
+            "timeplan.day.3": "木",
+            "timeplan.day.4": "金",
+            "timeplan.day.5": "土",
+            "timeplan.day.6": "日",
             "forward.title": "ポート転送",
             "forward.subtitle": "あるデバイスの TCP ポートを別のデバイスのポートへ転送します。In への接続は暗号化された同期接続を経由して Out に届きます。",
             "forward.in": "In（待ち受け）",
@@ -961,6 +1154,7 @@ struct AppConfig: Codable {
     var keyboardModifierMap: KeyboardModifierMap
     var sleepPreventionDuration: SleepPreventionDuration
     var sleepPreventionUntil: Date?
+    var sleepPreventionTimePlan: SleepTimePlan
     var disableSleepPreventionBelow20PercentOnBattery: Bool
 
     static let defaults = AppConfig(
@@ -975,6 +1169,7 @@ struct AppConfig: Codable {
         keyboardModifierMap: .identity,
         sleepPreventionDuration: .disabled,
         sleepPreventionUntil: nil,
+        sleepPreventionTimePlan: .empty,
         disableSleepPreventionBelow20PercentOnBattery: false
     )
     private static let storageKey = "ClipboardSyncMac.config"
@@ -995,6 +1190,7 @@ struct AppConfig: Codable {
         keyboardModifierMap: KeyboardModifierMap = .identity,
         sleepPreventionDuration: SleepPreventionDuration,
         sleepPreventionUntil: Date?,
+        sleepPreventionTimePlan: SleepTimePlan = .empty,
         disableSleepPreventionBelow20PercentOnBattery: Bool
     ) {
         self.mode = mode
@@ -1008,6 +1204,7 @@ struct AppConfig: Codable {
         self.keyboardModifierMap = keyboardModifierMap
         self.sleepPreventionDuration = sleepPreventionDuration
         self.sleepPreventionUntil = sleepPreventionUntil
+        self.sleepPreventionTimePlan = sleepPreventionTimePlan
         self.disableSleepPreventionBelow20PercentOnBattery = disableSleepPreventionBelow20PercentOnBattery
     }
 
@@ -1024,6 +1221,10 @@ struct AppConfig: Codable {
         keyboardModifierMap = try container.decodeIfPresent(KeyboardModifierMap.self, forKey: .keyboardModifierMap) ?? Self.defaults.keyboardModifierMap
         sleepPreventionDuration = try container.decodeIfPresent(SleepPreventionDuration.self, forKey: .sleepPreventionDuration) ?? Self.defaults.sleepPreventionDuration
         sleepPreventionUntil = try container.decodeIfPresent(Date.self, forKey: .sleepPreventionUntil)
+        sleepPreventionTimePlan = try container.decodeIfPresent(
+            SleepTimePlan.self,
+            forKey: .sleepPreventionTimePlan
+        ) ?? Self.defaults.sleepPreventionTimePlan
         disableSleepPreventionBelow20PercentOnBattery = try container.decodeIfPresent(
             Bool.self,
             forKey: .disableSleepPreventionBelow20PercentOnBattery
@@ -1063,6 +1264,7 @@ struct AppConfig: Codable {
             keyboardModifierMap: keyboardModifierMap,
             sleepPreventionDuration: sleepPreventionDuration,
             sleepPreventionUntil: sleepPreventionDuration.isTimed ? sleepPreventionUntil : nil,
+            sleepPreventionTimePlan: sleepPreventionTimePlan,
             disableSleepPreventionBelow20PercentOnBattery: disableSleepPreventionBelow20PercentOnBattery
         )
     }

@@ -3,6 +3,7 @@
 #include <QSettings>
 #include <QJsonDocument>
 #include <QUuid>
+#include <algorithm>
 #include <stdexcept>
 
 QString sleepPreventionDurationStorageValue(SleepPreventionDuration duration)
@@ -22,6 +23,8 @@ QString sleepPreventionDurationStorageValue(SleepPreventionDuration duration)
         return QStringLiteral("6h");
     case SleepPreventionDuration::EightHours:
         return QStringLiteral("8h");
+    case SleepPreventionDuration::TimePlan:
+        return QStringLiteral("timePlan");
     }
     throw std::runtime_error("Unknown sleep-prevention duration");
 }
@@ -42,6 +45,8 @@ SleepPreventionDuration sleepPreventionDurationFromStorageValue(const QString &v
         return SleepPreventionDuration::SixHours;
     if (value == QStringLiteral("8h"))
         return SleepPreventionDuration::EightHours;
+    if (value == QStringLiteral("timePlan"))
+        return SleepPreventionDuration::TimePlan;
     throw std::runtime_error(QStringLiteral("Unknown sleep-prevention duration: %1").arg(value).toStdString());
 }
 
@@ -60,9 +65,83 @@ std::optional<int> sleepPreventionDurationHours(SleepPreventionDuration duration
         return 8;
     case SleepPreventionDuration::Disabled:
     case SleepPreventionDuration::Forever:
+    case SleepPreventionDuration::TimePlan:
         return std::nullopt;
     }
     throw std::runtime_error("Unknown sleep-prevention duration");
+}
+
+SleepTimePlan SleepTimePlan::fromStorageValue(const QString &value)
+{
+    if (value.size() != BlockCount) {
+        throw std::runtime_error(QStringLiteral(
+            "A saved sleep time plan must hold %1 blocks but holds %2").arg(BlockCount).arg(value.size()).toStdString());
+    }
+    SleepTimePlan plan;
+    for (int index = 0; index < BlockCount; ++index) {
+        const QChar block = value.at(index);
+        if (block == u'0') {
+            plan.blocks_[static_cast<size_t>(index)] = false;
+        } else if (block == u'1') {
+            plan.blocks_[static_cast<size_t>(index)] = true;
+        } else {
+            throw std::runtime_error(QStringLiteral(
+                "A saved sleep time plan contains the unsupported block value '%1'").arg(block).toStdString());
+        }
+    }
+    return plan;
+}
+
+QString SleepTimePlan::storageValue() const
+{
+    QString value;
+    value.reserve(BlockCount);
+    for (const bool block : blocks_)
+        value.append(block ? u'1' : u'0');
+    return value;
+}
+
+bool SleepTimePlan::isEmpty() const
+{
+    return std::none_of(blocks_.begin(), blocks_.end(), [](bool block) { return block; });
+}
+
+int SleepTimePlan::preventedHourCount() const
+{
+    return static_cast<int>(std::count(blocks_.begin(), blocks_.end(), true));
+}
+
+bool SleepTimePlan::isPrevented(int day, int hour) const
+{
+    return blocks_[static_cast<size_t>(blockIndex(day, hour))];
+}
+
+void SleepTimePlan::setPrevented(bool prevented, int day, int hour)
+{
+    blocks_[static_cast<size_t>(blockIndex(day, hour))] = prevented;
+}
+
+bool SleepTimePlan::isPreventing(const QDateTime &local) const
+{
+    if (!local.isValid())
+        throw std::runtime_error("Cannot evaluate a sleep time plan at an invalid timestamp");
+    return isPrevented(dayIndex(local.date().dayOfWeek()), local.time().hour());
+}
+
+int SleepTimePlan::dayIndex(int qtDayOfWeek)
+{
+    if (qtDayOfWeek < 1 || qtDayOfWeek > DayCount)
+        throw std::runtime_error("Qt returned a day of week outside 1..7");
+    return qtDayOfWeek - 1;
+}
+
+int SleepTimePlan::blockIndex(int day, int hour)
+{
+    if (day < 0 || day >= DayCount)
+        throw std::runtime_error(QStringLiteral("Time-plan day %1 is out of range").arg(day).toStdString());
+    if (hour < 0 || hour >= HourCount)
+        throw std::runtime_error(QStringLiteral("Time-plan hour %1 is out of range").arg(hour).toStdString());
+    return day * HourCount + hour;
 }
 
 AppConfig AppConfig::load()
@@ -97,6 +176,8 @@ AppConfig AppConfig::load()
         throw std::runtime_error("Stored timed sleep-prevention setting has no expiration");
     if (!sleepPreventionDurationHours(config.sleepPreventionDuration))
         config.sleepPreventionUntil = {};
+    config.sleepPreventionTimePlan = SleepTimePlan::fromStorageValue(
+        settings.value(QStringLiteral("power/sleepPreventionTimePlan"), SleepTimePlan().storageValue()).toString());
     const auto modifier = [&settings](const QString &key, const QString &fallback) {
         const QString value = settings.value(QStringLiteral("input/map") + key, fallback).toString();
         static const QStringList valid{QStringLiteral("Shift"), QStringLiteral("Control"),
@@ -145,6 +226,7 @@ void AppConfig::save() const
         sleepPreventionDurationStorageValue(sleepPreventionDuration));
     settings.setValue(QStringLiteral("power/disableSleepPreventionBelow20PercentOnBattery"),
         disableSleepPreventionBelow20PercentOnBattery);
+    settings.setValue(QStringLiteral("power/sleepPreventionTimePlan"), sleepPreventionTimePlan.storageValue());
     if (sleepPreventionIsTimed) {
         settings.setValue(QStringLiteral("power/sleepPreventionUntil"),
             sleepPreventionUntil.toUTC().toString(Qt::ISODateWithMs));

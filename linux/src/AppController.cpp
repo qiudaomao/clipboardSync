@@ -8,6 +8,7 @@
 #include "PortForwardDialog.h"
 #include "ScreenLayoutDialog.h"
 #include "SleepPreventionController.h"
+#include "TimePlanDialog.h"
 #include "BulkFrame.h"
 #include "SyncTransport.h"
 #include "TunnelFrame.h"
@@ -107,7 +108,8 @@ void AppController::start()
         sleepPrevention_->setLowBatteryGuardEnabled(
             config_.disableSleepPreventionBelow20PercentOnBattery);
         savedSleepPreventionExpired = sleepPrevention_->restore(
-            config_.sleepPreventionDuration, config_.sleepPreventionUntil);
+            config_.sleepPreventionDuration, config_.sleepPreventionUntil,
+            config_.sleepPreventionTimePlan);
     } catch (const std::exception &error) {
         reportSleepPreventionError(QString::fromUtf8(error.what()));
     }
@@ -268,6 +270,7 @@ void AppController::buildUi()
             setSleepPrevention(duration);
         });
     }
+    sleepPreventionMenu_->addAction(QStringLiteral("Edit Time Plan..."), this, &AppController::showTimePlan);
     sleepPreventionMenu_->addSeparator();
     lowBatterySleepPreventionAction_ = sleepPreventionMenu_->addAction(
         QStringLiteral("Disable below 20% battery (on battery power)"));
@@ -327,6 +330,38 @@ void AppController::setSleepPrevention(SleepPreventionDuration duration)
     config_.sleepPreventionUntil = expiration;
     config_.save();
     updateSleepPreventionMenu();
+
+    // Choosing Time Plan with an empty schedule prevents nothing, so surface the editor rather than
+    // leaving the user with a selected mode that silently does nothing.
+    if (duration == SleepPreventionDuration::TimePlan && config_.sleepPreventionTimePlan.isEmpty())
+        showTimePlan();
+}
+
+void AppController::showTimePlan()
+{
+    if (!timePlanDialog_) {
+        timePlanDialog_ = new TimePlanDialog(window_);
+        connect(timePlanDialog_, &TimePlanDialog::planChanged,
+            this, &AppController::applySleepPreventionTimePlan);
+    }
+    // Show before refreshing, matching showScreenLayout: the dialog only populates once visible.
+    timePlanDialog_->show();
+    timePlanDialog_->updatePlan(config_.sleepPreventionTimePlan);
+    timePlanDialog_->raise();
+    timePlanDialog_->activateWindow();
+}
+
+void AppController::applySleepPreventionTimePlan(const SleepTimePlan &plan)
+{
+    try {
+        sleepPrevention_->setTimePlan(plan);
+    } catch (const std::exception &error) {
+        reportSleepPreventionError(QString::fromUtf8(error.what()));
+        return;
+    }
+    config_.sleepPreventionTimePlan = plan;
+    config_.save();
+    updateSleepPreventionMenu();
 }
 
 void AppController::setLowBatterySleepPreventionGuard(bool enabled)
@@ -381,6 +416,16 @@ QString AppController::sleepPreventionStatusText() const
         return paused
             ? QStringLiteral("Status: Paused — Forever selected")
             : QStringLiteral("Status: On — Forever");
+    case SleepPreventionDuration::TimePlan:
+        // The battery pause only matters while the plan would otherwise be preventing sleep;
+        // outside every planned hour, reporting "Paused" would blame the wrong thing.
+        if (sleepPrevention_->timePlan().isEmpty())
+            return QStringLiteral("Status: Off — Time Plan has no selected hours");
+        if (!sleepPrevention_->isInsideTimePlan())
+            return QStringLiteral("Status: Off — outside the Time Plan");
+        return paused
+            ? QStringLiteral("Status: Paused — Time Plan")
+            : QStringLiteral("Status: On — Time Plan");
     case SleepPreventionDuration::OneHour:
     case SleepPreventionDuration::TwoHours:
     case SleepPreventionDuration::FourHours:

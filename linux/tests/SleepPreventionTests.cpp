@@ -16,6 +16,7 @@ int main(int argc, char **argv)
         QStringLiteral("4 hour"),
         QStringLiteral("6 hour"),
         QStringLiteral("8 hour"),
+        QStringLiteral("Time Plan"),
     };
     if (choices.size() != expectedTitles.size())
         qFatal("Sleep-prevention menu has the wrong number of choices");
@@ -35,7 +36,8 @@ int main(int argc, char **argv)
             qFatal("Timed sleep-prevention expiration is wrong");
     }
     if (SleepPreventionController::expirationFor(SleepPreventionDuration::Disabled, now).isValid()
-        || SleepPreventionController::expirationFor(SleepPreventionDuration::Forever, now).isValid())
+        || SleepPreventionController::expirationFor(SleepPreventionDuration::Forever, now).isValid()
+        || SleepPreventionController::expirationFor(SleepPreventionDuration::TimePlan, now).isValid())
         qFatal("Untimed sleep-prevention choices unexpectedly received an expiration");
 
     if (!SleepPreventionController::shouldSuspendForLowBattery(true, true, 19.99)
@@ -45,9 +47,16 @@ int main(int argc, char **argv)
         qFatal("Low-battery sleep-prevention threshold or power-source condition is wrong");
 
     SleepPreventionController controller;
-    if (!controller.restore(SleepPreventionDuration::OneHour, QDateTime::currentDateTimeUtc().addSecs(-1))
+    if (!controller.restore(SleepPreventionDuration::OneHour, QDateTime::currentDateTimeUtc().addSecs(-1),
+            SleepTimePlan())
         || controller.selection() != SleepPreventionDuration::Disabled)
         qFatal("An expired persisted duration was not cleared without acquiring an inhibitor");
+
+    // A time plan covering no hours must leave the inhibitor released even while it is selected.
+    if (controller.restore(SleepPreventionDuration::TimePlan, {}, SleepTimePlan())
+        || controller.selection() != SleepPreventionDuration::TimePlan
+        || controller.isInsideTimePlan())
+        qFatal("An empty time plan was treated as an active sleep-prevention window");
 
     QTemporaryDir settingsDirectory;
     if (!settingsDirectory.isValid())
@@ -61,12 +70,14 @@ int main(int argc, char **argv)
     storedConfig.sleepPreventionDuration = SleepPreventionDuration::FourHours;
     storedConfig.sleepPreventionUntil = now.addSecs(4 * 3600);
     storedConfig.disableSleepPreventionBelow20PercentOnBattery = true;
+    storedConfig.sleepPreventionTimePlan.setPrevented(true, 2, 14);
     storedConfig.save();
     const AppConfig loadedConfig = AppConfig::load();
     if (loadedConfig.sleepPreventionDuration != SleepPreventionDuration::FourHours
         || loadedConfig.sleepPreventionUntil != storedConfig.sleepPreventionUntil
-        || !loadedConfig.disableSleepPreventionBelow20PercentOnBattery)
-        qFatal("Sleep-prevention duration, deadline, or low-battery guard did not persist");
+        || !loadedConfig.disableSleepPreventionBelow20PercentOnBattery
+        || loadedConfig.sleepPreventionTimePlan != storedConfig.sleepPreventionTimePlan)
+        qFatal("Sleep-prevention duration, deadline, low-battery guard, or time plan did not persist");
 
     qInfo("Sleep-prevention duration tests passed");
     return 0;

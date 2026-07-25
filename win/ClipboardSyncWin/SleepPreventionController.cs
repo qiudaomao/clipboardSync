@@ -9,6 +9,8 @@ using Microsoft.Win32;
 
 namespace ClipboardSyncWin;
 
+// Persisted as integers in config.json, so new members must be appended: inserting one would
+// silently reinterpret every saved configuration.
 internal enum SleepPreventionDuration
 {
     Disabled,
@@ -17,7 +19,8 @@ internal enum SleepPreventionDuration
     TwoHours,
     FourHours,
     SixHours,
-    EightHours
+    EightHours,
+    TimePlan
 }
 
 internal enum SleepPreventionSuspensionReason
@@ -54,6 +57,7 @@ internal static class SleepPreventionDurationExtensions
             SleepPreventionDuration.FourHours => "sleep.fourHours",
             SleepPreventionDuration.SixHours => "sleep.sixHours",
             SleepPreventionDuration.EightHours => "sleep.eightHours",
+            SleepPreventionDuration.TimePlan => "sleep.timePlan",
             _ => throw new ArgumentOutOfRangeException(nameof(duration), duration, "Unknown sleep-prevention duration")
         };
     }
@@ -83,6 +87,9 @@ internal sealed class SleepPreventionController : IDisposable
     private readonly SynchronizationContext uiContext;
     private readonly System.Windows.Forms.Timer expirationTimer = new();
     private readonly System.Windows.Forms.Timer batteryPollTimer = new() { Interval = 30_000 };
+    // Polls instead of firing once per hour boundary so a clock change, a time-zone change, or a
+    // sleep/wake cycle that skips the boundary still converges within one interval.
+    private readonly System.Windows.Forms.Timer timePlanTimer = new() { Interval = 30_000 };
     private bool requestActive;
     private bool powerEventsSubscribed;
     private bool disposed;
@@ -94,6 +101,13 @@ internal sealed class SleepPreventionController : IDisposable
     public DateTimeOffset? ExpiresAt { get; private set; }
     public bool LowBatteryGuardEnabled { get; private set; }
     public SleepPreventionSuspensionReason? SuspensionReason { get; private set; }
+    public SleepTimePlan TimePlan { get; private set; } = new();
+    /// <summary>
+    /// Whether the current wall-clock hour is inside the time plan. Meaningful only while
+    /// <see cref="SleepPreventionDuration.TimePlan"/> is selected; the tray menu reads it to
+    /// distinguish "on" from "off for now".
+    /// </summary>
+    public bool IsInsideTimePlan { get; private set; }
 
     public event Action? Expired;
     public event Action<Exception>? Failure;
@@ -104,6 +118,7 @@ internal sealed class SleepPreventionController : IDisposable
         this.uiContext = uiContext ?? throw new ArgumentNullException(nameof(uiContext));
         expirationTimer.Tick += (_, _) => ExpireIfDue();
         batteryPollTimer.Tick += (_, _) => RefreshBatteryStatusAndReconcile();
+        timePlanTimer.Tick += (_, _) => ReconcileTimePlan();
     }
 
     internal static bool ShouldSuspendForLowBattery(
@@ -130,7 +145,7 @@ internal sealed class SleepPreventionController : IDisposable
             var nextReason = DesiredSuspensionReason(Selection, guardEnabled: true);
             try
             {
-                EnforceRequest(Selection, nextReason);
+                EnforceRequest(Selection, nextReason, CurrentlyInsideTimePlan(Selection));
             }
             catch
             {
@@ -146,7 +161,7 @@ internal sealed class SleepPreventionController : IDisposable
             return;
         }
 
-        EnforceRequest(Selection, suspensionReason: null);
+        EnforceRequest(Selection, suspensionReason: null, CurrentlyInsideTimePlan(Selection));
         LowBatteryGuardEnabled = false;
         StopBatteryMonitoring();
         batteryState = null;
@@ -160,10 +175,12 @@ internal sealed class SleepPreventionController : IDisposable
     /// Restores persisted state. Returns true when a timed selection expired while the app was not
     /// running and the caller must clear it from persistent configuration.
     /// </summary>
-    public bool Restore(SleepPreventionDuration selection, DateTimeOffset? expiresAt)
+    public bool Restore(SleepPreventionDuration selection, DateTimeOffset? expiresAt, SleepTimePlan timePlan)
     {
         EnsureOwnerThread();
         EnsureNotDisposed();
+        ArgumentNullException.ThrowIfNull(timePlan);
+        TimePlan = timePlan.Clone();
         if (!Enum.IsDefined(selection))
         {
             throw new InvalidDataException($"Unknown sleep-prevention duration: {(int)selection}");
@@ -192,6 +209,27 @@ internal sealed class SleepPreventionController : IDisposable
         ReportStoredBatteryFailureIfNeeded();
         Trace.WriteLine($"Restored sleep prevention: {selection}.");
         return false;
+    }
+
+    /// <summary>
+    /// Replaces the weekly schedule. Reconciles the request immediately so an edit that covers (or
+    /// uncovers) the current hour takes effect without waiting for the next poll.
+    /// </summary>
+    public void SetTimePlan(SleepTimePlan plan)
+    {
+        EnsureOwnerThread();
+        EnsureNotDisposed();
+        ArgumentNullException.ThrowIfNull(plan);
+        if (TimePlan.Matches(plan))
+        {
+            return;
+        }
+        TimePlan = plan.Clone();
+        Trace.WriteLine($"Sleep prevention time plan updated: {TimePlan.StorageValue}");
+        if (Selection == SleepPreventionDuration.TimePlan)
+        {
+            ApplySelection(SleepPreventionDuration.TimePlan, null);
+        }
     }
 
     public DateTimeOffset? Select(SleepPreventionDuration duration)
@@ -228,9 +266,11 @@ internal sealed class SleepPreventionController : IDisposable
         EnsureOwnerThread();
         expirationTimer.Stop();
         batteryPollTimer.Stop();
+        timePlanTimer.Stop();
         StopBatteryMonitoring();
         expirationTimer.Dispose();
         batteryPollTimer.Dispose();
+        timePlanTimer.Dispose();
         ReleaseRequestIfNeeded();
         disposed = true;
     }
@@ -238,11 +278,14 @@ internal sealed class SleepPreventionController : IDisposable
     private void ApplySelection(SleepPreventionDuration duration, DateTimeOffset? expiresAt)
     {
         var nextReason = DesiredSuspensionReason(duration, LowBatteryGuardEnabled);
-        EnforceRequest(duration, nextReason);
+        var nextInsideTimePlan = CurrentlyInsideTimePlan(duration);
+        EnforceRequest(duration, nextReason, nextInsideTimePlan);
         Selection = duration;
         ExpiresAt = expiresAt;
+        UpdateInsideTimePlan(nextInsideTimePlan);
         UpdateSuspensionReason(nextReason);
         ScheduleExpirationTimer();
+        ScheduleTimePlanTimer();
     }
 
     private SleepPreventionSuspensionReason? DesiredSuspensionReason(
@@ -264,9 +307,12 @@ internal sealed class SleepPreventionController : IDisposable
 
     private void EnforceRequest(
         SleepPreventionDuration duration,
-        SleepPreventionSuspensionReason? suspensionReason)
+        SleepPreventionSuspensionReason? suspensionReason,
+        bool insideTimePlan)
     {
-        if (duration == SleepPreventionDuration.Disabled || suspensionReason is not null)
+        if (duration == SleepPreventionDuration.Disabled
+            || suspensionReason is not null
+            || (duration == SleepPreventionDuration.TimePlan && !insideTimePlan))
         {
             ReleaseRequestIfNeeded();
         }
@@ -274,6 +320,64 @@ internal sealed class SleepPreventionController : IDisposable
         {
             AcquireRequestIfNeeded();
         }
+    }
+
+    private bool CurrentlyInsideTimePlan(SleepPreventionDuration duration)
+    {
+        return duration == SleepPreventionDuration.TimePlan && TimePlan.IsPreventing(DateTime.Now);
+    }
+
+    private void UpdateInsideTimePlan(bool next)
+    {
+        if (IsInsideTimePlan == next)
+        {
+            return;
+        }
+        IsInsideTimePlan = next;
+        Trace.WriteLine($"Sleep prevention time plan is now {(next ? "inside a planned hour" : "outside every planned hour")}.");
+    }
+
+    private void ScheduleTimePlanTimer()
+    {
+        timePlanTimer.Stop();
+        if (Selection == SleepPreventionDuration.TimePlan)
+        {
+            timePlanTimer.Start();
+        }
+    }
+
+    private void ReconcileTimePlan()
+    {
+        if (Selection != SleepPreventionDuration.TimePlan)
+        {
+            timePlanTimer.Stop();
+            return;
+        }
+
+        var nextInsideTimePlan = CurrentlyInsideTimePlan(SleepPreventionDuration.TimePlan);
+        var nextReason = DesiredSuspensionReason(SleepPreventionDuration.TimePlan, LowBatteryGuardEnabled);
+        if (nextInsideTimePlan == IsInsideTimePlan && nextReason == SuspensionReason)
+        {
+            return;
+        }
+
+        try
+        {
+            EnforceRequest(SleepPreventionDuration.TimePlan, nextReason, nextInsideTimePlan);
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"Failed to reconcile the sleep-prevention time plan: {ex}");
+            Failure?.Invoke(ex);
+            return;
+        }
+
+        if (nextInsideTimePlan != IsInsideTimePlan)
+        {
+            UpdateInsideTimePlan(nextInsideTimePlan);
+            StateChanged?.Invoke();
+        }
+        UpdateSuspensionReason(nextReason);
     }
 
     private void StartBatteryMonitoring()
@@ -339,7 +443,7 @@ internal sealed class SleepPreventionController : IDisposable
         var nextReason = DesiredSuspensionReason(Selection, guardEnabled: true);
         try
         {
-            EnforceRequest(Selection, nextReason);
+            EnforceRequest(Selection, nextReason, CurrentlyInsideTimePlan(Selection));
             UpdateSuspensionReason(nextReason);
         }
         catch (Exception ex)

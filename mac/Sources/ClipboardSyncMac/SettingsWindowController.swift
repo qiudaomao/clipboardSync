@@ -421,6 +421,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             keyboardModifierMap: keyboardModifierMap,
             sleepPreventionDuration: currentConfig.sleepPreventionDuration,
             sleepPreventionUntil: currentConfig.sleepPreventionUntil,
+            sleepPreventionTimePlan: currentConfig.sleepPreventionTimePlan,
             disableSleepPreventionBelow20PercentOnBattery: currentConfig.disableSleepPreventionBelow20PercentOnBattery
         )
         onSave?(nextConfig)

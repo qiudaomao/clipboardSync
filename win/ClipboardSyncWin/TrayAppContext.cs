@@ -37,6 +37,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem sleepPreventionStatusItem;
     private readonly ToolStripMenuItem lowBatterySleepPreventionItem;
     private readonly Dictionary<SleepPreventionDuration, ToolStripMenuItem> sleepPreventionItems = [];
+    private TimePlanForm? timePlanForm;
     private readonly SleepPreventionController sleepPreventionController;
     private readonly System.Windows.Forms.Timer sleepPreventionStatusTimer = new() { Interval = 30_000 };
     private readonly ToolStripMenuItem sendFilesItem;
@@ -223,7 +224,8 @@ internal sealed class TrayAppContext : ApplicationContext
                 config.DisableSleepPreventionBelow20PercentOnBattery);
             savedSleepPreventionExpired = sleepPreventionController.Restore(
                 config.SleepPreventionDuration,
-                config.SleepPreventionUntil);
+                config.SleepPreventionUntil,
+                SleepTimePlan.FromStorageValue(config.SleepPreventionTimePlan));
         }
         catch (Exception ex)
         {
@@ -289,6 +291,7 @@ internal sealed class TrayAppContext : ApplicationContext
             trayMenu.Dispose();
             trayIcon.Dispose();
             screenLayoutForm?.Dispose();
+            timePlanForm?.Dispose();
             sleepPreventionStatusTimer.Stop();
             sleepPreventionStatusTimer.Dispose();
             sleepPreventionController.Dispose();
@@ -439,6 +442,8 @@ internal sealed class TrayAppContext : ApplicationContext
             sleepPreventionItem.DropDownItems.Add(durationItem);
             sleepPreventionItems[duration] = durationItem;
         }
+        sleepPreventionItem.DropDownItems.Add(
+            new ToolStripMenuItem(AppText.Text("sleep.editTimePlan"), null, (_, _) => ShowTimePlan()));
         sleepPreventionItem.DropDownItems.Add(new ToolStripSeparator());
         sleepPreventionItem.DropDownItems.Add(lowBatterySleepPreventionItem);
         moreFeaturesItem.DropDownItems.Add(sleepPreventionItem);
@@ -549,8 +554,55 @@ internal sealed class TrayAppContext : ApplicationContext
             SleepPreventionDuration.Disabled => AppText.Text("sleep.statusOff"),
             SleepPreventionDuration.Forever => AppText.Text(
                 paused ? "sleep.statusPausedForever" : "sleep.statusForever"),
+            SleepPreventionDuration.TimePlan => FormatTimePlanSleepPreventionStatus(paused),
             _ => FormatTimedSleepPreventionStatus(paused)
         };
+    }
+
+    private string FormatTimePlanSleepPreventionStatus(bool paused)
+    {
+        // The battery pause only matters while the plan would otherwise be preventing sleep;
+        // outside every planned hour, reporting "Paused" would blame the wrong thing.
+        if (sleepPreventionController.TimePlan.IsEmpty)
+        {
+            return AppText.Text("sleep.statusTimePlanEmpty");
+        }
+        if (!sleepPreventionController.IsInsideTimePlan)
+        {
+            return AppText.Text("sleep.statusTimePlanOff");
+        }
+        return AppText.Text(paused ? "sleep.statusPausedTimePlan" : "sleep.statusTimePlanOn");
+    }
+
+    private void ShowTimePlan()
+    {
+        // Modeless (like the screen layout window) so the schedule can be adjusted while the tray
+        // menu keeps reporting live status.
+        if (timePlanForm is null || timePlanForm.IsDisposed)
+        {
+            timePlanForm = new TimePlanForm();
+            timePlanForm.PlanChanged += ApplySleepPreventionTimePlan;
+            timePlanForm.FormClosed += (_, _) => timePlanForm = null;
+        }
+        timePlanForm.UpdatePlan(SleepTimePlan.FromStorageValue(config.SleepPreventionTimePlan));
+        timePlanForm.Show();
+        timePlanForm.Activate();
+    }
+
+    private void ApplySleepPreventionTimePlan(SleepTimePlan plan)
+    {
+        try
+        {
+            sleepPreventionController.SetTimePlan(plan);
+        }
+        catch (Exception ex)
+        {
+            ShowSleepPreventionError(ex);
+            return;
+        }
+        config.SleepPreventionTimePlan = plan.StorageValue;
+        ConfigStore.Save(config);
+        UpdateMenu();
     }
 
     private string FormatTimedSleepPreventionStatus(bool paused)
@@ -598,6 +650,14 @@ internal sealed class TrayAppContext : ApplicationContext
         config.SleepPreventionUntil = expiration;
         ConfigStore.Save(config);
         UpdateMenu();
+
+        // Choosing Time Plan with an empty schedule prevents nothing, so surface the editor rather
+        // than leaving the user with a selected mode that silently does nothing.
+        if (duration == SleepPreventionDuration.TimePlan
+            && SleepTimePlan.FromStorageValue(config.SleepPreventionTimePlan).IsEmpty)
+        {
+            ShowTimePlan();
+        }
     }
 
     private void ToggleLowBatterySleepPreventionGuard()

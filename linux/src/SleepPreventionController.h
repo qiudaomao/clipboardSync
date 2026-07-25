@@ -38,14 +38,21 @@ public:
     static bool shouldSuspendForLowBattery(bool hasBattery, bool isOnBatteryPower, double chargePercent);
 
     /// Returns true when a timed selection expired while the app was not running.
-    bool restore(SleepPreventionDuration duration, const QDateTime &expiresAt);
+    bool restore(SleepPreventionDuration duration, const QDateTime &expiresAt, const SleepTimePlan &timePlan);
     QDateTime setDuration(SleepPreventionDuration duration);
     void setLowBatteryGuardEnabled(bool enabled);
+    /// Replaces the weekly schedule. Reconciles the inhibitor immediately so an edit that covers
+    /// (or uncovers) the current hour takes effect without waiting for the next poll.
+    void setTimePlan(const SleepTimePlan &plan);
 
     SleepPreventionDuration selection() const { return selection_; }
     QDateTime expiresAt() const { return expiresAt_; }
     bool lowBatteryGuardEnabled() const { return lowBatteryGuardEnabled_; }
     SleepPreventionSuspensionReason suspensionReason() const { return suspensionReason_; }
+    SleepTimePlan timePlan() const { return timePlan_; }
+    /// Whether the current wall-clock hour is inside the time plan. Meaningful only while
+    /// TimePlan is selected; the tray menu reads it to distinguish "on" from "off for now".
+    bool isInsideTimePlan() const { return insideTimePlan_; }
 
 signals:
     void expired();
@@ -71,7 +78,11 @@ private:
     SleepPreventionSuspensionReason desiredSuspensionReason(
         SleepPreventionDuration duration, bool guardEnabled) const;
     void enforcePortalRequest(SleepPreventionDuration duration,
-        SleepPreventionSuspensionReason suspensionReason);
+        SleepPreventionSuspensionReason suspensionReason, bool insideTimePlan);
+    bool currentlyInsideTimePlan(SleepPreventionDuration duration) const;
+    void updateInsideTimePlan(bool next);
+    void scheduleTimePlanTimer();
+    void reconcileTimePlan();
     void updateSuspensionReason(SleepPreventionSuspensionReason reason);
     void acquirePortalRequestIfNeeded();
     void releasePortalRequestIfNeeded();
@@ -92,6 +103,9 @@ private:
     QDateTime expiresAt_;
     QString requestPath_;
     QTimer expirationTimer_;
+    QTimer timePlanTimer_;
+    SleepTimePlan timePlan_;
+    bool insideTimePlan_ = false;
     QDBusServiceWatcher *portalWatcher_ = nullptr;
 
     bool lowBatteryGuardEnabled_ = false;

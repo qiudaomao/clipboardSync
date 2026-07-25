@@ -45,6 +45,8 @@ add_executable(clipboard-sync
     src/SleepPreventionController.h
     src/SyncTransport.cpp
     src/SyncTransport.h
+    src/TimePlanDialog.cpp
+    src/TimePlanDialog.h
     src/TunnelFrame.cpp
     src/TunnelFrame.h
     src/UpdateController.cpp
@@ -175,6 +177,18 @@ target_link_libraries(clipboard-service-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Wi
 target_include_directories(clipboard-service-tests PRIVATE src)
 add_test(NAME clipboard-service-tests COMMAND clipboard-service-tests)
 set_tests_properties(clipboard-service-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(time-plan-tests
+    tests/TimePlanTests.cpp
+    src/AppConfig.cpp
+    src/AppConfig.h
+    src/TimePlanDialog.cpp
+    src/TimePlanDialog.h
+)
+target_link_libraries(time-plan-tests PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+target_include_directories(time-plan-tests PRIVATE src)
+add_test(NAME time-plan-tests COMMAND time-plan-tests)
+set_tests_properties(time-plan-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(sleep-prevention-tests
     tests/SleepPreventionTests.cpp

@@ -202,6 +202,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         return controller
     }()
+    private lazy var timePlanWindowController: TimePlanWindowController = {
+        let controller = TimePlanWindowController()
+        controller.onPlanChanged = { [weak self] plan in
+            self?.applySleepPreventionTimePlan(plan)
+        }
+        return controller
+    }()
     private lazy var screenLayoutWindowController: ScreenLayoutWindowController = {
         let controller = ScreenLayoutWindowController()
         controller.onLayoutChanged = { [weak self] entries in
@@ -267,7 +274,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             )
             let expired = try sleepPreventionController.restore(
                 selection: config.sleepPreventionDuration,
-                expiresAt: config.sleepPreventionUntil
+                expiresAt: config.sleepPreventionUntil,
+                timePlan: config.sleepPreventionTimePlan
             )
             if expired {
                 config.sleepPreventionDuration = .disabled
@@ -532,6 +540,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sleepPreventionMenu.addItem(item)
             sleepPreventionItems[duration] = item
         }
+        let editTimePlanItem = NSMenuItem(
+            title: AppText.text("sleep.editTimePlan"),
+            action: #selector(showTimePlan),
+            keyEquivalent: ""
+        )
+        editTimePlanItem.target = self
+        sleepPreventionMenu.addItem(editTimePlanItem)
         sleepPreventionMenu.addItem(.separator())
         lowBatterySleepPreventionItem = NSMenuItem(
             title: AppText.text("sleep.disableBelow20OnBattery"),
@@ -635,6 +650,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sleepPreventionStatusItem.title = AppText.text(
                 paused ? "sleep.statusPausedForever" : "sleep.statusForever"
             )
+        case .timePlan:
+            // The battery pause only matters while the plan would otherwise be preventing sleep;
+            // outside every planned hour, reporting "Paused" would blame the wrong thing.
+            if sleepPreventionController.timePlan.isEmpty {
+                sleepPreventionStatusItem.title = AppText.text("sleep.statusTimePlanEmpty")
+            } else if !sleepPreventionController.isInsideTimePlan {
+                sleepPreventionStatusItem.title = AppText.text("sleep.statusTimePlanOff")
+            } else {
+                sleepPreventionStatusItem.title = AppText.text(
+                    paused ? "sleep.statusPausedTimePlan" : "sleep.statusTimePlanOn"
+                )
+            }
         default:
             guard let expiresAt = sleepPreventionController.expiresAt else {
                 preconditionFailure("A timed sleep-prevention selection has no expiration")
@@ -1507,6 +1534,28 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let expiration = try sleepPreventionController.select(duration)
             config.sleepPreventionDuration = duration
             config.sleepPreventionUntil = expiration
+            config.save()
+            updateMenu()
+        } catch {
+            presentSleepPreventionError(error)
+            return
+        }
+
+        // Choosing Time Plan with an empty schedule prevents nothing, so surface the editor rather
+        // than leaving the user with a selected mode that silently does nothing.
+        if duration == .timePlan, config.sleepPreventionTimePlan.isEmpty {
+            showTimePlan()
+        }
+    }
+
+    @objc private func showTimePlan() {
+        timePlanWindowController.show(plan: config.sleepPreventionTimePlan)
+    }
+
+    private func applySleepPreventionTimePlan(_ plan: SleepTimePlan) {
+        do {
+            try sleepPreventionController.setTimePlan(plan)
+            config.sleepPreventionTimePlan = plan
             config.save()
             updateMenu()
         } catch {

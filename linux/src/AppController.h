@@ -26,6 +26,7 @@ class InputSharingCoordinator;
 class PortForwardCoordinator;
 class ScreenLayoutDialog;
 class SleepPreventionController;
+class TimePlanDialog;
 class SyncTransport;
 class UpdateController;
 
@@ -77,6 +78,8 @@ private:
     void setLaunchAtLogin(bool enabled);
     void setSleepPrevention(SleepPreventionDuration duration);
     void setLowBatterySleepPreventionGuard(bool enabled);
+    void showTimePlan();
+    void applySleepPreventionTimePlan(const SleepTimePlan &plan);
     void updateSleepPreventionMenu();
     QString sleepPreventionStatusText() const;
     void reportSleepPreventionError(const QString &details);
@@ -144,6 +147,7 @@ private:
     QTimer sleepPreventionStatusTimer_;
     QList<QJsonObject> history_;
     ScreenLayoutDialog *layoutDialog_ = nullptr;
+    TimePlanDialog *timePlanDialog_ = nullptr;
     QHash<QString, PeerDevice> devices_;
     QSet<QString> layoutWatchers_;
     QTimer cursorReportTimer_;

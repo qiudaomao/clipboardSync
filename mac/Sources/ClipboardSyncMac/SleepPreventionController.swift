@@ -193,6 +193,10 @@ final class SleepPreventionController {
     private(set) var expiresAt: Date?
     private(set) var lowBatteryGuardEnabled = false
     private(set) var suspensionReason: SleepPreventionSuspensionReason?
+    private(set) var timePlan: SleepTimePlan = .empty
+    /// Whether the current wall-clock hour is inside the time plan. Meaningful only while
+    /// `.timePlan` is selected; the menu reads it to distinguish "on" from "off for now".
+    private(set) var isInsideTimePlan = false
 
     var onExpired: (() -> Void)?
     var onFailure: ((Error) -> Void)?
@@ -200,6 +204,7 @@ final class SleepPreventionController {
 
     private var assertionID: IOPMAssertionID?
     private var expirationTimer: Timer?
+    private var timePlanTimer: Timer?
     private let batteryMonitor = MacBatteryMonitor()
     private var batteryState: MacBatteryState?
     private var batteryStatusError: Error?
@@ -233,7 +238,11 @@ final class SleepPreventionController {
             storeBatteryResult(result)
             let nextReason = desiredSuspensionReason(for: selection, guardEnabled: true)
             do {
-                try enforceAssertion(for: selection, suspensionReason: nextReason)
+                try enforceAssertion(
+                    for: selection,
+                    suspensionReason: nextReason,
+                    insideTimePlan: currentlyInsideTimePlan(for: selection)
+                )
             } catch {
                 batteryMonitor.stop()
                 batteryState = nil
@@ -247,7 +256,11 @@ final class SleepPreventionController {
             return
         }
 
-        try enforceAssertion(for: selection, suspensionReason: nil)
+        try enforceAssertion(
+            for: selection,
+            suspensionReason: nil,
+            insideTimePlan: currentlyInsideTimePlan(for: selection)
+        )
         lowBatteryGuardEnabled = false
         batteryMonitor.stop()
         batteryState = nil
@@ -257,9 +270,21 @@ final class SleepPreventionController {
         NSLog("Low-battery sleep-prevention guard disabled")
     }
 
+    /// Replaces the weekly schedule. Reconciles the assertion immediately so an edit that covers
+    /// (or uncovers) the current hour takes effect without waiting for the next poll.
+    func setTimePlan(_ plan: SleepTimePlan) throws {
+        precondition(Thread.isMainThread, "Sleep prevention must be changed on the main thread")
+        guard plan != timePlan else { return }
+        timePlan = plan
+        NSLog("Sleep prevention time plan updated: \(plan.storageValue)")
+        guard selection == .timePlan else { return }
+        try applySelection(.timePlan, expiresAt: nil)
+    }
+
     /// Restores persisted duration state. Returns true when a previously timed selection already
     /// expired and its persisted state must be cleared by the caller.
-    func restore(selection: SleepPreventionDuration, expiresAt: Date?) throws -> Bool {
+    func restore(selection: SleepPreventionDuration, expiresAt: Date?, timePlan: SleepTimePlan) throws -> Bool {
+        self.timePlan = timePlan
         guard selection != .disabled else {
             try applySelection(.disabled, expiresAt: nil)
             return false
@@ -303,17 +328,22 @@ final class SleepPreventionController {
     func stopForTermination() throws {
         expirationTimer?.invalidate()
         expirationTimer = nil
+        timePlanTimer?.invalidate()
+        timePlanTimer = nil
         batteryMonitor.stop()
         try releaseAssertionIfNeeded()
     }
 
     private func applySelection(_ duration: SleepPreventionDuration, expiresAt: Date?) throws {
         let nextReason = desiredSuspensionReason(for: duration, guardEnabled: lowBatteryGuardEnabled)
-        try enforceAssertion(for: duration, suspensionReason: nextReason)
+        let nextInsideTimePlan = currentlyInsideTimePlan(for: duration)
+        try enforceAssertion(for: duration, suspensionReason: nextReason, insideTimePlan: nextInsideTimePlan)
         selection = duration
         self.expiresAt = expiresAt
+        updateInsideTimePlan(nextInsideTimePlan)
         updateSuspensionReason(nextReason)
         scheduleExpirationTimer()
+        scheduleTimePlanTimer()
     }
 
     private func desiredSuspensionReason(
@@ -331,13 +361,24 @@ final class SleepPreventionController {
 
     private func enforceAssertion(
         for duration: SleepPreventionDuration,
-        suspensionReason: SleepPreventionSuspensionReason?
+        suspensionReason: SleepPreventionSuspensionReason?,
+        insideTimePlan: Bool
     ) throws {
-        if duration == .disabled || suspensionReason != nil {
+        if duration == .disabled || suspensionReason != nil || (duration == .timePlan && !insideTimePlan) {
             try releaseAssertionIfNeeded()
         } else {
             try acquireAssertionIfNeeded()
         }
+    }
+
+    private func currentlyInsideTimePlan(for duration: SleepPreventionDuration) -> Bool {
+        duration == .timePlan && timePlan.isPreventing(at: Date())
+    }
+
+    private func updateInsideTimePlan(_ next: Bool) {
+        guard isInsideTimePlan != next else { return }
+        isInsideTimePlan = next
+        NSLog("Sleep prevention time plan is now \(next ? "inside a planned hour" : "outside every planned hour")")
     }
 
     private func refreshBatteryStateBeforeUserChange() {
@@ -350,7 +391,11 @@ final class SleepPreventionController {
         storeBatteryResult(result)
         let nextReason = desiredSuspensionReason(for: selection, guardEnabled: true)
         do {
-            try enforceAssertion(for: selection, suspensionReason: nextReason)
+            try enforceAssertion(
+                for: selection,
+                suspensionReason: nextReason,
+                insideTimePlan: currentlyInsideTimePlan(for: selection)
+            )
             updateSuspensionReason(nextReason)
         } catch {
             NSLog("Failed to reconcile sleep prevention after a battery update: \(error.localizedDescription)")
@@ -427,6 +472,40 @@ final class SleepPreventionController {
         }
         self.assertionID = nil
         NSLog("Released macOS display-idle and system-idle sleep assertion \(assertionID)")
+    }
+
+    /// Polls instead of firing once per hour boundary so a clock change, a time-zone change, or a
+    /// sleep/wake cycle that skips the boundary still converges within one interval.
+    private func scheduleTimePlanTimer() {
+        timePlanTimer?.invalidate()
+        timePlanTimer = nil
+        guard selection == .timePlan else { return }
+
+        let timer = Timer(timeInterval: 30, repeats: true) { [weak self] _ in
+            self?.reconcileTimePlan()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        timePlanTimer = timer
+    }
+
+    private func reconcileTimePlan() {
+        guard selection == .timePlan else { return }
+        let nextInsideTimePlan = currentlyInsideTimePlan(for: .timePlan)
+        let nextReason = desiredSuspensionReason(for: .timePlan, guardEnabled: lowBatteryGuardEnabled)
+        guard nextInsideTimePlan != isInsideTimePlan || nextReason != suspensionReason else { return }
+
+        do {
+            try enforceAssertion(for: .timePlan, suspensionReason: nextReason, insideTimePlan: nextInsideTimePlan)
+        } catch {
+            NSLog("Failed to reconcile the sleep-prevention time plan: \(error.localizedDescription)")
+            onFailure?(error)
+            return
+        }
+        if nextInsideTimePlan != isInsideTimePlan {
+            updateInsideTimePlan(nextInsideTimePlan)
+            onStateChanged?()
+        }
+        updateSuspensionReason(nextReason)
     }
 
     private func scheduleExpirationTimer() {

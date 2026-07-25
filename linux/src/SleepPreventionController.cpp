@@ -82,6 +82,11 @@ SleepPreventionController::SleepPreventionController(QObject *parent)
     connect(portalWatcher_, &QDBusServiceWatcher::serviceUnregistered,
         this, [this](const QString &) { handlePortalUnavailable(); });
 
+    // Polls instead of firing once per hour boundary so a clock change, a time-zone change, or a
+    // sleep/wake cycle that skips the boundary still converges within one interval.
+    timePlanTimer_.setInterval(30000);
+    connect(&timePlanTimer_, &QTimer::timeout, this, &SleepPreventionController::reconcileTimePlan);
+
     batteryPollTimer_.setInterval(30000);
     connect(&batteryPollTimer_, &QTimer::timeout,
         this, &SleepPreventionController::refreshBatteryStatusAndReconcile);
@@ -99,6 +104,7 @@ SleepPreventionController::SleepPreventionController(QObject *parent)
 SleepPreventionController::~SleepPreventionController()
 {
     expirationTimer_.stop();
+    timePlanTimer_.stop();
     stopBatteryMonitoring();
     try {
         releasePortalRequestIfNeeded();
@@ -117,6 +123,7 @@ QList<SleepPreventionChoice> SleepPreventionController::choices()
         {SleepPreventionDuration::FourHours, QStringLiteral("4 hour")},
         {SleepPreventionDuration::SixHours, QStringLiteral("6 hour")},
         {SleepPreventionDuration::EightHours, QStringLiteral("8 hour")},
+        {SleepPreventionDuration::TimePlan, QStringLiteral("Time Plan")},
     };
 }
 
@@ -144,7 +151,7 @@ void SleepPreventionController::setLowBatteryGuardEnabled(bool enabled)
         const SleepPreventionSuspensionReason nextReason =
             desiredSuspensionReason(selection_, true);
         try {
-            enforcePortalRequest(selection_, nextReason);
+            enforcePortalRequest(selection_, nextReason, currentlyInsideTimePlan(selection_));
         } catch (...) {
             stopBatteryMonitoring();
             batteryState_.reset();
@@ -158,7 +165,8 @@ void SleepPreventionController::setLowBatteryGuardEnabled(bool enabled)
         return;
     }
 
-    enforcePortalRequest(selection_, SleepPreventionSuspensionReason::None);
+    enforcePortalRequest(selection_, SleepPreventionSuspensionReason::None,
+        currentlyInsideTimePlan(selection_));
     lowBatteryGuardEnabled_ = false;
     stopBatteryMonitoring();
     batteryState_.reset();
@@ -168,10 +176,12 @@ void SleepPreventionController::setLowBatteryGuardEnabled(bool enabled)
     qInfo() << "Low-battery sleep-prevention guard disabled";
 }
 
-bool SleepPreventionController::restore(SleepPreventionDuration duration, const QDateTime &expiresAt)
+bool SleepPreventionController::restore(
+    SleepPreventionDuration duration, const QDateTime &expiresAt, const SleepTimePlan &timePlan)
 {
     ensureOwnerThread();
     sleepPreventionDurationStorageValue(duration);
+    timePlan_ = timePlan;
     if (duration == SleepPreventionDuration::Disabled) {
         applySelection(SleepPreventionDuration::Disabled, {});
         return false;
@@ -211,6 +221,17 @@ QDateTime SleepPreventionController::setDuration(SleepPreventionDuration duratio
     return expiration;
 }
 
+void SleepPreventionController::setTimePlan(const SleepTimePlan &plan)
+{
+    ensureOwnerThread();
+    if (plan == timePlan_)
+        return;
+    timePlan_ = plan;
+    qInfo() << "Sleep prevention time plan updated:" << timePlan_.storageValue();
+    if (selection_ == SleepPreventionDuration::TimePlan)
+        applySelection(SleepPreventionDuration::TimePlan, {});
+}
+
 void SleepPreventionController::ensureOwnerThread() const
 {
     if (QThread::currentThread() != thread())
@@ -222,11 +243,14 @@ void SleepPreventionController::applySelection(
 {
     const SleepPreventionSuspensionReason nextReason =
         desiredSuspensionReason(duration, lowBatteryGuardEnabled_);
-    enforcePortalRequest(duration, nextReason);
+    const bool nextInsideTimePlan = currentlyInsideTimePlan(duration);
+    enforcePortalRequest(duration, nextReason, nextInsideTimePlan);
     selection_ = duration;
     expiresAt_ = expiresAt;
+    updateInsideTimePlan(nextInsideTimePlan);
     updateSuspensionReason(nextReason);
     scheduleExpirationTimer();
+    scheduleTimePlanTimer();
 }
 
 SleepPreventionSuspensionReason SleepPreventionController::desiredSuspensionReason(
@@ -242,15 +266,66 @@ SleepPreventionSuspensionReason SleepPreventionController::desiredSuspensionReas
         : SleepPreventionSuspensionReason::None;
 }
 
-void SleepPreventionController::enforcePortalRequest(
-    SleepPreventionDuration duration, SleepPreventionSuspensionReason suspensionReason)
+void SleepPreventionController::enforcePortalRequest(SleepPreventionDuration duration,
+    SleepPreventionSuspensionReason suspensionReason, bool insideTimePlan)
 {
     if (duration == SleepPreventionDuration::Disabled
-        || suspensionReason != SleepPreventionSuspensionReason::None) {
+        || suspensionReason != SleepPreventionSuspensionReason::None
+        || (duration == SleepPreventionDuration::TimePlan && !insideTimePlan)) {
         releasePortalRequestIfNeeded();
     } else {
         acquirePortalRequestIfNeeded();
     }
+}
+
+bool SleepPreventionController::currentlyInsideTimePlan(SleepPreventionDuration duration) const
+{
+    return duration == SleepPreventionDuration::TimePlan
+        && timePlan_.isPreventing(QDateTime::currentDateTime());
+}
+
+void SleepPreventionController::updateInsideTimePlan(bool next)
+{
+    if (insideTimePlan_ == next)
+        return;
+    insideTimePlan_ = next;
+    qInfo() << "Sleep prevention time plan is now"
+            << (next ? "inside a planned hour" : "outside every planned hour");
+}
+
+void SleepPreventionController::scheduleTimePlanTimer()
+{
+    timePlanTimer_.stop();
+    if (selection_ == SleepPreventionDuration::TimePlan)
+        timePlanTimer_.start();
+}
+
+void SleepPreventionController::reconcileTimePlan()
+{
+    if (selection_ != SleepPreventionDuration::TimePlan) {
+        timePlanTimer_.stop();
+        return;
+    }
+
+    const bool nextInsideTimePlan = currentlyInsideTimePlan(SleepPreventionDuration::TimePlan);
+    const SleepPreventionSuspensionReason nextReason =
+        desiredSuspensionReason(SleepPreventionDuration::TimePlan, lowBatteryGuardEnabled_);
+    if (nextInsideTimePlan == insideTimePlan_ && nextReason == suspensionReason_)
+        return;
+
+    try {
+        enforcePortalRequest(SleepPreventionDuration::TimePlan, nextReason, nextInsideTimePlan);
+    } catch (const std::exception &error) {
+        qCritical("Failed to reconcile the sleep-prevention time plan: %s", error.what());
+        emit errorOccurred(QString::fromUtf8(error.what()));
+        return;
+    }
+
+    if (nextInsideTimePlan != insideTimePlan_) {
+        updateInsideTimePlan(nextInsideTimePlan);
+        emit stateChanged();
+    }
+    updateSuspensionReason(nextReason);
 }
 
 void SleepPreventionController::updateSuspensionReason(SleepPreventionSuspensionReason reason)
@@ -475,7 +550,7 @@ void SleepPreventionController::refreshBatteryStatusAndReconcile()
     const SleepPreventionSuspensionReason nextReason =
         desiredSuspensionReason(selection_, true);
     try {
-        enforcePortalRequest(selection_, nextReason);
+        enforcePortalRequest(selection_, nextReason, currentlyInsideTimePlan(selection_));
         updateSuspensionReason(nextReason);
     } catch (const std::exception &error) {
         qCritical("Failed to reconcile sleep prevention after a battery update: %s", error.what());
@@ -501,7 +576,7 @@ void SleepPreventionController::handleUPowerUnavailable()
     const SleepPreventionSuspensionReason nextReason =
         desiredSuspensionReason(selection_, true);
     try {
-        enforcePortalRequest(selection_, nextReason);
+        enforcePortalRequest(selection_, nextReason, currentlyInsideTimePlan(selection_));
         updateSuspensionReason(nextReason);
     } catch (const std::exception &error) {
         qCritical("Failed to pause sleep prevention after UPower stopped: %s", error.what());
