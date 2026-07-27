@@ -30,11 +30,9 @@ internal sealed class InputSharingCoordinator : IDisposable
     private const uint LLKHF_INJECTED = 0x00000010;
 
     /// Stamped as dwExtraInfo on every keyboard event this app (and the elevated input
-    /// service — keep InputAgent's copy in sync) injects, so the keyboard hook can tell
-    /// its own injections apart from other software's. Foreign injected keys are user
-    /// input: software remappers (PowerToys, AutoHotkey, vendor utilities expanding a
-    /// key into Ctrl+Alt+Win+Shift), on-screen keyboards. A blanket LLKHF_INJECTED skip
-    /// silently dropped those while their physical counterparts forwarded fine.
+    /// service — keep WindowsInputInjector's copy in sync) injects, so the keyboard hook
+    /// can tell its own injections apart from other software's and never re-capture them
+    /// even if the two components are at different versions.
     internal static readonly IntPtr SelfInjectionTag = (IntPtr)0x43530A11;
     private const uint SPI_SETCURSORS = 0x0057;
     private const uint WM_QUIT = 0x0012;
@@ -387,22 +385,35 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
 
         var data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-        // Only skip our own injections (see SelfInjectionTag); foreign injected events are
-        // captured and forwarded like hardware keys.
-        if ((data.flags & LLKHF_INJECTED) != 0 && data.dwExtraInfo == SelfInjectionTag)
+        var message = wParam.ToInt32();
+        if (message != WM_KEYDOWN && message != WM_KEYUP && message != WM_SYSKEYDOWN && message != WM_SYSKEYUP)
         {
             return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
         }
-
-        var message = wParam.ToInt32();
         var action = message == WM_KEYUP || message == WM_SYSKEYUP ? "up" : "down";
-        if (message == WM_KEYDOWN || message == WM_KEYUP || message == WM_SYSKEYDOWN || message == WM_SYSKEYUP)
+
+        if ((data.flags & LLKHF_INJECTED) != 0)
         {
-            SendKey((Keys)data.vkCode, action);
-            return (IntPtr)1;
+            // Keystrokes injected by other software are deliberately neither captured nor
+            // suppressed: they belong to that software (password-manager auto-type, on-screen
+            // keyboards), and intercepting them is both a privacy problem and behavior that
+            // endpoint protection flags. The one exception is MODIFIER state. A key remapper
+            // that expands one key into a chord (CapsLock -> Ctrl+Alt+Win+Shift) injects those
+            // modifiers, and without them the peer receives the chord's real key unmodified.
+            // Relaying a modifier press types nothing anywhere; it only keeps the peer's
+            // modifier state truthful. Our own injections carry SelfInjectionTag and are
+            // skipped outright so a stale service build can't echo input back to itself.
+            if (data.dwExtraInfo != SelfInjectionTag &&
+                WindowsKeyToCanonical.TryGetValue((Keys)data.vkCode, out var injectedKey) &&
+                IsModifierKey(injectedKey))
+            {
+                SendKey((Keys)data.vkCode, action);
+            }
+            return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
         }
 
-        return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
+        SendKey((Keys)data.vkCode, action);
+        return (IntPtr)1;
     }
 
     private bool HandleLocalMouseMove(POINT point)
