@@ -1944,6 +1944,9 @@ struct InputMousePayload: Codable {
     let normalizedY: Double?
     let deltaX: Double?
     let deltaY: Double?
+    // Controller's held-modifier snapshot, stamped on button events only (older
+    // peers omit it) so the receiver can reconcile modifier state before a click.
+    let modifiers: [String]?
 }
 
 struct InputKeyPayload: Codable {

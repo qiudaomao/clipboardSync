@@ -855,7 +855,8 @@ internal sealed class InputSharingCoordinator : IDisposable
                 Action = action,
                 Button = button,
                 NormalizedX = normalized.X,
-                NormalizedY = normalized.Y
+                NormalizedY = normalized.Y,
+                Modifiers = CurrentPressedModifiers()
             },
             SentAt = Now()
         });
@@ -982,6 +983,13 @@ internal sealed class InputSharingCoordinator : IDisposable
             return;
         }
         ClearPendingRemoteMouseMove();
+        // Button events stamped with the controller's modifier snapshot reconcile just
+        // like key events, so a stale held modifier can't turn a plain click into a
+        // Ctrl/Alt-click (and a real modifier-click re-asserts any lost modifier).
+        if (mouse.Modifiers is not null)
+        {
+            SyncRemoteSourceModifiers(mouse.Modifiers);
+        }
         if (mouse.NormalizedX is not null && mouse.NormalizedY is not null)
         {
             WarpTo(mouse.NormalizedX.Value, mouse.NormalizedY.Value);
@@ -1025,15 +1033,11 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
         if (IsModifierKey(key.Key))
         {
-            if (key.Action == "down")
-            {
-                remotePressedSourceModifierKeys.Add(key.Key);
-            }
-            else
-            {
-                remotePressedSourceModifierKeys.Remove(key.Key);
-            }
-            ApplyMappedRemoteModifierState(remotePressedSourceModifierKeys);
+            // The stamped snapshot already includes this event's own change and is
+            // authoritative, so a modifier keyup lost to a hook miss or dropped
+            // message heals on the next modifier event instead of sticking until
+            // the next regular keystroke.
+            SyncRemoteSourceModifiers(key.Modifiers);
             return;
         }
 
@@ -1042,7 +1046,7 @@ internal sealed class InputSharingCoordinator : IDisposable
             return;
         }
 
-        ApplyMappedRemoteModifierState(key.Modifiers);
+        SyncRemoteSourceModifiers(key.Modifiers);
         SendKeyboardInput((ushort)virtualKey, key.Action == "up");
     }
 
@@ -1322,6 +1326,20 @@ internal sealed class InputSharingCoordinator : IDisposable
             }
         }
         return modifiers;
+    }
+
+    /// Replaces the tracked controller-side modifier set with the snapshot stamped on an
+    /// incoming message and injects whatever transitions that implies. Keeping the set in
+    /// lockstep with every snapshot (rather than applying snapshots transiently) means one
+    /// lost or missed message can't leave a modifier held here indefinitely.
+    private void SyncRemoteSourceModifiers(IEnumerable<string>? modifiers)
+    {
+        remotePressedSourceModifierKeys.Clear();
+        if (modifiers is not null)
+        {
+            remotePressedSourceModifierKeys.UnionWith(modifiers);
+        }
+        ApplyMappedRemoteModifierState(remotePressedSourceModifierKeys);
     }
 
     private void ApplyMappedRemoteModifierState(IEnumerable<string>? modifiers)

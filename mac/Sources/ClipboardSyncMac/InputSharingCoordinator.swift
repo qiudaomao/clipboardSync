@@ -620,7 +620,8 @@ final class InputSharingCoordinator {
                 normalizedX: normalized.x,
                 normalizedY: normalized.y,
                 deltaX: nil,
-                deltaY: nil
+                deltaY: nil,
+                modifiers: nil
             ),
             key: nil,
             sentAt: Date().timeIntervalSince1970
@@ -707,7 +708,8 @@ final class InputSharingCoordinator {
                 normalizedX: normalized.x,
                 normalizedY: normalized.y,
                 deltaX: nil,
-                deltaY: nil
+                deltaY: nil,
+                modifiers: Array(lastModifierKeys).sorted()
             ),
             key: nil,
             sentAt: Date().timeIntervalSince1970
@@ -738,7 +740,8 @@ final class InputSharingCoordinator {
                 normalizedX: normalized.x,
                 normalizedY: normalized.y,
                 deltaX: event.getDoubleValueField(.scrollWheelEventDeltaAxis2),
-                deltaY: event.getDoubleValueField(.scrollWheelEventDeltaAxis1)
+                deltaY: event.getDoubleValueField(.scrollWheelEventDeltaAxis1),
+                modifiers: nil
             ),
             key: nil,
             sentAt: Date().timeIntervalSince1970
@@ -844,6 +847,13 @@ final class InputSharingCoordinator {
         guard receivingRemote, let mouse else {
             return
         }
+        // Button events stamped with the controller's modifier snapshot reconcile just
+        // like key events, so a stale held modifier can't turn a plain click into a
+        // Cmd/Ctrl-click (and a real modifier-click re-asserts any lost modifier).
+        if let modifiers = mouse.modifiers {
+            remotePressedSourceModifierKeys = Set(modifiers)
+            reconcileRemoteModifierState()
+        }
         let buttonName = canonicalMouseButton(mouse.button)
         let button = cgMouseButton(for: buttonName)
         let point = mouse.normalizedX.flatMap { x in
@@ -907,6 +917,9 @@ final class InputSharingCoordinator {
         ) else {
             return
         }
+        // Modifier+scroll gestures (Cmd/Ctrl zoom, Shift horizontal) need the held
+        // modifiers on the wheel event itself.
+        event.flags = Self.flags(from: Array(remotePressedModifierKeys))
         post(event)
     }
 
@@ -941,11 +954,11 @@ final class InputSharingCoordinator {
             return
         }
         if Self.modifierKeys.contains(key.key) {
-            if key.action == "down" {
-                remotePressedSourceModifierKeys.insert(key.key)
-            } else {
-                remotePressedSourceModifierKeys.remove(key.key)
-            }
+            // The stamped snapshot already includes this event's own change and is
+            // authoritative (same rationale as for regular keys below), so a modifier
+            // keyup lost to a hook miss or dropped message heals on the next modifier
+            // event instead of sticking until the next regular keystroke.
+            remotePressedSourceModifierKeys = Set(key.modifiers)
             reconcileRemoteModifierState()
             return
         }
@@ -1129,6 +1142,9 @@ final class InputSharingCoordinator {
         guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button) else {
             return
         }
+        // Hardware pointer events carry the held-modifier flags; without them a remote
+        // Cmd/Ctrl/Shift-click reaches apps as a plain click.
+        event.flags = Self.flags(from: Array(remotePressedModifierKeys))
         if clickState > 0 {
             event.setIntegerValueField(.mouseEventClickState, value: clickState)
         }
@@ -1368,19 +1384,29 @@ final class InputSharingCoordinator {
         return result
     }
 
+    /// Alongside the documented device-independent masks, real hardware events carry a
+    /// device-dependent bit per physical modifier key (NX_DEVICEL*KEYMASK) plus
+    /// maskNonCoalesced. Remote-control apps — Screen Sharing/VNC viewers, VMs, Wine —
+    /// identify which modifier key to forward from those device bits, so synthetic events
+    /// without them type fine in local apps but the modifiers vanish inside a Screen
+    /// Sharing window. Left-hand bits, matching the left-hand keycodes we inject.
     private static func flags(from modifiers: [String]) -> CGEventFlags {
-        var flags = CGEventFlags()
+        var flags: CGEventFlags = [.maskNonCoalesced]
         if modifiers.contains("Shift") {
             flags.insert(.maskShift)
+            flags.insert(CGEventFlags(rawValue: 0x2)) // NX_DEVICELSHIFTKEYMASK
         }
         if modifiers.contains("Control") {
             flags.insert(.maskControl)
+            flags.insert(CGEventFlags(rawValue: 0x1)) // NX_DEVICELCTLKEYMASK
         }
         if modifiers.contains("Alt") {
             flags.insert(.maskAlternate)
+            flags.insert(CGEventFlags(rawValue: 0x20)) // NX_DEVICELALTKEYMASK
         }
         if modifiers.contains("Meta") {
             flags.insert(.maskCommand)
+            flags.insert(CGEventFlags(rawValue: 0x8)) // NX_DEVICELCMDKEYMASK
         }
         return flags
     }

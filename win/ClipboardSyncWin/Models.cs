@@ -724,6 +724,9 @@ internal sealed class InputMousePayload
     public double? NormalizedY { get; set; }
     public double? DeltaX { get; set; }
     public double? DeltaY { get; set; }
+    // Controller's held-modifier snapshot, stamped on button events only (older
+    // peers omit it) so the receiver can reconcile modifier state before a click.
+    public List<string>? Modifiers { get; set; }
 }
 
 internal sealed class InputKeyPayload
