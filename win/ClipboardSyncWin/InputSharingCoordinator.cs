@@ -28,6 +28,14 @@ internal sealed class InputSharingCoordinator : IDisposable
     private const int WM_SYSKEYUP = 0x0105;
     private const uint LLMHF_INJECTED = 0x00000001;
     private const uint LLKHF_INJECTED = 0x00000010;
+
+    /// Stamped as dwExtraInfo on every keyboard event this app (and the elevated input
+    /// service — keep InputAgent's copy in sync) injects, so the keyboard hook can tell
+    /// its own injections apart from other software's. Foreign injected keys are user
+    /// input: software remappers (PowerToys, AutoHotkey, vendor utilities expanding a
+    /// key into Ctrl+Alt+Win+Shift), on-screen keyboards. A blanket LLKHF_INJECTED skip
+    /// silently dropped those while their physical counterparts forwarded fine.
+    internal static readonly IntPtr SelfInjectionTag = (IntPtr)0x43530A11;
     private const uint SPI_SETCURSORS = 0x0057;
     private const uint WM_QUIT = 0x0012;
     private const uint PM_NOREMOVE = 0x0000;
@@ -379,7 +387,9 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
 
         var data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-        if ((data.flags & LLKHF_INJECTED) != 0)
+        // Only skip our own injections (see SelfInjectionTag); foreign injected events are
+        // captured and forwarded like hardware keys.
+        if ((data.flags & LLKHF_INJECTED) != 0 && data.dwExtraInfo == SelfInjectionTag)
         {
             return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
         }
@@ -1520,7 +1530,8 @@ internal sealed class InputSharingCoordinator : IDisposable
                 {
                     wVk = virtualKey,
                     wScan = (ushort)MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC),
-                    dwFlags = flags
+                    dwFlags = flags,
+                    dwExtraInfo = SelfInjectionTag
                 }
             }
         };

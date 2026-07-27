@@ -21,6 +21,12 @@ internal sealed class WindowsInputInjector : IDisposable
     private const uint InputMouse = 0;
     private const uint InputKeyboard = 1;
 
+    // Mirrors InputSharingCoordinator.SelfInjectionTag in the tray app: marks our
+    // injected keyboard events so its hook skips only clipboardSync's own injections
+    // and still forwards keys synthesized by other software (remappers, on-screen
+    // keyboards). Keep the two values identical.
+    private static readonly UIntPtr SelfInjectionTag = (UIntPtr)0x43530A11;
+
     private const uint KeyEventExtendedKey = 0x0001;
     private const uint KeyEventKeyUp = 0x0002;
 
@@ -86,7 +92,8 @@ internal sealed class WindowsInputInjector : IDisposable
                     // Carry the scan code so consumers that read it (consoles, RDP, games) see a
                     // press that looks physical, matching the in-process injection path.
                     ScanCode = (ushort)NativeMethods.MapVirtualKey(virtualKey, NativeMethods.MapvkVkToVsc),
-                    Flags = flags
+                    Flags = flags,
+                    ExtraInfo = SelfInjectionTag
                 }
             }
         };
