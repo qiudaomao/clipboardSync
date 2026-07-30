@@ -691,8 +691,15 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
 
         CancelPendingMouseMoveSend();
-        SendPressedModifierKeyUps();
-        SendCapture("end", activeTargetDeviceId, activeScreenId, edge.Value, activeEntry);
+        // Moving between two monitors of the SAME peer is a hand-off, not a hand-back: sending
+        // "end" there made the receiver tear down its capture state mid-gesture, which dropped
+        // any drag crossing the boundary and released held modifiers. Send only the "start" that
+        // tells it which monitor the normalized coordinates now refer to.
+        if (match.DeviceId != activeTargetDeviceId)
+        {
+            SendPressedModifierKeyUps();
+            SendCapture("end", activeTargetDeviceId, activeScreenId, edge.Value, activeEntry);
+        }
         virtualCursor = Clamp(virtualCursor, match.Rect);
         activeScreenId = match.ScreenId;
         activeTargetDeviceId = match.DeviceId;
@@ -986,10 +993,17 @@ internal sealed class InputSharingCoordinator : IDisposable
 
         if (capture.Action == "start")
         {
+            // Already receiving means this is a hand-off between two of our own monitors rather
+            // than a fresh capture, so a held modifier belongs to a gesture still in progress
+            // (Shift-drag, Ctrl-drag) and must survive the crossing.
+            var isScreenHandoff = receivingRemote;
             receivingRemote = true;
             receivingScreenId = capture.ScreenId;
             ClearPendingRemoteMouseMove();
-            ReleaseRemoteModifiers();
+            if (!isScreenHandoff)
+            {
+                ReleaseRemoteModifiers();
+            }
             WarpTo(capture.NormalizedX, capture.NormalizedY);
         }
         else if (capture.Action == "end")

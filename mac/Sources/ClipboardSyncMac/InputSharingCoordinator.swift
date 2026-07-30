@@ -85,7 +85,7 @@ final class InputSharingCoordinator {
         activeTargetDeviceId = nil
         receivingRemote = false
         receivingScreenId = nil
-        remotePressedMouseButtons.removeAll()
+        releaseRemotePressedMouseButtons()
         cancelPendingMouseMove()
         releaseRemoteModifiers()
     }
@@ -186,9 +186,9 @@ final class InputSharingCoordinator {
         // receiving stops being possible — otherwise they stay held system-wide.
         if !canReceiveRemoteInput {
             releaseRemoteModifiers()
+            releaseRemotePressedMouseButtons()
             receivingRemote = false
             receivingScreenId = nil
-            remotePressedMouseButtons.removeAll()
         }
         updateStatus()
     }
@@ -508,8 +508,14 @@ final class InputSharingCoordinator {
         }
 
         cancelPendingMouseMove()
-        sendPressedModifierKeyUps()
-        sendCapture(action: "end", targetDeviceId: activeTargetDeviceId, screenId: activeScreenId, edge: edge, entry: activeEntry)
+        // Moving between two monitors of the SAME peer is a hand-off, not a hand-back: sending
+        // "end" there made the receiver tear down its capture state mid-gesture, which dropped
+        // any drag crossing the boundary and released held modifiers. Send only the "start" that
+        // tells it which monitor the normalized coordinates now refer to.
+        if match.deviceId != activeTargetDeviceId {
+            sendPressedModifierKeyUps()
+            sendCapture(action: "end", targetDeviceId: activeTargetDeviceId, screenId: activeScreenId, edge: edge, entry: activeEntry)
+        }
         virtualCursor = clamp(virtualCursor, to: match.rect)
         self.activeScreenId = match.screenId
         self.activeTargetDeviceId = match.deviceId
@@ -826,16 +832,33 @@ final class InputSharingCoordinator {
             return
         }
         if capture.action == "start" {
+            // Already receiving means this is a hand-off between two of our own monitors rather
+            // than a fresh capture, and a drag may be in flight across it. Wiping the pressed
+            // buttons here stopped `remoteDragEventType` resolving, so post-crossing moves went
+            // out as plain moves while the button was still physically down — a window being
+            // dragged simply stopped following the cursor at the screen boundary.
+            let isScreenHandoff = receivingRemote
             receivingRemote = true
             receivingScreenId = capture.screenId
-            remotePressedMouseButtons.removeAll()
-            releaseRemoteModifiers()
-            warpTo(normalizedX: capture.normalizedX, normalizedY: capture.normalizedY)
+            if !isScreenHandoff {
+                remotePressedMouseButtons.removeAll()
+                releaseRemoteModifiers()
+            }
+            if isScreenHandoff, let eventType = remoteDragEventType {
+                // Warping mid-drag moves the cursor without telling the drag, which drops it.
+                // Carry the drag onto the new monitor with a drag event instead.
+                let point = pointFor(normalizedX: capture.normalizedX, normalizedY: capture.normalizedY)
+                postMouseEvent(type: eventType, button: remoteDragButton, at: point, clickState: remoteClickState)
+            } else {
+                warpTo(normalizedX: capture.normalizedX, normalizedY: capture.normalizedY)
+            }
         } else if capture.action == "end" {
+            // A real hand-back: drop anything still held. Clearing the set without posting the
+            // matching up event left the button down as far as macOS was concerned.
+            releaseRemotePressedMouseButtons()
             releaseRemoteModifiers()
             receivingRemote = false
             receivingScreenId = nil
-            remotePressedMouseButtons.removeAll()
         }
     }
 
@@ -957,6 +980,28 @@ final class InputSharingCoordinator {
             return .center
         }
         return .left
+    }
+
+    /// Posts the matching up event for every button the peer still holds, so control never
+    /// returns to the peer leaving a button stuck down on this machine.
+    private func releaseRemotePressedMouseButtons() {
+        guard !remotePressedMouseButtons.isEmpty else {
+            return
+        }
+        let point = currentCursorLocation()
+        for button in remotePressedMouseButtons.sorted() {
+            let type: CGEventType
+            switch button {
+            case "right":
+                type = .rightMouseUp
+            case "middle", "back", "forward":
+                type = .otherMouseUp
+            default:
+                type = .leftMouseUp
+            }
+            postMouseEvent(type: type, button: cgMouseButton(for: button), at: point)
+        }
+        remotePressedMouseButtons.removeAll()
     }
 
     private func handleRemoteKey(_ key: InputKeyPayload?) {
