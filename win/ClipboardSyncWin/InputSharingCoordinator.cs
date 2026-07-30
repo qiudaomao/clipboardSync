@@ -21,7 +21,12 @@ internal sealed class InputSharingCoordinator : IDisposable
     private const int WM_MBUTTONDOWN = 0x0207;
     private const int WM_MBUTTONUP = 0x0208;
     private const int WM_MOUSEWHEEL = 0x020A;
+    private const int WM_XBUTTONDOWN = 0x020B;
+    private const int WM_XBUTTONUP = 0x020C;
     private const int WM_MOUSEHWHEEL = 0x020E;
+    /// Which X button an XBUTTON message refers to, in mouseData's high word.
+    private const int XBUTTON1 = 0x0001;
+    private const int XBUTTON2 = 0x0002;
     private const int WM_KEYDOWN = 0x0100;
     private const int WM_KEYUP = 0x0101;
     private const int WM_SYSKEYDOWN = 0x0104;
@@ -365,6 +370,12 @@ internal sealed class InputSharingCoordinator : IDisposable
             case WM_MBUTTONDOWN:
             case WM_MBUTTONUP:
                 SendMouseButton(message);
+                return (IntPtr)1;
+            case WM_XBUTTONDOWN:
+            case WM_XBUTTONUP:
+                // The thumb buttons (back/forward). mouseData's high word says which one; without
+                // this case they were never forwarded and the peer saw nothing at all.
+                SendMouseButton(message, SignedHighWord(data.mouseData) == XBUTTON1 ? "back" : "forward");
                 return (IntPtr)1;
             case WM_MOUSEWHEEL:
                 SendMouseWheel(0, SignedHighWord(data.mouseData) / 120.0);
@@ -855,15 +866,17 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
     }
 
-    private void SendMouseButton(int message)
+    private void SendMouseButton(int message, string? xButton = null)
     {
         if (activeTargetDeviceId is null || activeScreenId is null || !layoutStore.Entries.TryGetValue(activeScreenId, out var entry))
         {
             return;
         }
-        var button = message == WM_RBUTTONDOWN || message == WM_RBUTTONUP ? "right" :
-            message == WM_MBUTTONDOWN || message == WM_MBUTTONUP ? "middle" : "left";
-        var action = message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN || message == WM_MBUTTONDOWN ? "down" : "up";
+        var button = xButton
+            ?? (message == WM_RBUTTONDOWN || message == WM_RBUTTONUP ? "right" :
+                message == WM_MBUTTONDOWN || message == WM_MBUTTONUP ? "middle" : "left");
+        var action = message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN ||
+            message == WM_MBUTTONDOWN || message == WM_XBUTTONDOWN ? "down" : "up";
         var normalized = NormalizedPoint(entry);
         MessageReady?.Invoke(new InputMessage
         {
@@ -1016,11 +1029,22 @@ internal sealed class InputSharingCoordinator : IDisposable
             WarpTo(mouse.NormalizedX.Value, mouse.NormalizedY.Value);
         }
 
+        var down = mouse.Action == "down";
+        // The thumb buttons share one pair of flags and are told apart by mouseData, unlike
+        // every other button.
+        if (mouse.Button == "back" || mouse.Button == "forward")
+        {
+            SendMouseInput(
+                down ? MouseFlags.XDown : MouseFlags.XUp,
+                mouse.Button == "back" ? XBUTTON1 : XBUTTON2);
+            return;
+        }
+
         var flags = mouse.Button == "right"
-            ? mouse.Action == "down" ? MouseFlags.RightDown : MouseFlags.RightUp
+            ? down ? MouseFlags.RightDown : MouseFlags.RightUp
             : mouse.Button == "middle"
-                ? mouse.Action == "down" ? MouseFlags.MiddleDown : MouseFlags.MiddleUp
-                : mouse.Action == "down" ? MouseFlags.LeftDown : MouseFlags.LeftUp;
+                ? down ? MouseFlags.MiddleDown : MouseFlags.MiddleUp
+                : down ? MouseFlags.LeftDown : MouseFlags.LeftUp;
         SendMouseInput(flags, 0);
     }
 
@@ -1478,7 +1502,9 @@ internal sealed class InputSharingCoordinator : IDisposable
     [
         Keys.Left, Keys.Right, Keys.Up, Keys.Down,
         Keys.Home, Keys.End, Keys.PageUp, Keys.PageDown,
-        Keys.Insert, Keys.Delete, Keys.LWin, Keys.RWin
+        Keys.Insert, Keys.Delete, Keys.LWin, Keys.RWin,
+        // Keypad divide and NumLock are the two keypad keys with E0-prefixed scan codes.
+        Keys.Divide, Keys.NumLock
     ];
 
     private void SendKeyboardInput(ushort virtualKey, bool keyUp)
@@ -1576,7 +1602,17 @@ internal sealed class InputSharingCoordinator : IDisposable
         [Keys.Oemtilde] = "Backquote", [Keys.F1] = "F1", [Keys.F2] = "F2",
         [Keys.F3] = "F3", [Keys.F4] = "F4", [Keys.F5] = "F5", [Keys.F6] = "F6",
         [Keys.F7] = "F7", [Keys.F8] = "F8", [Keys.F9] = "F9", [Keys.F10] = "F10",
-        [Keys.F11] = "F11", [Keys.F12] = "F12"
+        [Keys.F11] = "F11", [Keys.F12] = "F12",
+        // Numeric keypad, so a peer's keypad reaches this machine as keypad keys rather than
+        // being dropped. NumPad0-9 are the NumLock-on virtual keys; with NumLock off Windows
+        // reports the navigation keys instead, which already map above.
+        [Keys.NumPad0] = "Numpad0", [Keys.NumPad1] = "Numpad1", [Keys.NumPad2] = "Numpad2",
+        [Keys.NumPad3] = "Numpad3", [Keys.NumPad4] = "Numpad4", [Keys.NumPad5] = "Numpad5",
+        [Keys.NumPad6] = "Numpad6", [Keys.NumPad7] = "Numpad7", [Keys.NumPad8] = "Numpad8",
+        [Keys.NumPad9] = "Numpad9", [Keys.Decimal] = "NumpadDecimal",
+        [Keys.Multiply] = "NumpadMultiply", [Keys.Add] = "NumpadAdd",
+        [Keys.Subtract] = "NumpadSubtract", [Keys.Divide] = "NumpadDivide",
+        [Keys.NumLock] = "NumLock"
     };
 
     private static readonly Dictionary<string, Keys> CanonicalToWindowsKey = BuildReverseKeyMap();
@@ -1697,6 +1733,8 @@ internal sealed class InputSharingCoordinator : IDisposable
         RightUp = 0x0010,
         MiddleDown = 0x0020,
         MiddleUp = 0x0040,
+        XDown = 0x0080,
+        XUp = 0x0100,
         Wheel = 0x0800,
         HWheel = 0x1000,
         VirtualDesk = 0x4000,

@@ -302,7 +302,7 @@ final class InputSharingCoordinator {
                 return Unmanaged.passUnretained(event)
             }
             flushPendingMouseMove()
-            sendMouseButton(type: type)
+            sendMouseButton(type: type, event: event)
             return nil
         case .scrollWheel:
             guard activeScreenId != nil else {
@@ -674,7 +674,7 @@ final class InputSharingCoordinator {
         pendingMouseMoveTimer = nil
     }
 
-    private func sendMouseButton(type: CGEventType) {
+    private func sendMouseButton(type: CGEventType, event: CGEvent) {
         guard let target = activeTargetDeviceId, let screenId = activeScreenId, let entry = layoutStore.entries[screenId] else {
             return
         }
@@ -684,7 +684,17 @@ final class InputSharingCoordinator {
         case .rightMouseDown, .rightMouseUp:
             button = "right"
         case .otherMouseDown, .otherMouseUp:
-            button = "middle"
+            // Every non-left/right button arrives as `otherMouse`; only the button number
+            // distinguishes the wheel click from the thumb buttons, so reporting them all as
+            // "middle" lost back/forward on the way out.
+            switch event.getIntegerValueField(.mouseEventButtonNumber) {
+            case 3:
+                button = "back"
+            case 4:
+                button = "forward"
+            default:
+                button = "middle"
+            }
         default:
             button = "left"
         }
@@ -865,9 +875,9 @@ final class InputSharingCoordinator {
             eventType = .rightMouseDown
         case ("right", "up"):
             eventType = .rightMouseUp
-        case ("middle", "down"):
+        case ("middle", "down"), ("back", "down"), ("forward", "down"):
             eventType = .otherMouseDown
-        case ("middle", "up"):
+        case ("middle", "up"), ("back", "up"), ("forward", "up"):
             eventType = .otherMouseUp
         case (_, "down"):
             eventType = .leftMouseDown
@@ -996,7 +1006,7 @@ final class InputSharingCoordinator {
         if Self.secondaryFnKeys.contains(key.key) {
             flags.insert(.maskSecondaryFn)
         }
-        if Self.arrowKeys.contains(key.key) {
+        if Self.arrowKeys.contains(key.key) || Self.numpadKeys.contains(key.key) {
             flags.insert(.maskNumericPad)
         }
         event.flags = flags
@@ -1308,17 +1318,27 @@ final class InputSharingCoordinator {
             return "right"
         case "middle":
             return "middle"
+        case "back":
+            return "back"
+        case "forward":
+            return "forward"
         default:
             return "left"
         }
     }
 
+    /// macOS addresses the thumb buttons as plain button numbers 3 and 4 on an `otherMouse`
+    /// event; AppKit's Back/Forward handling and browsers read exactly those numbers.
     private func cgMouseButton(for button: String) -> CGMouseButton {
         switch button {
         case "right":
             return .right
         case "middle":
             return .center
+        case "back":
+            return CGMouseButton(rawValue: 3) ?? .center
+        case "forward":
+            return CGMouseButton(rawValue: 4) ?? .center
         default:
             return .left
         }
@@ -1328,6 +1348,13 @@ final class InputSharingCoordinator {
     private static let modifierKeys = Set(modifierKeyOrder)
     private static let arrowKeys: Set<String> = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
     private static let secondaryFnKeys: Set<String> = arrowKeys.union(["Home", "End", "PageUp", "PageDown", "Delete"])
+    /// Real keypad events carry NX_NUMERICPADMASK; apps that distinguish the keypad from the
+    /// main block (spreadsheets, calculators, games) read it, so injected keypad keys set it too.
+    private static let numpadKeys: Set<String> = [
+        "Numpad0", "Numpad1", "Numpad2", "Numpad3", "Numpad4",
+        "Numpad5", "Numpad6", "Numpad7", "Numpad8", "Numpad9",
+        "NumpadDecimal", "NumpadMultiply", "NumpadAdd", "NumpadDivide", "NumpadSubtract"
+    ]
 
     private var hasAccessibilityPermission: Bool {
         AXIsProcessTrusted()
@@ -1424,7 +1451,16 @@ final class InputSharingCoordinator {
         96: "F5", 97: "F6", 98: "F7", 99: "F3", 100: "F8", 101: "F9", 103: "F11",
         109: "F10", 111: "F12", 115: "Home", 116: "PageUp", 117: "Delete", 118: "F4",
         119: "End", 120: "F2", 121: "PageDown", 122: "F1", 123: "ArrowLeft", 124: "ArrowRight",
-        125: "ArrowDown", 126: "ArrowUp"
+        125: "ArrowDown", 126: "ArrowUp",
+        // Numeric keypad. Absent from this table, every keypad press was dropped by `sendKey`
+        // (an unmapped keycode returns early), so the whole keypad went nowhere. Keypad Enter
+        // and Equals deliberately fold onto the main-block "Enter"/"Equal" because Windows has
+        // no distinct virtual key for either; the keypad's own numerals stay distinct so the
+        // receiver can reproduce them with maskNumericPad set, as real keypad events carry.
+        82: "Numpad0", 83: "Numpad1", 84: "Numpad2", 85: "Numpad3", 86: "Numpad4",
+        87: "Numpad5", 88: "Numpad6", 89: "Numpad7", 91: "Numpad8", 92: "Numpad9",
+        65: "NumpadDecimal", 67: "NumpadMultiply", 69: "NumpadAdd", 75: "NumpadDivide",
+        78: "NumpadSubtract", 76: "Enter", 81: "Equal", 71: "NumLock"
     ]
 
     private static let canonicalToMacKey: [String: CGKeyCode] = {

@@ -37,9 +37,17 @@ internal sealed class WindowsInputInjector : IDisposable
     private const uint MouseRightUp = 0x0010;
     private const uint MouseMiddleDown = 0x0020;
     private const uint MouseMiddleUp = 0x0040;
+    // The thumb buttons share one flag pair and are identified by mouseData, so they need their
+    // own held-state tracking rather than a bit in heldMouseButtons.
+    private const uint MouseXDown = 0x0080;
+    private const uint MouseXUp = 0x0100;
+    private const int XButton1 = 0x0001;
+    private const int XButton2 = 0x0002;
+    private const int XButtonMask = XButton1 | XButton2;
 
     private readonly Dictionary<ushort, bool> heldKeys = new();
     private uint heldMouseButtons;
+    private int heldXButtons;
 
     private IntPtr currentDesktop = IntPtr.Zero;
     private string? currentDesktopName;
@@ -64,7 +72,7 @@ internal sealed class WindowsInputInjector : IDisposable
         };
         if (Send(input))
         {
-            TrackMouseButtons(flags);
+            TrackMouseButtons(flags, data);
         }
     }
 
@@ -136,11 +144,28 @@ internal sealed class WindowsInputInjector : IDisposable
         {
             InjectMouse(MouseMiddleUp, 0, 0, 0);
         }
+        if ((heldXButtons & XButton1) != 0)
+        {
+            InjectMouse(MouseXUp, XButton1, 0, 0);
+        }
+        if ((heldXButtons & XButton2) != 0)
+        {
+            InjectMouse(MouseXUp, XButton2, 0, 0);
+        }
         heldMouseButtons = 0;
+        heldXButtons = 0;
     }
 
-    private void TrackMouseButtons(uint flags)
+    private void TrackMouseButtons(uint flags, int data)
     {
+        if ((flags & MouseXDown) != 0)
+        {
+            heldXButtons |= data & XButtonMask;
+        }
+        if ((flags & MouseXUp) != 0)
+        {
+            heldXButtons &= ~(data & XButtonMask);
+        }
         if ((flags & MouseLeftDown) != 0)
         {
             heldMouseButtons |= MouseLeftDown;
