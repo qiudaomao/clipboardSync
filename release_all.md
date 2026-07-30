@@ -225,6 +225,8 @@ APPCAST_GEN=$(find ~/.dotnet/tools/.store/netsparkleupdater.tools.appcastgenerat
   -name 'NetSparkleUpdater.Tools.AppCastGenerator.dll' | head -1)
 FX=$(~/.dotnet/dotnet --list-runtimes | awk '/Microsoft.NETCore.App 8\./{print $2}' | tail -1)
 WORKDIR=$(mktemp -d)
+CHANGELOG_DIR="$WORKDIR/changelogs"
+mkdir -p "$CHANGELOG_DIR"
 
 cp "artifacts/windows/ClipboardSyncSetup-${TAG}.exe" "$WORKDIR/"
 # Seed with existing feed (LF) so --reparse-existing keeps history:
@@ -233,11 +235,14 @@ from pathlib import Path
 src = Path("${RELEASE_REPO}/win-appcast.xml").read_text().replace("\r\n", "\n")
 Path("${WORKDIR}/appcast.xml").write_bytes(src.encode())
 PY
+# Place the exact user-facing release note in "$CHANGELOG_DIR/${VERSION}.md" before
+# generating. The generator puts it in the item's <description> before it signs the feed.
 
 ~/.dotnet/dotnet exec --fx-version "$FX" "$APPCAST_GEN" \
   -a "$WORKDIR" -b "$WORKDIR" -e exe -o windows-x64 \
   -n "Clipboard Sync" \
   -u "https://github.com/qiudaomao/clipboardSyncRelease/releases/download/${TAG}" \
+  -p "$CHANGELOG_DIR" \
   --reparse-existing --overwrite-old-items --file-extract-version
 
 # Use the signature file written *with* the appcast (already LF on macOS):

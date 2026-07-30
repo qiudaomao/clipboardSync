@@ -53,6 +53,9 @@ Windows flow below:
    - Run the generator against a scratch directory (its output file is named `appcast.xml`,
      which would collide with the macOS appcast in the release checkout); copy the existing
      `win-appcast.xml` in as `appcast.xml` first so `--reparse-existing` keeps old items.
+   - Supply each release's user-facing note as `<version>.md` through `--change-log-path`
+     (for example, `0.1.36.md`). The generator writes it into the item's `<description>`
+     before producing the detached feed signature; do not patch the generated XML afterward.
    - The standalone `--generate-signature` subcommand crashes on macOS. Use the
      `appcast.xml.signature` the generator writes next to the appcast during generation —
      the file is already LF on macOS, so that signature covers the exact bytes GitHub raw
