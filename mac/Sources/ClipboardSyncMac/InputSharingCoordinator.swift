@@ -1508,9 +1508,19 @@ final class InputSharingCoordinator {
         78: "NumpadSubtract", 76: "Enter", 81: "Equal", 71: "NumLock"
     ]
 
+    /// Several keycodes share a canonical name, so the winner must be chosen deliberately.
+    /// Iterating the dictionary directly picked an arbitrary one — Swift randomizes hash order
+    /// per process — which let "Equal" bind to the keypad's equals (81) instead of the main
+    /// row's (24) on some launches. The keypad key ignores Shift, so Shift+= typed "=" rather
+    /// than "+". Ascending keycode is deterministic and picks the intended key in every case
+    /// here: main-row Equal (24) over keypad (81), Return (36) over keypad Enter (76), and the
+    /// left modifier over the right.
     private static let canonicalToMacKey: [String: CGKeyCode] = {
         var result: [String: CGKeyCode] = [:]
-        for (keyCode, canonical) in macKeyToCanonical where result[canonical] == nil {
+        for keyCode in macKeyToCanonical.keys.sorted() {
+            guard let canonical = macKeyToCanonical[keyCode], result[canonical] == nil else {
+                continue
+            }
             result[canonical] = keyCode
         }
         return result

@@ -1631,10 +1631,14 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private static readonly Dictionary<string, Keys> CanonicalToWindowsKey = BuildReverseKeyMap();
 
+    /// Ordered explicitly rather than relying on Dictionary enumeration, whose order is
+    /// unspecified: several virtual keys share a canonical name and the winner must be chosen,
+    /// not left to chance. Ascending key value picks the generic/left variant (ShiftKey over
+    /// L/RShiftKey, LWin over RWin), matching what the enumeration happened to yield before.
     private static Dictionary<string, Keys> BuildReverseKeyMap()
     {
         var result = new Dictionary<string, Keys>();
-        foreach (var pair in WindowsKeyToCanonical)
+        foreach (var pair in WindowsKeyToCanonical.OrderBy(pair => (int)pair.Key))
         {
             result.TryAdd(pair.Value, pair.Key);
         }
