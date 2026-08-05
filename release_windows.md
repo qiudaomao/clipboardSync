@@ -7,7 +7,7 @@ Steps to cut a Windows release and publish it through NetSparkle auto-update.
 
 Release artifacts and `win-appcast.xml` live in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo (`git@github.com:qiudaomao/clipboardSyncRelease.git`), not in this repo.
 
-The current Windows release target is `v0.1.37`, matching the app version `0.1.37`.
+The current Windows release target is `v0.1.38`, matching the app version `0.1.38`.
 
 ## Publishing from macOS
 
@@ -54,7 +54,7 @@ Windows flow below:
      which would collide with the macOS appcast in the release checkout); copy the existing
      `win-appcast.xml` in as `appcast.xml` first so `--reparse-existing` keeps old items.
    - Supply each release's user-facing note as `<version>.md` through `--change-log-path`
-     (for example, `0.1.37.md`). The generator writes it into the item's `<description>`
+     (for example, `0.1.38.md`). The generator writes it into the item's `<description>`
      before producing the detached feed signature; do not patch the generated XML afterward.
    - The standalone `--generate-signature` subcommand crashes on macOS. Use the
      `appcast.xml.signature` the generator writes next to the appcast during generation —
