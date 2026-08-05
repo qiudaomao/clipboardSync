@@ -302,7 +302,14 @@ internal sealed class InputSharingCoordinator : IDisposable
     {
         if (hookThread is not null)
         {
-            return;
+            if (hookInstallFailure is null)
+            {
+                return;
+            }
+            // The thread survives a failed SetWindowsHookEx (it still runs its message loop),
+            // so a transient failure — e.g. a locked desktop at install time — would otherwise
+            // persist until input sharing is toggled. Tear down and retry on this update.
+            RemoveHooks();
         }
         using var ready = new ManualResetEventSlim(false);
         var thread = new Thread(() => HookThreadProc(ready))

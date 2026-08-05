@@ -2225,7 +2225,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
         if (message.Kind == "hello" && config.Mode == SyncMode.Client && message.Role == "server")
         {
-            if (message.ControlDeviceId is not null &&
+            if (!string.IsNullOrEmpty(message.ControlDeviceId) &&
                 (config.ControlDeviceId != message.ControlDeviceId ||
                  config.ControlDeviceAuto != (message.ControlDeviceAuto ?? false)))
             {
@@ -2285,7 +2285,7 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private bool ApplyInputConfig(InputMessage message)
     {
-        if (message.ControlDeviceId is null)
+        if (string.IsNullOrEmpty(message.ControlDeviceId))
         {
             return false;
         }
