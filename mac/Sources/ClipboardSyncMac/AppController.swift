@@ -315,6 +315,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.inputStatusMenuItem.title = status
             }
         }
+        inputCoordinator.onLocalPhysicalInput = { [weak self] in
+            DispatchQueue.main.async {
+                self?.handleLocalPhysicalMouseActivity()
+            }
+        }
 
         guard !BetaLicense.isExpired else {
             statusText = AppText.text("status.betaExpired")
@@ -772,13 +777,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         let selectedTitle = devices.first { $0.id == selectedId }?.title ?? AppText.text("device.unknown")
-        controlDeviceMenuItem.title = AppText.format("menu.controlDeviceWithTitle", selectedTitle)
+        let autoTitle = AppText.format("menu.controlDeviceAuto", selectedTitle)
+        controlDeviceMenuItem.title = AppText.format(
+            "menu.controlDeviceWithTitle",
+            config.controlDeviceAuto ? autoTitle : selectedTitle
+        )
+
+        let autoItem = NSMenuItem(title: autoTitle, action: #selector(setAutoControlDevice), keyEquivalent: "")
+        autoItem.target = self
+        autoItem.state = config.controlDeviceAuto ? .on : .off
+        controlDeviceMenu.addItem(autoItem)
+        controlDeviceMenu.addItem(.separator())
 
         for device in devices {
             let item = NSMenuItem(title: device.title, action: #selector(setControlDevice), keyEquivalent: "")
             item.target = self
             item.representedObject = device.id
-            item.state = device.id == selectedId ? .on : .off
+            item.state = !config.controlDeviceAuto && device.id == selectedId ? .on : .off
             controlDeviceMenu.addItem(item)
         }
     }
@@ -1635,8 +1650,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let controlDeviceId = sender.representedObject as? String else {
             return
         }
+        config.controlDeviceAuto = false
         config.controlDeviceId = controlDeviceId
         config.save()
+        NSLog("Control device set manually: \(controlDeviceId.prefix(8))")
+        updateInputCoordinator()
+        syncInputConfig()
+    }
+
+    @objc private func setAutoControlDevice() {
+        // Choosing Auto from this computer is itself an intentional local interaction, so use it
+        // as the initial election rather than waiting for the next mouse movement.
+        config.controlDeviceAuto = true
+        config.controlDeviceId = deviceId
+        config.save()
+        NSLog("Control device set to Auto; local mouse is the initial controller")
         updateInputCoordinator()
         syncInputConfig()
     }
@@ -1719,7 +1747,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func sharedInputConfigChanged(from previous: AppConfig, to next: AppConfig) -> Bool {
-        previous.controlDeviceId != next.controlDeviceId
+        previous.controlDeviceId != next.controlDeviceId || previous.controlDeviceAuto != next.controlDeviceAuto
     }
 
     private func restartTransport() {
@@ -2199,6 +2227,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         rememberInputDevice(from: message)
 
+        if message.kind == "autoControlActivity" {
+            handleAutoControlActivity(message)
+            return
+        }
+
         if message.kind == "config" {
             handleInputConfig(message)
             return
@@ -2235,8 +2268,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if message.kind == "hello", config.mode == .client, message.role == SyncMode.server.rawValue {
-            if let controlDeviceId = message.controlDeviceId, config.controlDeviceId != controlDeviceId {
+            if let controlDeviceId = message.controlDeviceId,
+               !controlDeviceId.isEmpty,
+               config.controlDeviceId != controlDeviceId || config.controlDeviceAuto != (message.controlDeviceAuto ?? false) {
                 config.controlDeviceId = controlDeviceId
+                config.controlDeviceAuto = message.controlDeviceAuto ?? false
                 config.save()
                 updateInputCoordinator()
             }
@@ -2266,13 +2302,78 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @discardableResult
     private func applyInputConfig(_ message: InputMessage) -> Bool {
-        guard let controlDeviceId = message.controlDeviceId, config.controlDeviceId != controlDeviceId else {
+        guard let controlDeviceId = message.controlDeviceId, !controlDeviceId.isEmpty else {
+            return false
+        }
+        let controlDeviceAuto = message.controlDeviceAuto ?? false
+        guard config.controlDeviceId != controlDeviceId || config.controlDeviceAuto != controlDeviceAuto else {
             return false
         }
         config.controlDeviceId = controlDeviceId
+        config.controlDeviceAuto = controlDeviceAuto
         config.save()
         updateInputCoordinator()
         return true
+    }
+
+    /// Auto is server-authoritative. A child only reports a real local mouse event; the server
+    /// verifies the reporting peer is enabled before committing and broadcasting the election.
+    private func handleAutoControlActivity(_ message: InputMessage) {
+        guard config.mode == .server else {
+            return
+        }
+        guard
+            message.role == SyncMode.client.rawValue,
+            config.inputSharingEnabled,
+            config.controlDeviceAuto,
+            inputDevices[message.origin]?.inputEnabled == true
+        else {
+            NSLog("Ignoring Auto-control mouse activity from \(message.origin.prefix(8))")
+            return
+        }
+        electAutoControlDevice(message.origin)
+    }
+
+    private func handleLocalPhysicalMouseActivity() {
+        guard config.controlDeviceAuto, config.inputSharingEnabled, peerCount > 0 else {
+            return
+        }
+        if config.mode == .server {
+            electAutoControlDevice(deviceId)
+            return
+        }
+        guard transport != nil else {
+            return
+        }
+        NSLog("Requesting Auto control election from local physical mouse input")
+        publishInput(InputMessage(
+            type: "input",
+            origin: deviceId,
+            target: nil,
+            kind: "autoControlActivity",
+            role: config.mode.rawValue,
+            deviceName: nil,
+            deviceAddress: nil,
+            screens: nil,
+            enabled: nil,
+            controlDeviceId: nil,
+            layout: nil,
+            capture: nil,
+            mouse: nil,
+            key: nil,
+            sentAt: Date().timeIntervalSince1970
+        ))
+    }
+
+    private func electAutoControlDevice(_ controlDeviceId: String) {
+        guard config.controlDeviceAuto, config.controlDeviceId != controlDeviceId else {
+            return
+        }
+        config.controlDeviceId = controlDeviceId
+        config.save()
+        NSLog("Auto control elected device \(controlDeviceId.prefix(8)) after local physical mouse input")
+        updateInputCoordinator()
+        sendInputConfig()
     }
 
     private func updateInputCoordinator(sendHello: Bool = false) {
@@ -2317,6 +2418,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             screens: nil,
             enabled: nil,
             controlDeviceId: effectiveControlDeviceId,
+            controlDeviceAuto: config.controlDeviceAuto,
             layout: nil,
             capture: nil,
             mouse: nil,

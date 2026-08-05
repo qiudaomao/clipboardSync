@@ -23,6 +23,11 @@ Files remain an explicit clipboard workflow: copy files in Finder or Explorer, c
 
 The ordinary menu focuses on connection status, clipboard tasks, input sharing, and pausing/resuming sync. The work mode is selected only in Settings. Port forwarding, **Prevent System Sleep**, and launch-at-login live under **More Features**. Sleep prevention keeps both the system and display awake from idle, shows its live state and remaining time as the first submenu row, and can be left disabled, enabled forever, enabled for 1, 2, 4, 6, or 8 hours, or driven by a **Time Plan**. The Time Plan editor is a weekly grid of 7 days by 24 hours in the device's local time: blue blocks prevent sleep, gray blocks allow it. Click a block to switch it or drag to switch a rectangle of blocks; changes save as they are applied. An independent option can pause it while running on battery below 20%; reconnecting power or recovering to 20% resumes the original choice, while timed choices keep their original deadline. Explicit user sleep and laptop-lid actions remain under operating-system control. First launch opens Settings automatically; incomplete configuration remains actionable from the status row.
 
+For input sharing, **Control Device** can be fixed to one device or set to **Auto**. Auto follows
+the computer whose physical mouse or touchpad was most recently used; keyboard activity does not
+switch it, so it is safe to use a mouse on one computer and a keyboard on another. The server
+authoritatively synchronizes the current Auto controller and ignores relayed/synthetic input.
+
 ![mac](assets/mac.png)
 
 ![win](assets/win.png)

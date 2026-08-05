@@ -74,6 +74,9 @@ struct AppConfig {
     QJsonArray portForwardRules;
     bool inputSharingEnabled = false;
     QString controlDeviceId; // empty selects this device
+    // When true, the server elects the device that most recently used a local physical mouse or touchpad.
+    // controlDeviceId remains the active, server-authoritative election.
+    bool controlDeviceAuto = false;
     bool reverseMouseVerticalScroll = false;
     KeyboardModifierMap keyboardModifierMap;
     SleepPreventionDuration sleepPreventionDuration = SleepPreventionDuration::Disabled;

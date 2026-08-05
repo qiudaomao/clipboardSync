@@ -260,6 +260,7 @@ enum AppText {
             "menu.enableInputSharing": "Enable Input Sharing",
             "menu.controlDevice": "Control Device",
             "menu.controlDeviceWithTitle": "Control Device: %@",
+            "menu.controlDeviceAuto": "Auto (mouse; current: %@)",
             "menu.screenLayout": "Screen Layout...",
             "menu.portForward": "Port Forward...",
             "menu.completeSetup": "Complete Setup...",
@@ -360,6 +361,7 @@ enum AppText {
             "input.waitingPeer": "Input Sharing: waiting for peer",
             "input.grantAccessibility": "Input Sharing: grant Accessibility",
             "input.grantInputMonitoring": "Input Sharing: grant Input Monitoring",
+            "input.autoMonitorUnavailable": "Input Sharing: Auto control unavailable",
             "input.peerDisabled": "Input Sharing: peer disabled",
             "input.waitingPeerScreen": "Input Sharing: waiting for peer screen",
             "input.controllingPeer": "Input Sharing: controlling peer (%@)",
@@ -478,6 +480,7 @@ enum AppText {
             "menu.enableInputSharing": "启用输入共享",
             "menu.controlDevice": "控制设备",
             "menu.controlDeviceWithTitle": "控制设备：%@",
+            "menu.controlDeviceAuto": "自动（鼠标；当前：%@）",
             "menu.screenLayout": "屏幕布局...",
             "menu.portForward": "端口转发...",
             "menu.completeSetup": "完成设置...",
@@ -578,6 +581,7 @@ enum AppText {
             "input.waitingPeer": "输入共享：等待对端",
             "input.grantAccessibility": "输入共享：请授权辅助功能",
             "input.grantInputMonitoring": "输入共享：请授权输入监控",
+            "input.autoMonitorUnavailable": "输入共享：自动控制不可用",
             "input.peerDisabled": "输入共享：对端已禁用",
             "input.waitingPeerScreen": "输入共享：等待对端屏幕信息",
             "input.controllingPeer": "输入共享：正在控制对端（%@）",
@@ -696,6 +700,7 @@ enum AppText {
             "menu.enableInputSharing": "입력 공유 활성화",
             "menu.controlDevice": "제어 장치",
             "menu.controlDeviceWithTitle": "제어 장치: %@",
+            "menu.controlDeviceAuto": "자동 (마우스; 현재: %@)",
             "menu.screenLayout": "화면 레이아웃...",
             "menu.portForward": "포트 포워딩...",
             "menu.completeSetup": "설정 완료...",
@@ -796,6 +801,7 @@ enum AppText {
             "input.waitingPeer": "입력 공유: 상대 대기 중",
             "input.grantAccessibility": "입력 공유: 손쉬운 사용 권한 필요",
             "input.grantInputMonitoring": "입력 공유: 입력 모니터링 권한 필요",
+            "input.autoMonitorUnavailable": "입력 공유: 자동 제어를 사용할 수 없음",
             "input.peerDisabled": "입력 공유: 상대가 비활성화됨",
             "input.waitingPeerScreen": "입력 공유: 상대 화면 정보 대기 중",
             "input.controllingPeer": "입력 공유: 상대 제어 중 (%@)",
@@ -914,6 +920,7 @@ enum AppText {
             "menu.enableInputSharing": "入力共有を有効化",
             "menu.controlDevice": "制御デバイス",
             "menu.controlDeviceWithTitle": "制御デバイス: %@",
+            "menu.controlDeviceAuto": "自動（マウス；現在：%@）",
             "menu.screenLayout": "画面レイアウト...",
             "menu.portForward": "ポート転送...",
             "menu.completeSetup": "設定を完了...",
@@ -1014,6 +1021,7 @@ enum AppText {
             "input.waitingPeer": "入力共有: 相手を待機中",
             "input.grantAccessibility": "入力共有: アクセシビリティを許可してください",
             "input.grantInputMonitoring": "入力共有: 入力監視を許可してください",
+            "input.autoMonitorUnavailable": "入力共有: 自動制御を利用できません",
             "input.peerDisabled": "入力共有: 相手が無効です",
             "input.waitingPeerScreen": "入力共有: 相手の画面情報を待機中",
             "input.controllingPeer": "入力共有: 相手を制御中 (%@)",
@@ -1153,6 +1161,9 @@ struct AppConfig: Codable {
     var encryptTransport: Bool
     var inputSharingEnabled: Bool
     var controlDeviceId: String?
+    /// When enabled, the server elects the device that most recently used a local physical mouse or touchpad.
+    /// `controlDeviceId` remains the server-authoritative current election.
+    var controlDeviceAuto: Bool
     var reverseMouseVerticalScroll: Bool
     var keyboardModifierMap: KeyboardModifierMap
     var sleepPreventionDuration: SleepPreventionDuration
@@ -1168,6 +1179,7 @@ struct AppConfig: Codable {
         encryptTransport: true,
         inputSharingEnabled: false,
         controlDeviceId: nil,
+        controlDeviceAuto: false,
         reverseMouseVerticalScroll: false,
         keyboardModifierMap: .identity,
         sleepPreventionDuration: .disabled,
@@ -1189,6 +1201,7 @@ struct AppConfig: Codable {
         encryptTransport: Bool = true,
         inputSharingEnabled: Bool,
         controlDeviceId: String?,
+        controlDeviceAuto: Bool = false,
         reverseMouseVerticalScroll: Bool,
         keyboardModifierMap: KeyboardModifierMap = .identity,
         sleepPreventionDuration: SleepPreventionDuration,
@@ -1203,6 +1216,7 @@ struct AppConfig: Codable {
         self.encryptTransport = encryptTransport
         self.inputSharingEnabled = inputSharingEnabled
         self.controlDeviceId = controlDeviceId
+        self.controlDeviceAuto = controlDeviceAuto
         self.reverseMouseVerticalScroll = reverseMouseVerticalScroll
         self.keyboardModifierMap = keyboardModifierMap
         self.sleepPreventionDuration = sleepPreventionDuration
@@ -1220,6 +1234,7 @@ struct AppConfig: Codable {
         encryptTransport = try container.decodeIfPresent(Bool.self, forKey: .encryptTransport) ?? Self.defaults.encryptTransport
         inputSharingEnabled = try container.decodeIfPresent(Bool.self, forKey: .inputSharingEnabled) ?? Self.defaults.inputSharingEnabled
         controlDeviceId = try container.decodeIfPresent(String.self, forKey: .controlDeviceId) ?? Self.defaults.controlDeviceId
+        controlDeviceAuto = try container.decodeIfPresent(Bool.self, forKey: .controlDeviceAuto) ?? Self.defaults.controlDeviceAuto
         reverseMouseVerticalScroll = try container.decodeIfPresent(Bool.self, forKey: .reverseMouseVerticalScroll) ?? Self.defaults.reverseMouseVerticalScroll
         keyboardModifierMap = try container.decodeIfPresent(KeyboardModifierMap.self, forKey: .keyboardModifierMap) ?? Self.defaults.keyboardModifierMap
         sleepPreventionDuration = try container.decodeIfPresent(SleepPreventionDuration.self, forKey: .sleepPreventionDuration) ?? Self.defaults.sleepPreventionDuration
@@ -1263,6 +1278,7 @@ struct AppConfig: Codable {
             encryptTransport: encryptTransport,
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: controlDeviceId?.trimmingCharacters(in: .whitespacesAndNewlines),
+            controlDeviceAuto: controlDeviceAuto,
             reverseMouseVerticalScroll: reverseMouseVerticalScroll,
             keyboardModifierMap: keyboardModifierMap,
             sleepPreventionDuration: sleepPreventionDuration,
@@ -1551,6 +1567,8 @@ struct InputMessage: Codable {
     let screens: [ScreenMetrics]?
     let enabled: Bool?
     let controlDeviceId: String?
+    /// Nil is an older peer that only understands manual control-device selection.
+    let controlDeviceAuto: Bool?
     let layout: [ScreenLayoutEntry]?
     let capture: InputCapturePayload?
     let mouse: InputMousePayload?
@@ -1571,6 +1589,7 @@ struct InputMessage: Codable {
         screens: [ScreenMetrics]?,
         enabled: Bool?,
         controlDeviceId: String?,
+        controlDeviceAuto: Bool? = nil,
         layout: [ScreenLayoutEntry]?,
         capture: InputCapturePayload?,
         mouse: InputMousePayload?,
@@ -1590,6 +1609,7 @@ struct InputMessage: Codable {
         self.screens = screens
         self.enabled = enabled
         self.controlDeviceId = controlDeviceId
+        self.controlDeviceAuto = controlDeviceAuto
         self.layout = layout
         self.capture = capture
         self.mouse = mouse
@@ -1607,7 +1627,8 @@ struct InputMessage: Codable {
         deviceAddress: String?,
         screens: [ScreenMetrics],
         enabled: Bool,
-        controlDeviceId: String?
+        controlDeviceId: String?,
+        controlDeviceAuto: Bool
     ) -> InputMessage {
         InputMessage(
             type: "input",
@@ -1620,6 +1641,7 @@ struct InputMessage: Codable {
             screens: screens,
             enabled: enabled,
             controlDeviceId: controlDeviceId,
+            controlDeviceAuto: controlDeviceAuto,
             layout: nil,
             capture: nil,
             mouse: nil,

@@ -28,6 +28,7 @@ public:
     QList<ScreenMetrics> screenList{{1920, 1080, 1, 0, 0}};
     QPointF cursor{960, 540};
     bool captureActive = false;
+    bool physicalInputMonitoring = false;
     QList<QPointF> warps;
     QList<InjectedEvent> injected;
 
@@ -43,6 +44,8 @@ public:
     void warpCursor(const QPointF &position) override { warps.append(position); }
     bool startCapture(const QPointF &) override { captureActive = true; return true; }
     void stopCapture() override { captureActive = false; }
+    bool startPhysicalInputMonitor() override { physicalInputMonitoring = true; return true; }
+    void stopPhysicalInputMonitor() override { physicalInputMonitoring = false; }
     void injectMove(const QRectF &rect, double normalizedX, double normalizedY) override
     {
         injected.append(InjectedEvent{QStringLiteral("move"), QString(), false, rect, normalizedX, normalizedY});
@@ -62,6 +65,7 @@ public:
 
     void fakeMotion(double deltaX, double deltaY) { emit captureMotion(deltaX, deltaY); }
     void fakeKey(const QString &key, bool down) { emit captureKey(key, down); }
+    void fakePhysicalInput() { emit physicalInputActivity(); }
 };
 
 void require(bool condition, const char *what)
@@ -271,6 +275,45 @@ void testControllerEdgeCrossing()
     require(!backend.warps.isEmpty(), "the local cursor is warped to the return point");
 }
 
+void testAutoControlObservesOnlyMouseBackendActivity()
+{
+    QTemporaryDir directory;
+    ScreenLayoutStore store(directory.filePath(QStringLiteral("layout.json")));
+    store.merge(QStringLiteral("me"), {{1920, 1080, 1, 0, 0}});
+    FakeBackend backend;
+    InputSharingCoordinator coordinator(&backend, &store);
+    coordinator.configure(QStringLiteral("me"));
+
+    int physicalMouseEvents = 0;
+    QObject::connect(&coordinator, &InputSharingCoordinator::localPhysicalInput,
+        [&physicalMouseEvents] { ++physicalMouseEvents; });
+
+    InputSharingCoordinator::Settings settings;
+    settings.enabled = true;
+    settings.controlDeviceAuto = true;
+    settings.controlDeviceId = QStringLiteral("controller");
+    coordinator.update(settings, QStringLiteral("client"), 1,
+        {{QStringLiteral("controller"), true}}, {{QStringLiteral("controller"), QStringLiteral("Controller")}});
+    require(backend.physicalInputMonitoring,
+        "Auto observes local physical mouse input while another device is controller");
+    require(coordinator.makeHello(QStringLiteral("Receiver"), QString()).value(QStringLiteral("controlDeviceAuto")).toBool(),
+        "Auto mode is advertised to the server and peers");
+
+    backend.fakeKey(QStringLiteral("KeyA"), true);
+    require(physicalMouseEvents == 0,
+        "keyboard activity never requests an Auto control election");
+
+    backend.fakePhysicalInput();
+    require(waitUntil([&physicalMouseEvents] { return physicalMouseEvents == 1; }),
+        "physical mouse activity is reported for server-authoritative Auto election");
+
+    settings.controlDeviceAuto = false;
+    coordinator.update(settings, QStringLiteral("client"), 1,
+        {{QStringLiteral("controller"), true}}, {{QStringLiteral("controller"), QStringLiteral("Controller")}});
+    require(!backend.physicalInputMonitoring,
+        "manual control selection disables Auto mouse observation");
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -280,6 +323,7 @@ int main(int argc, char **argv)
     testNeighborGeometry();
     testReceiverInjection();
     testControllerEdgeCrossing();
+    testAutoControlObservesOnlyMouseBackendActivity();
     qInfo("input-sharing-tests passed");
     return 0;
 }

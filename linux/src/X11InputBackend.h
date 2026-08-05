@@ -30,6 +30,9 @@ public:
     bool startCapture(const QPointF &anchor) override;
     void stopCapture() override;
 
+    bool startPhysicalInputMonitor() override;
+    void stopPhysicalInputMonitor() override;
+
     void injectMove(const QRectF &screenRect, double normalizedX, double normalizedY) override;
     void injectButton(const QString &button, bool down) override;
     void injectWheel(double deltaX, double deltaY) override;
@@ -38,12 +41,18 @@ public:
 private:
     X11Display *injectDisplay();
     void captureLoop(double anchorX, double anchorY);
+    void physicalInputLoop(X11Display *display, int xiOpcode);
+    bool isPhysicalMouseDevice(X11Display *display, int sourceId) const;
+    void closePhysicalInputStopPipe();
     double devicePixelRatio() const;
 
     X11Display *injectDisplay_ = nullptr;
     std::thread captureThread_;
     std::atomic<bool> captureRunning_{false};
     int captureStopPipe_[2] = {-1, -1};
+    std::thread physicalInputThread_;
+    std::atomic<bool> physicalInputMonitoring_{false};
+    int physicalInputStopPipe_[2] = {-1, -1};
     double wheelRemainderX_ = 0;
     double wheelRemainderY_ = 0;
 };

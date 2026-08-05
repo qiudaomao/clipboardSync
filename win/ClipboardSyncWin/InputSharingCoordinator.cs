@@ -63,6 +63,7 @@ internal sealed class InputSharingCoordinator : IDisposable
     private static readonly string[] ModifierKeyOrder = ["Shift", "Control", "Alt", "Meta"];
     private static readonly TimeSpan RemoteMouseMoveInterval = TimeSpan.FromMilliseconds(8);
     private static readonly TimeSpan MouseMoveSendInterval = TimeSpan.FromMilliseconds(1000.0 / 60);
+    private const long AutoActivityMinimumIntervalMilliseconds = 250;
 
     private readonly string deviceId;
     private readonly ScreenLayoutStore layoutStore;
@@ -98,9 +99,13 @@ internal sealed class InputSharingCoordinator : IDisposable
     private uint hookThreadId;
     private Point localAnchor;
     private bool localCursorHidden;
+    private long lastAutoActivityAt;
+    private volatile string? hookInstallFailure;
 
     public event Action<InputMessage>? MessageReady;
     public event Action<string>? StatusChanged;
+    /// <summary>Raised only for a non-injected local mouse event while Auto waits.</summary>
+    public event Action? LocalPhysicalInput;
 
     public InputSharingCoordinator(string deviceId, ScreenLayoutStore layoutStore)
     {
@@ -139,7 +144,8 @@ internal sealed class InputSharingCoordinator : IDisposable
             deviceAddress,
             CurrentScreens(),
             config.InputSharingEnabled && peerCount > 0,
-            EffectiveControlDeviceId);
+            EffectiveControlDeviceId,
+            config.ControlDeviceAuto);
     }
 
     public void Handle(InputMessage message)
@@ -230,21 +236,32 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
     }
 
+    /// <summary>
+    /// In Auto mode a receiver still installs passive LL hooks. Their injection flags let us
+    /// observe actual local hardware activity without treating relayed SendInput events as a
+    /// request to take control back.
+    /// </summary>
+    private bool ShouldMonitorLocalPhysicalInput =>
+        config.InputSharingEnabled && peerCount > 0 && config.ControlDeviceAuto && !IsController;
+
     private bool HasKnownRemotePeer => layoutStore.Entries.Values.Any(entry =>
         entry.DeviceId != deviceId && deviceEnabled.TryGetValue(entry.DeviceId, out var enabled) && enabled);
 
     private void UpdateInputState()
     {
-        if (IsController)
+        // A device that just lost the Auto election still needs to end any capture it owned.
+        // Passive mouse observation keeps hooks alive, but must never keep remote capture alive.
+        if (!IsController && activeScreenId is not null)
+        {
+            EndRemoteCapture(null);
+        }
+
+        if (IsController || ShouldMonitorLocalPhysicalInput)
         {
             EnsureHooks();
         }
         else
         {
-            if (activeScreenId is not null)
-            {
-                EndRemoteCapture(null);
-            }
             RemoveHooks();
         }
         if (!CanReceiveRemoteInput)
@@ -259,8 +276,10 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private void UpdateStatus()
     {
-        var status = !config.InputSharingEnabled
-            ? AppText.Text("input.off")
+        var status = hookInstallFailure is not null
+            ? AppText.Format("input.hookInstallFailed", hookInstallFailure)
+            : !config.InputSharingEnabled
+                ? AppText.Text("input.off")
             : peerCount == 0
                 ? AppText.Text("input.waitingPeer")
                 : IsController && !HasKnownRemotePeer
@@ -292,6 +311,7 @@ internal sealed class InputSharingCoordinator : IDisposable
             Name = "InputSharingHooks",
             Priority = ThreadPriority.Highest
         };
+        hookInstallFailure = null;
         hookThread = thread;
         thread.Start();
         ready.Wait();
@@ -307,6 +327,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         hookThread.Join(TimeSpan.FromSeconds(2));
         hookThread = null;
         hookThreadId = 0;
+        hookInstallFailure = null;
     }
 
     private void HookThreadProc(ManualResetEventSlim ready)
@@ -316,7 +337,14 @@ internal sealed class InputSharingCoordinator : IDisposable
         // RemoveHooks can never race its creation and get lost.
         PeekMessage(out _, IntPtr.Zero, 0, 0, PM_NOREMOVE);
         mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, IntPtr.Zero, 0);
+        var mouseError = mouseHook == IntPtr.Zero ? Marshal.GetLastWin32Error() : 0;
         keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, IntPtr.Zero, 0);
+        var keyboardError = keyboardHook == IntPtr.Zero ? Marshal.GetLastWin32Error() : 0;
+        if (mouseHook == IntPtr.Zero || keyboardHook == IntPtr.Zero)
+        {
+            hookInstallFailure = $"mouse hook error {mouseError}; keyboard hook error {keyboardError}";
+            System.Diagnostics.Trace.WriteLine($"Input-sharing hook installation failed: {hookInstallFailure}");
+        }
         ready.Set();
 
         while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
@@ -339,13 +367,19 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode < HC_ACTION || !IsController)
+        if (nCode < HC_ACTION)
         {
             return CallNextHookEx(mouseHook, nCode, wParam, lParam);
         }
 
         var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
         if ((data.flags & LLMHF_INJECTED) != 0)
+        {
+            return CallNextHookEx(mouseHook, nCode, wParam, lParam);
+        }
+
+        ReportLocalPhysicalInput();
+        if (!IsController)
         {
             return CallNextHookEx(mouseHook, nCode, wParam, lParam);
         }
@@ -390,7 +424,7 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode < HC_ACTION || !IsController || activeScreenId is null)
+        if (nCode < HC_ACTION)
         {
             return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
         }
@@ -402,6 +436,7 @@ internal sealed class InputSharingCoordinator : IDisposable
             return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
         }
         var action = message == WM_KEYUP || message == WM_SYSKEYUP ? "up" : "down";
+        var shouldCapture = IsController && activeScreenId is not null;
 
         if ((data.flags & LLKHF_INJECTED) != 0)
         {
@@ -414,7 +449,7 @@ internal sealed class InputSharingCoordinator : IDisposable
             // Relaying a modifier press types nothing anywhere; it only keeps the peer's
             // modifier state truthful. Our own injections carry SelfInjectionTag and are
             // skipped outright so a stale service build can't echo input back to itself.
-            if (data.dwExtraInfo != SelfInjectionTag &&
+            if (shouldCapture && data.dwExtraInfo != SelfInjectionTag &&
                 WindowsKeyToCanonical.TryGetValue((Keys)data.vkCode, out var injectedKey) &&
                 IsModifierKey(injectedKey))
             {
@@ -423,8 +458,35 @@ internal sealed class InputSharingCoordinator : IDisposable
             return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
         }
 
+        if (!shouldCapture)
+        {
+            return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
+        }
+
         SendKey((Keys)data.vkCode, action);
         return (IntPtr)1;
+    }
+
+    private void ReportLocalPhysicalInput()
+    {
+        if (!ShouldMonitorLocalPhysicalInput)
+        {
+            return;
+        }
+
+        var now = Environment.TickCount64;
+        var previous = Interlocked.Read(ref lastAutoActivityAt);
+        if (previous != 0 && now - previous < AutoActivityMinimumIntervalMilliseconds)
+        {
+            return;
+        }
+        if (Interlocked.CompareExchange(ref lastAutoActivityAt, now, previous) != previous)
+        {
+            return;
+        }
+
+        System.Diagnostics.Trace.WriteLine("Auto control detected local physical mouse input.");
+        LocalPhysicalInput?.Invoke();
     }
 
     private bool HandleLocalMouseMove(POINT point)

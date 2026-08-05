@@ -172,6 +172,8 @@ void AppController::start()
         if (inputStatusAction_)
             inputStatusAction_->setText(status);
     });
+    connect(input_, &InputSharingCoordinator::localPhysicalInput,
+        this, &AppController::handleLocalPhysicalMouseActivity);
     connect(qApp, &QCoreApplication::aboutToQuit, input_, &InputSharingCoordinator::deactivate);
     layoutStore_.merge(config_.deviceId, inputBackend_->screens());
     cursorReportTimer_.setInterval(CursorReportIntervalMs);
@@ -899,6 +901,11 @@ void AppController::handleInputMessage(const QJsonObject &message)
 
     rememberInputDevice(message);
 
+    if (kind == QStringLiteral("autoControlActivity")) {
+        handleAutoControlActivity(message);
+        return;
+    }
+
     if (kind == QStringLiteral("config")) {
         handleInputConfig(message);
         return;
@@ -935,9 +942,12 @@ void AppController::handleInputMessage(const QJsonObject &message)
         if (config_.mode == AppConfig::Mode::ChildDevice
             && message.value(QStringLiteral("role")).toString() == QStringLiteral("server")) {
             const QString controlDeviceId = message.value(QStringLiteral("controlDeviceId")).toString();
-            if (!controlDeviceId.isEmpty() && config_.controlDeviceId != controlDeviceId) {
+            const bool controlDeviceAuto = message.value(QStringLiteral("controlDeviceAuto")).toBool(false);
+            if (!controlDeviceId.isEmpty()
+                && (config_.controlDeviceId != controlDeviceId || config_.controlDeviceAuto != controlDeviceAuto)) {
                 qInfo().noquote() << "Adopting server control device:" << controlDeviceId.left(8);
                 config_.controlDeviceId = controlDeviceId;
+                config_.controlDeviceAuto = controlDeviceAuto;
                 config_.save();
                 updateInputCoordinator();
             }
@@ -995,10 +1005,13 @@ void AppController::handleInputConfig(const QJsonObject &message)
 {
     const QString role = message.value(QStringLiteral("role")).toString();
     const QString controlDeviceId = message.value(QStringLiteral("controlDeviceId")).toString();
-    const auto apply = [this, &controlDeviceId] {
-        if (controlDeviceId.isEmpty() || config_.controlDeviceId == controlDeviceId)
+    const bool controlDeviceAuto = message.value(QStringLiteral("controlDeviceAuto")).toBool(false);
+    const auto apply = [this, &controlDeviceId, controlDeviceAuto] {
+        if (controlDeviceId.isEmpty()
+            || (config_.controlDeviceId == controlDeviceId && config_.controlDeviceAuto == controlDeviceAuto))
             return false;
         config_.controlDeviceId = controlDeviceId;
+        config_.controlDeviceAuto = controlDeviceAuto;
         config_.save();
         updateInputCoordinator();
         return true;
@@ -1011,6 +1024,50 @@ void AppController::handleInputConfig(const QJsonObject &message)
     } else if (role == QStringLiteral("server")) {
         apply();
     }
+}
+
+void AppController::handleAutoControlActivity(const QJsonObject &message)
+{
+    const QString origin = message.value(QStringLiteral("origin")).toString();
+    if (config_.mode != AppConfig::Mode::Server)
+        return;
+    if (message.value(QStringLiteral("role")).toString() != QStringLiteral("client")
+        || !config_.inputSharingEnabled || !config_.controlDeviceAuto
+        || !devices_.contains(origin) || devices_.value(origin).inputEnabled != true) {
+        qInfo().noquote() << "Ignoring Auto-control physical mouse activity from" << origin.left(8);
+        return;
+    }
+    electAutoControlDevice(origin);
+}
+
+void AppController::handleLocalPhysicalMouseActivity()
+{
+    if (!config_.controlDeviceAuto || !config_.inputSharingEnabled || peerCount_ == 0)
+        return;
+    if (config_.mode == AppConfig::Mode::Server) {
+        electAutoControlDevice(config_.deviceId);
+        return;
+    }
+    if (config_.paused || !config_.isComplete())
+        return;
+    qInfo() << "Requesting Auto control election from local physical mouse input";
+    QJsonObject message{{QStringLiteral("type"), QStringLiteral("input")},
+        {QStringLiteral("origin"), config_.deviceId}, {QStringLiteral("kind"), QStringLiteral("autoControlActivity")},
+        {QStringLiteral("role"), roleString()},
+        {QStringLiteral("sentAt"), QDateTime::currentMSecsSinceEpoch() / 1000.0}};
+    publishEncrypted(message, true);
+}
+
+void AppController::electAutoControlDevice(const QString &deviceId)
+{
+    if (!config_.controlDeviceAuto || config_.controlDeviceId == deviceId)
+        return;
+    config_.controlDeviceId = deviceId;
+    config_.save();
+    qInfo().noquote() << "Auto control elected" << deviceId.left(8)
+                      << "after local physical mouse input";
+    updateInputCoordinator();
+    sendInputConfig();
 }
 
 void AppController::handleLayoutMessage(const QJsonObject &message)
@@ -1080,6 +1137,7 @@ void AppController::updateInputCoordinator(bool sendHello)
     InputSharingCoordinator::Settings settings;
     settings.enabled = config_.inputSharingEnabled;
     settings.controlDeviceId = config_.controlDeviceId;
+    settings.controlDeviceAuto = config_.controlDeviceAuto;
     settings.reverseMouseVerticalScroll = config_.reverseMouseVerticalScroll;
     settings.modifierMap = config_.keyboardModifierMap;
     input_->update(settings, roleString(), peerCount_, deviceEnabledMap(), deviceDisplayNames());
@@ -1107,6 +1165,7 @@ void AppController::sendInputConfig()
         {QStringLiteral("role"), roleString()},
         {QStringLiteral("deviceName"), QHostInfo::localHostName()},
         {QStringLiteral("controlDeviceId"), effectiveControlDeviceId()},
+        {QStringLiteral("controlDeviceAuto"), config_.controlDeviceAuto},
         {QStringLiteral("sentAt"), QDateTime::currentMSecsSinceEpoch() / 1000.0}};
     const QString address = localLanAddress();
     if (!address.isEmpty())
@@ -1290,8 +1349,21 @@ void AppController::setControlDevice(const QString &deviceId)
                       << (config_.mode == AppConfig::Mode::Server
                              ? QStringLiteral("(applying as server)")
                              : QStringLiteral("(requesting from server)"));
+    config_.controlDeviceAuto = false;
     config_.controlDeviceId = deviceId;
     config_.save();
+    updateInputCoordinator();
+    sendInputConfig();
+}
+
+void AppController::setAutoControlDevice()
+{
+    // The user selected Auto on this device, so it becomes the initial controller without waiting
+    // for a second physical mouse move after the tray-menu click.
+    config_.controlDeviceAuto = true;
+    config_.controlDeviceId = config_.deviceId;
+    config_.save();
+    qInfo() << "Control device set to Auto; local mouse is the initial controller";
     updateInputCoordinator();
     sendInputConfig();
 }
@@ -1308,13 +1380,22 @@ void AppController::rebuildControlDeviceMenu()
     ids.append(peerIds);
     if (!ids.contains(selectedId))
         ids.append(selectedId);
+    const QString selectedTitle = selectedId == config_.deviceId
+        ? QStringLiteral("%1 (this device)").arg(deviceDisplayName(selectedId))
+        : deviceDisplayName(selectedId);
+    QAction *autoAction = controlDeviceMenu_->addAction(
+        QStringLiteral("Auto (mouse; current: %1)").arg(selectedTitle));
+    autoAction->setCheckable(true);
+    autoAction->setChecked(config_.controlDeviceAuto);
+    connect(autoAction, &QAction::triggered, this, &AppController::setAutoControlDevice);
+    controlDeviceMenu_->addSeparator();
     for (const QString &id : ids) {
         const QString title = id == config_.deviceId
             ? QStringLiteral("%1 (this device)").arg(deviceDisplayName(id))
             : deviceDisplayName(id);
         QAction *action = controlDeviceMenu_->addAction(title);
         action->setCheckable(true);
-        action->setChecked(id == selectedId);
+        action->setChecked(!config_.controlDeviceAuto && id == selectedId);
         connect(action, &QAction::triggered, this, [this, id] { setControlDevice(id); });
     }
 }

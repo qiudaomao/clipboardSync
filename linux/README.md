@@ -18,7 +18,7 @@ selection without extending a timed deadline.
 ## Build
 
 Dependencies: CMake 3.24+, Qt 6.7+ (`Core`, `DBus`, `Gui`, `Widgets`, `Network`,
-and `WebSockets`), OpenSSL 3, X11 client libraries (`libX11`, `libXtst`,
+and `WebSockets`), OpenSSL 3, X11 client libraries (`libX11`, `libXi`, `libXtst`,
 `libXfixes`), and a C++20 compiler.
 
 ```sh
@@ -80,7 +80,10 @@ the optional low-battery sleep-prevention guard also works inside the sandbox.
 ## Input sharing
 
 Input sharing follows the shared protocol: enable it from the tray menu, pick
-the Control Device, and arrange every machine's monitors in `Screen Layout…`.
+the Control Device (or `Auto (mouse; current: …)`), and arrange every machine's monitors in `Screen Layout…`.
+Auto uses XInput2 raw pointer events to elect the device whose physical mouse or touchpad was
+most recently used. Keyboard activity does not switch the controller, so a mouse on one device
+and a keyboard on another can be used together; XTest-injected remote input is ignored.
 When this device is the controller, crossing a screen edge captures the local
 pointer and keyboard (an X11 pointer/keyboard grab; the cursor is hidden via
 XFixes) and relays the events to the adjacent peer. When a peer controls this

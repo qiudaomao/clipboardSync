@@ -22,5 +22,10 @@
 - Port-forward edits are transactional: all row edits, including enable/disable, commit together on Apply or Save. Apply commits the draft and leaves the panel open so rule status can be checked; Save commits and closes. Remote updates must not silently discard a local draft.
 - Screen layout changes save as they are applied. The UI must identify the local device, avoid exposing raw device IDs, and confirm permanent forget actions.
 - Modifier remapping is labeled **Receive Key Mapping** because it is applied by the device receiving remote keyboard input.
+- **Control Device** offers a fixed device or **Auto**. In Auto mode, the server elects the device
+  that most recently produced a genuine local physical mouse or touchpad event; injected/relayed
+  events must never elect a controller. Keyboard activity must not switch control, so a mouse on
+  one device and a keyboard on another remain usable at the same time. The menu shows Auto's
+  current elected device, and the server broadcasts every accepted election.
 - Windows must expose update history directly from the tray menu; users should not have to wait for an available-update dialog to discover previous releases.
 - Preserve platform-native controls and conventions while keeping terminology, information hierarchy, and state semantics consistent across macOS and Windows.

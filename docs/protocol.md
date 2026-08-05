@@ -205,8 +205,12 @@ before being placed on the receiving clipboard as file-drop URLs.
 
 ## Input Message
 
-Input sharing uses the same encrypted envelope. The selected control device is
-identified by device id and synchronized by the server.
+Input sharing uses the same encrypted envelope. The server synchronizes the active
+control device by device id. The user may choose a fixed device or **Auto**: in Auto
+mode, the server elects the device that most recently produced a genuine local physical
+mouse or touchpad event. Keyboard activity never changes the controller, so a mouse on
+one device can intentionally be used with a keyboard on another. Injected/relayed input
+must never count as Auto activity.
 
 ### Hello
 
@@ -225,6 +229,7 @@ identified by device id and synchronized by the server.
   ],
   "enabled": true,
   "controlDeviceId": "controller-device-id",
+  "controlDeviceAuto": false,
   "sentAt": 1782835200.0
 }
 ```
@@ -265,6 +270,7 @@ relative position when it's first placed into the shared layout.
   "deviceName": "Win-C",
   "deviceAddress": "192.168.1.30",
   "controlDeviceId": "controller-device-id",
+  "controlDeviceAuto": false,
   "sentAt": 1782835200.0
 }
 ```
@@ -273,6 +279,29 @@ relative position when it's first placed into the shared layout.
 send it as a change request. The server applies the request and broadcasts the
 accepted server config to all peers. Local input-sharing enablement is not
 synchronized; each device advertises its current receiver state with `hello`.
+
+`controlDeviceAuto: true` enables Auto mode. `controlDeviceId` remains present and
+identifies the current server-authoritative election, so reconnecting peers have a
+deterministic controller before any mouse activity occurs. A missing `controlDeviceAuto`
+is the legacy fixed-device mode (`false`).
+
+### Auto control activity
+
+```json
+{
+  "type": "input",
+  "origin": "device-id",
+  "target": null,
+  "kind": "autoControlActivity",
+  "role": "client",
+  "sentAt": 1782835200.0
+}
+```
+
+Only an enabled child device sends this after a local physical mouse or touchpad event
+while another device is the active Auto controller. The server validates the sender,
+changes `controlDeviceId`, and broadcasts a normal `config` message. It ignores keyboard
+events, synthetic events, disabled peers, and activity while Auto is off.
 
 ### Layout
 
@@ -503,7 +532,7 @@ Encrypted envelope fields:
 - A server applies remote messages locally only when it is configured with the same password.
 - Input sharing is off by default and must be enabled in settings or the tray/menu.
 - Input-sharing enablement is local to each device. It is not synchronized by `kind: "config"`.
-- The configured control device is selected by device id. The server is authoritative for shared input config; clients may request changes with `kind: "config"`, and the server rebroadcasts the accepted config.
+- The configured control device is either a fixed device id or Auto. In Auto mode, only a local physical mouse/touchpad event can request election; keyboard input never switches control. The server is authoritative for shared input config and Auto elections; clients may request fixed/Auto changes with `kind: "config"`, and the server rebroadcasts the accepted config.
 - The Screen Layout window shows every known device's monitors as separate rects (a device with several monitors gets one rect per monitor), all drawn at one consistent scale and true aspect ratio, color-coded per device, and draggable to describe how the machines physically sit relative to each other. A machine's own monitors are fixed relative to each other (that arrangement belongs to the OS, not this tool) and always move together as one rigid group when dragged. Dragging enforces no overlap between different machines and snaps the moved machine to touch (zero gap) another machine's screen. Dragging sends `kind: "layout"`; the server is authoritative and rebroadcasts the accepted table, mirroring how `kind: "config"` is synchronized.
 - Reverse vertical scroll is a local receiver setting. It is not synchronized, flips only injected `deltaY`, and leaves horizontal wheel deltas unchanged.
 - The controller starts remote capture when the local pointer reaches an edge of its own screen and a neighboring screen is adjacent to it in the shared layout, and walks that layout as the pointer keeps moving: exiting a remote screen's edge hands capture to whichever screen is adjacent there (another remote screen, or back to the controller's own screen), and sticks at the edge when no neighbor is registered there.

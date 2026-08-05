@@ -186,6 +186,8 @@ internal sealed class AppConfig
     public bool EncryptTransport { get; set; } = true;
     public bool InputSharingEnabled { get; set; }
     public string? ControlDeviceId { get; set; }
+    /// <summary>When true, the server elects the device with the most recent local physical mouse or touchpad activity.</summary>
+    public bool ControlDeviceAuto { get; set; }
     public bool ReverseMouseVerticalScroll { get; set; }
     public KeyboardModifierMap KeyboardModifierMap { get; set; } = new();
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
@@ -240,6 +242,7 @@ internal sealed class AppConfig
             EncryptTransport = EncryptTransport,
             InputSharingEnabled = InputSharingEnabled,
             ControlDeviceId = ControlDeviceId,
+            ControlDeviceAuto = ControlDeviceAuto,
             ReverseMouseVerticalScroll = ReverseMouseVerticalScroll,
             KeyboardModifierMap = modifierMap.Clone(),
             DeviceId = DeviceId,
@@ -311,6 +314,8 @@ internal sealed class InputMessage
     public List<ScreenMetrics>? Screens { get; set; }
     public bool? Enabled { get; set; }
     public string? ControlDeviceId { get; set; }
+    /// <summary>Null means a legacy peer that supports only manual device selection.</summary>
+    public bool? ControlDeviceAuto { get; set; }
     public List<ScreenLayoutEntry>? Layout { get; set; }
     public InputCapturePayload? Capture { get; set; }
     public InputMousePayload? Mouse { get; set; }
@@ -327,7 +332,8 @@ internal sealed class InputMessage
         string? deviceAddress,
         List<ScreenMetrics> screens,
         bool enabled,
-        string? controlDeviceId)
+        string? controlDeviceId,
+        bool controlDeviceAuto)
     {
         return new InputMessage
         {
@@ -340,6 +346,7 @@ internal sealed class InputMessage
             Screens = screens,
             Enabled = enabled,
             ControlDeviceId = controlDeviceId,
+            ControlDeviceAuto = controlDeviceAuto,
             SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
         };
     }

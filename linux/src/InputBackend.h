@@ -31,6 +31,12 @@ public:
     virtual bool startCapture(const QPointF &anchor) = 0;
     virtual void stopCapture() = 0;
 
+    // Passive, device-originated mouse observation used only by Auto control-device selection
+    // while another peer is controller. Implementations must not report this app's injected
+    // remote input as physical activity. Keyboard activity deliberately never changes control.
+    virtual bool startPhysicalInputMonitor() = 0;
+    virtual void stopPhysicalInputMonitor() = 0;
+
     virtual void injectMove(const QRectF &screenRect, double normalizedX, double normalizedY) = 0;
     virtual void injectButton(const QString &button, bool down) = 0;
     virtual void injectWheel(double deltaX, double deltaY) = 0;
@@ -43,4 +49,6 @@ signals:
     void captureWheel(double deltaX, double deltaY);
     void captureKey(const QString &canonicalKey, bool down);
     void captureFailed(const QString &reason);
+    void physicalInputActivity();
+    void physicalInputMonitorFailed(const QString &reason);
 };

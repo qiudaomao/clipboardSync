@@ -417,6 +417,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             encryptTransport: encryptTransport,
             inputSharingEnabled: inputSharingEnabled,
             controlDeviceId: currentConfig.controlDeviceId,
+            controlDeviceAuto: currentConfig.controlDeviceAuto,
             reverseMouseVerticalScroll: reverseMouseVerticalScroll,
             keyboardModifierMap: keyboardModifierMap,
             sleepPreventionDuration: currentConfig.sleepPreventionDuration,

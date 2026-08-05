@@ -34,7 +34,7 @@ ctest --test-dir linux/build --output-on-failure
 ```
 
 Linux requires Qt 6.7+, OpenSSL 3, CMake 3.24+, Ninja, and the X11 client
-libraries (`libX11`, `libXtst`, `libXfixes`). The supported features are
+libraries (`libX11`, `libXi`, `libXtst`, `libXfixes`). The supported features are
 encrypted text/image sync, legacy and chunked clipboard-file receive/transfer,
 TCP port forwarding, and keyboard/mouse input sharing with the shared screen
 layout on X11 sessions (capability-detected only on Wayland). The Flatpak
@@ -59,6 +59,9 @@ Text and image clipboard changes sync automatically. File clipboard contents are
 The `History` submenu keeps the latest 10 clipboard items and can restore/resend an item.
 Set the same sync password on every device before starting. Clipboard payloads are encrypted with AES-GCM over the existing WebSocket connection; unchecking `Encrypt transport` in Settings keeps HMAC password authentication but skips payload encryption to save CPU on trusted networks.
 Input Sharing is off by default. Enable it from Settings or the menu, choose `Server -> Client` or `Client -> Server`, and arrange each machine's screen in the `Screen Layout...` menu window (drag rects to match how they physically sit relative to each other). macOS needs Accessibility/Input Monitoring permission before keyboard and mouse sharing can run.
+`Control Device` can be fixed or set to `Auto (mouse; current: …)`. Auto switches only after a
+physical mouse or touchpad event; keyboard activity does not change the controller, and relayed
+input is ignored.
 `More Features -> Prevent System Sleep` shows the live state and remaining time in its first row, and can keep the Mac and its display awake from idle forever or for 1, 2, 4, 6, or 8 hours. Its independent low-battery checkbox pauses the IOKit assertion only while the Mac is on battery power below 20%, and resumes on AC power or battery recovery without extending a timed deadline. Timed choices retain their original deadline if the app is relaunched or manually put to sleep; explicit sleep and lid-close behavior remain under macOS control.
 
 The Swift Package in `mac/Package.swift` is kept as a lightweight compiler check, but the Xcode project is the native app bundle build.
@@ -87,6 +90,9 @@ Text and image clipboard changes sync automatically. File clipboard contents are
 The `History` submenu keeps the latest 10 clipboard items and can restore/resend an item.
 Set the same sync password on every device before starting. Clipboard payloads are encrypted with AES-GCM over the existing WebSocket connection; unchecking `Encrypt transport` in Settings keeps HMAC password authentication but skips payload encryption to save CPU on trusted networks.
 Input Sharing is off by default. Enable it from Configure or the tray menu, choose `Server -> Client` or `Client -> Server`, and arrange each machine's screen in the `Screen Layout...` tray menu window (drag rects to match how they physically sit relative to each other).
+`Control Device` can be fixed or set to `Auto (mouse; current: …)`. Auto switches only after a
+physical mouse or touchpad event; keyboard activity does not change the controller, and relayed
+input is ignored.
 `More Features -> Prevent System Sleep` shows the live state and remaining time in its first row, and can keep Windows and its display awake from idle forever or for 1, 2, 4, 6, or 8 hours. Its independent low-battery checkbox pauses the Windows execution-state request only while the PC is on battery power below 20%, and resumes on AC power or battery recovery without extending a timed deadline. Timed choices retain their original deadline if the app is relaunched or manually put to sleep; explicit sleep and lid-close behavior remain under Windows control.
 
 ### Auto-update (NetSparkle)

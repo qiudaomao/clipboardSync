@@ -161,6 +161,7 @@ AppConfig AppConfig::load()
     config.paused = settings.value(QStringLiteral("sync/paused"), false).toBool();
     config.inputSharingEnabled = settings.value(QStringLiteral("input/sharingEnabled"), false).toBool();
     config.controlDeviceId = settings.value(QStringLiteral("input/controlDeviceId")).toString().trimmed();
+    config.controlDeviceAuto = settings.value(QStringLiteral("input/controlDeviceAuto"), false).toBool();
     config.reverseMouseVerticalScroll = settings.value(QStringLiteral("input/reverseMouseVerticalScroll"), false).toBool();
     config.sleepPreventionDuration = sleepPreventionDurationFromStorageValue(
         settings.value(QStringLiteral("power/sleepPreventionDuration"), QStringLiteral("disabled")).toString());
@@ -217,6 +218,7 @@ void AppConfig::save() const
     settings.setValue(QStringLiteral("sync/paused"), paused);
     settings.setValue(QStringLiteral("input/sharingEnabled"), inputSharingEnabled);
     settings.setValue(QStringLiteral("input/controlDeviceId"), controlDeviceId);
+    settings.setValue(QStringLiteral("input/controlDeviceAuto"), controlDeviceAuto);
     settings.setValue(QStringLiteral("input/reverseMouseVerticalScroll"), reverseMouseVerticalScroll);
     settings.setValue(QStringLiteral("input/mapShift"), keyboardModifierMap.shift);
     settings.setValue(QStringLiteral("input/mapControl"), keyboardModifierMap.control);

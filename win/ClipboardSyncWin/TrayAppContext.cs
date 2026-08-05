@@ -162,6 +162,7 @@ internal sealed class TrayAppContext : ApplicationContext
         // thread would queue realtime mouse moves behind clipboard polls and menu rebuilds.
         inputCoordinator.MessageReady += message => PublishInput(message);
         inputCoordinator.StatusChanged += text => OnUi(() => inputStatusItem.Text = text);
+        inputCoordinator.LocalPhysicalInput += () => OnUi(HandleLocalPhysicalMouseActivity);
         // Like input, tunnel traffic is sent straight from the coordinator's worker threads;
         // encrypt+send is thread-safe and must not queue behind UI-thread work.
         portForwardCoordinator.MessageReady += message => PublishTunnel(message);
@@ -763,13 +764,24 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         var selectedTitle = devices.FirstOrDefault(item => item.Id == selectedId)?.Title ?? AppText.Text("device.unknown");
-        controlDeviceItem.Text = AppText.Format("menu.controlDeviceWithTitle", selectedTitle);
+        var autoTitle = AppText.Format("menu.controlDeviceAuto", selectedTitle);
+        controlDeviceItem.Text = AppText.Format(
+            "menu.controlDeviceWithTitle",
+            config.ControlDeviceAuto ? autoTitle : selectedTitle);
+
+        var autoItem = new ToolStripMenuItem(autoTitle)
+        {
+            Checked = config.ControlDeviceAuto
+        };
+        autoItem.Click += (_, _) => SetAutoControlDevice();
+        controlDeviceItem.DropDownItems.Add(autoItem);
+        controlDeviceItem.DropDownItems.Add(new ToolStripSeparator());
 
         foreach (var device in devices)
         {
             var item = new ToolStripMenuItem(device.Title)
             {
-                Checked = device.Id == selectedId,
+                Checked = !config.ControlDeviceAuto && device.Id == selectedId,
                 Tag = device.Id
             };
             item.Click += (_, _) => SetControlDevice(device.Id);
@@ -1594,8 +1606,22 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private void SetControlDevice(string controlDeviceId)
     {
+        config.ControlDeviceAuto = false;
         config.ControlDeviceId = controlDeviceId;
         ConfigStore.Save(config);
+        System.Diagnostics.Trace.WriteLine($"Control device set manually: {controlDeviceId[..Math.Min(8, controlDeviceId.Length)]}");
+        UpdateInputCoordinator();
+        SyncInputConfig();
+    }
+
+    private void SetAutoControlDevice()
+    {
+        // Selecting Auto from this device is an explicit local interaction. Make it the first
+        // election rather than requiring another physical mouse event after the tray click.
+        config.ControlDeviceAuto = true;
+        config.ControlDeviceId = config.DeviceId;
+        ConfigStore.Save(config);
+        System.Diagnostics.Trace.WriteLine("Control device set to Auto; local mouse is the initial controller.");
         UpdateInputCoordinator();
         SyncInputConfig();
     }
@@ -1615,7 +1641,8 @@ internal sealed class TrayAppContext : ApplicationContext
 
         var shouldRestartTransport = RequiresTransportRestart(previousConfig, nextConfig);
         var shouldSendHello = previousConfig.InputSharingEnabled != nextConfig.InputSharingEnabled;
-        var shouldSyncInputConfig = previousConfig.ControlDeviceId != nextConfig.ControlDeviceId;
+        var shouldSyncInputConfig = previousConfig.ControlDeviceId != nextConfig.ControlDeviceId ||
+            previousConfig.ControlDeviceAuto != nextConfig.ControlDeviceAuto;
 
         config = nextConfig;
         ConfigStore.Save(config);
@@ -2154,6 +2181,12 @@ internal sealed class TrayAppContext : ApplicationContext
 
         RememberInputDevice(message);
 
+        if (message.Kind == "autoControlActivity")
+        {
+            HandleAutoControlActivity(message);
+            return;
+        }
+
         if (message.Kind == "config")
         {
             HandleInputConfig(message);
@@ -2192,9 +2225,12 @@ internal sealed class TrayAppContext : ApplicationContext
 
         if (message.Kind == "hello" && config.Mode == SyncMode.Client && message.Role == "server")
         {
-            if (message.ControlDeviceId is not null && config.ControlDeviceId != message.ControlDeviceId)
+            if (message.ControlDeviceId is not null &&
+                (config.ControlDeviceId != message.ControlDeviceId ||
+                 config.ControlDeviceAuto != (message.ControlDeviceAuto ?? false)))
             {
                 config.ControlDeviceId = message.ControlDeviceId;
+                config.ControlDeviceAuto = message.ControlDeviceAuto ?? false;
                 ConfigStore.Save(config);
                 UpdateInputCoordinator();
             }
@@ -2249,14 +2285,79 @@ internal sealed class TrayAppContext : ApplicationContext
 
     private bool ApplyInputConfig(InputMessage message)
     {
-        if (message.ControlDeviceId is null || config.ControlDeviceId == message.ControlDeviceId)
+        if (message.ControlDeviceId is null)
+        {
+            return false;
+        }
+        var controlDeviceAuto = message.ControlDeviceAuto ?? false;
+        if (config.ControlDeviceId == message.ControlDeviceId && config.ControlDeviceAuto == controlDeviceAuto)
         {
             return false;
         }
         config.ControlDeviceId = message.ControlDeviceId;
+        config.ControlDeviceAuto = controlDeviceAuto;
         ConfigStore.Save(config);
         UpdateInputCoordinator();
         return true;
+    }
+
+    /// Auto election stays server-authoritative. A child can report only local physical mouse
+    /// activity; the server verifies that the reporting peer has input sharing enabled before
+    /// committing and broadcasting the new active controller.
+    private void HandleAutoControlActivity(InputMessage message)
+    {
+        if (config.Mode != SyncMode.Server)
+        {
+            return;
+        }
+        if (message.Role != "client" || !config.InputSharingEnabled ||
+            !config.ControlDeviceAuto || !inputDevices.TryGetValue(message.Origin, out var device) ||
+            device.InputEnabled != true)
+        {
+            System.Diagnostics.Trace.WriteLine($"Ignoring Auto-control mouse activity from {message.Origin}.");
+            return;
+        }
+        ElectAutoControlDevice(message.Origin);
+    }
+
+    private void HandleLocalPhysicalMouseActivity()
+    {
+        if (!config.ControlDeviceAuto || !config.InputSharingEnabled || peerCount == 0)
+        {
+            return;
+        }
+        if (config.Mode == SyncMode.Server)
+        {
+            ElectAutoControlDevice(config.DeviceId);
+            return;
+        }
+        if (transport is null)
+        {
+            return;
+        }
+        System.Diagnostics.Trace.WriteLine("Requesting Auto control election from local physical mouse input.");
+        PublishInput(new InputMessage
+        {
+            Type = "input",
+            Origin = config.DeviceId,
+            Kind = "autoControlActivity",
+            Role = "client",
+            SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        });
+    }
+
+    private void ElectAutoControlDevice(string controlDeviceId)
+    {
+        if (!config.ControlDeviceAuto || config.ControlDeviceId == controlDeviceId)
+        {
+            return;
+        }
+        config.ControlDeviceId = controlDeviceId;
+        ConfigStore.Save(config);
+        System.Diagnostics.Trace.WriteLine(
+            $"Auto control elected {controlDeviceId[..Math.Min(8, controlDeviceId.Length)]} after physical mouse input.");
+        UpdateInputCoordinator();
+        SendInputConfig();
     }
 
     private void UpdateInputCoordinator(bool sendHello = false)
@@ -2310,6 +2411,7 @@ internal sealed class TrayAppContext : ApplicationContext
             DeviceName = Environment.MachineName,
             DeviceAddress = NetworkAddress.LocalLanIPv4Address(),
             ControlDeviceId = EffectiveControlDeviceId,
+            ControlDeviceAuto = config.ControlDeviceAuto,
             SentAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0
         });
     }

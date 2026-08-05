@@ -7,6 +7,7 @@
 
 #include <X11/XKBlib.h>
 #include <X11/Xlib.h>
+#include <X11/extensions/XInput2.h>
 #include <X11/extensions/XTest.h>
 #include <X11/extensions/Xfixes.h>
 #include <X11/keysym.h>
@@ -15,6 +16,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 
 namespace {
@@ -101,6 +103,7 @@ X11InputBackend::X11InputBackend(QObject *parent) : InputBackend(parent) {}
 X11InputBackend::~X11InputBackend()
 {
     stopCapture();
+    stopPhysicalInputMonitor();
     if (injectDisplay_)
         XCloseDisplay(injectDisplay_);
 }
@@ -184,6 +187,155 @@ void X11InputBackend::stopCapture()
         qWarning() << "Failed to signal the input-capture thread; joining anyway";
     if (captureThread_.joinable())
         captureThread_.join();
+}
+
+bool X11InputBackend::startPhysicalInputMonitor()
+{
+    if (physicalInputMonitoring_.load())
+        return true;
+    if (physicalInputThread_.joinable()) {
+        physicalInputThread_.join();
+        closePhysicalInputStopPipe();
+    }
+    if (pipe(physicalInputStopPipe_) != 0) {
+        const QString reason = QStringLiteral("Could not create Auto-control monitor pipe");
+        emit physicalInputMonitorFailed(reason);
+        return false;
+    }
+    Display *display = XOpenDisplay(nullptr);
+    if (!display) {
+        closePhysicalInputStopPipe();
+        const QString reason = QStringLiteral("Could not open an X11 display for Auto control monitoring");
+        emit physicalInputMonitorFailed(reason);
+        return false;
+    }
+    int xiOpcode = 0;
+    int eventBase = 0;
+    int errorBase = 0;
+    if (!XQueryExtension(display, "XInputExtension", &xiOpcode, &eventBase, &errorBase)) {
+        XCloseDisplay(display);
+        closePhysicalInputStopPipe();
+        const QString reason = QStringLiteral("XInput2 is unavailable; Auto control needs local hardware input monitoring");
+        emit physicalInputMonitorFailed(reason);
+        return false;
+    }
+    int major = 2;
+    int minor = 0;
+    if (XIQueryVersion(display, &major, &minor) != Success) {
+        XCloseDisplay(display);
+        closePhysicalInputStopPipe();
+        const QString reason = QStringLiteral("XInput2 version negotiation failed for Auto control monitoring");
+        emit physicalInputMonitorFailed(reason);
+        return false;
+    }
+
+    unsigned char bits[XIMaskLen(XI_LASTEVENT)]{};
+    XISetMask(bits, XI_RawMotion);
+    XISetMask(bits, XI_RawButtonPress);
+    XIEventMask mask{XIAllDevices, static_cast<int>(sizeof(bits)), bits};
+    if (XISelectEvents(display, DefaultRootWindow(display), &mask, 1) != Success) {
+        XCloseDisplay(display);
+        closePhysicalInputStopPipe();
+        const QString reason = QStringLiteral("Could not subscribe to XInput2 raw hardware events for Auto control");
+        emit physicalInputMonitorFailed(reason);
+        return false;
+    }
+    XFlush(display);
+    physicalInputMonitoring_.store(true);
+    physicalInputThread_ = std::thread(&X11InputBackend::physicalInputLoop, this, display, xiOpcode);
+    qInfo() << "Auto control XInput2 hardware-input monitor started";
+    return true;
+}
+
+void X11InputBackend::stopPhysicalInputMonitor()
+{
+    const bool wasMonitoring = physicalInputMonitoring_.exchange(false);
+    if (wasMonitoring) {
+        const char wake = 'q';
+        if (physicalInputStopPipe_[1] < 0 || write(physicalInputStopPipe_[1], &wake, 1) != 1)
+            qWarning() << "Failed to signal the Auto-control input monitor; joining anyway";
+    }
+    if (physicalInputThread_.joinable())
+        physicalInputThread_.join();
+    closePhysicalInputStopPipe();
+    if (wasMonitoring)
+        qInfo() << "Auto control XInput2 hardware-input monitor stopped";
+}
+
+void X11InputBackend::physicalInputLoop(X11Display *opaqueDisplay, int xiOpcode)
+{
+    Display *display = reinterpret_cast<Display *>(opaqueDisplay);
+    const auto finish = [this, display] {
+        XCloseDisplay(display);
+        physicalInputMonitoring_.store(false);
+    };
+    const int xFd = ConnectionNumber(display);
+    const int stopFd = physicalInputStopPipe_[0];
+    while (physicalInputMonitoring_.load()) {
+        while (physicalInputMonitoring_.load() && XPending(display) > 0) {
+            XEvent event;
+            XNextEvent(display, &event);
+            if (event.type != GenericEvent || event.xcookie.extension != xiOpcode
+                || !XGetEventData(display, &event.xcookie)) {
+                continue;
+            }
+            const int eventType = event.xcookie.evtype;
+            if (eventType == XI_RawMotion || eventType == XI_RawButtonPress) {
+                const auto *raw = static_cast<XIRawEvent *>(event.xcookie.data);
+                // XTEST injection synthesizes events through the virtual core devices. Only
+                // slave/floating physical pointer devices may elect this machine, so relayed
+                // input cannot bounce Auto control back to the receiver. Keyboard events are
+                // not selected: a mouse on A and keyboard on B are intentionally independent.
+                if (raw && isPhysicalMouseDevice(opaqueDisplay, raw->sourceid))
+                    emit physicalInputActivity();
+            }
+            XFreeEventData(display, &event.xcookie);
+        }
+
+        fd_set readable;
+        FD_ZERO(&readable);
+        FD_SET(xFd, &readable);
+        FD_SET(stopFd, &readable);
+        if (select(std::max(xFd, stopFd) + 1, &readable, nullptr, nullptr, nullptr) < 0) {
+            if (errno == EINTR)
+                continue;
+            emit physicalInputMonitorFailed(QStringLiteral("XInput2 event monitor select() failed"));
+            break;
+        }
+        if (FD_ISSET(stopFd, &readable))
+            break;
+    }
+    finish();
+}
+
+void X11InputBackend::closePhysicalInputStopPipe()
+{
+    if (physicalInputStopPipe_[0] >= 0) {
+        close(physicalInputStopPipe_[0]);
+        physicalInputStopPipe_[0] = -1;
+    }
+    if (physicalInputStopPipe_[1] >= 0) {
+        close(physicalInputStopPipe_[1]);
+        physicalInputStopPipe_[1] = -1;
+    }
+}
+
+bool X11InputBackend::isPhysicalMouseDevice(X11Display *opaqueDisplay, int sourceId) const
+{
+    Display *display = reinterpret_cast<Display *>(opaqueDisplay);
+    int count = 0;
+    XIDeviceInfo *devices = XIQueryDevice(display, sourceId, &count);
+    if (!devices || count != 1) {
+        if (devices)
+            XIFreeDeviceInfo(devices);
+        return false;
+    }
+    const XIDeviceInfo &device = devices[0];
+    const bool isHardwareClass = device.use == XISlavePointer || device.use == XIFloatingSlave;
+    const QString name = QString::fromUtf8(device.name ? device.name : "");
+    const bool isXTest = name.contains(QStringLiteral("XTEST"), Qt::CaseInsensitive);
+    XIFreeDeviceInfo(devices);
+    return isHardwareClass && !isXTest;
 }
 
 void X11InputBackend::captureLoop(double anchorX, double anchorY)

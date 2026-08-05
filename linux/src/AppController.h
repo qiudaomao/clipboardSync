@@ -91,6 +91,9 @@ private:
     void handleInputMessage(const QJsonObject &message);
     void rememberInputDevice(const QJsonObject &message);
     void handleInputConfig(const QJsonObject &message);
+    void handleAutoControlActivity(const QJsonObject &message);
+    void handleLocalPhysicalMouseActivity();
+    void electAutoControlDevice(const QString &deviceId);
     void handleLayoutMessage(const QJsonObject &message);
     void handleLayoutForget(const QJsonObject &message);
     void handleLayoutWatch(const QJsonObject &message);
@@ -110,6 +113,7 @@ private:
     void reportLocalCursor();
     void toggleInputSharing();
     void setControlDevice(const QString &deviceId);
+    void setAutoControlDevice();
     void rebuildControlDeviceMenu();
     QString effectiveControlDeviceId() const;
     QString roleString() const;

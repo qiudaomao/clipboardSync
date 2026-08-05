@@ -12,6 +12,7 @@ namespace {
 constexpr int PollIntervalMs = 16;
 constexpr int MouseMoveSendIntervalMs = 16;   // ~60 Hz controller-side coalescing
 constexpr int RemoteMouseMoveIntervalMs = 8;  // receiver-side injection coalescing
+constexpr int AutoControlActivityMinimumIntervalMs = 250;
 constexpr double EdgeThreshold = 2.0;
 const QStringList ModifierKeyOrder{QStringLiteral("Shift"), QStringLiteral("Control"),
     QStringLiteral("Alt"), QStringLiteral("Meta")};
@@ -64,6 +65,13 @@ InputSharingCoordinator::InputSharingCoordinator(InputBackend *backend, ScreenLa
         if (activeScreenId_)
             endRemoteCapture(std::nullopt);
     });
+    connect(backend_, &InputBackend::physicalInputActivity,
+        this, &InputSharingCoordinator::reportLocalPhysicalInput);
+    connect(backend_, &InputBackend::physicalInputMonitorFailed, this, [this](const QString &reason) {
+        autoInputMonitorFailure_ = reason;
+        qWarning().noquote() << "Auto control hardware-input monitor failed:" << reason;
+        updateStatus();
+    });
 }
 
 void InputSharingCoordinator::configure(const QString &deviceId)
@@ -97,6 +105,7 @@ QJsonObject InputSharingCoordinator::makeHello(const QString &deviceName, const 
         {QStringLiteral("screens"), screens},
         {QStringLiteral("enabled"), settings_.enabled && peerCount_ > 0},
         {QStringLiteral("controlDeviceId"), effectiveControlDeviceId()},
+        {QStringLiteral("controlDeviceAuto"), settings_.controlDeviceAuto},
         {QStringLiteral("sentAt"), now()}};
     if (!deviceAddress.isEmpty())
         hello.insert(QStringLiteral("deviceAddress"), deviceAddress);
@@ -145,6 +154,7 @@ void InputSharingCoordinator::deactivate()
     remoteMouseMoveTimer_.stop();
     mouseMoveSendTimer_.stop();
     pollTimer_.stop();
+    backend_->stopPhysicalInputMonitor();
 }
 
 QString InputSharingCoordinator::effectiveControlDeviceId() const
@@ -162,6 +172,26 @@ bool InputSharingCoordinator::canReceiveRemoteInput() const
     return settings_.enabled && peerCount_ > 0 && effectiveControlDeviceId() != deviceId_;
 }
 
+bool InputSharingCoordinator::shouldMonitorLocalPhysicalInput() const
+{
+    return settings_.enabled && peerCount_ > 0 && settings_.controlDeviceAuto && !isController();
+}
+
+void InputSharingCoordinator::reportLocalPhysicalInput()
+{
+    if (!shouldMonitorLocalPhysicalInput())
+        return;
+    if (lastAutoControlActivityAt_.isValid()) {
+        if (lastAutoControlActivityAt_.elapsed() < AutoControlActivityMinimumIntervalMs)
+            return;
+        lastAutoControlActivityAt_.restart();
+    } else {
+        lastAutoControlActivityAt_.start();
+    }
+    qInfo().noquote() << "Auto control detected local physical mouse input";
+    emit localPhysicalInput();
+}
+
 bool InputSharingCoordinator::hasKnownRemotePeer() const
 {
     const auto &entries = layout_->entries();
@@ -172,6 +202,19 @@ bool InputSharingCoordinator::hasKnownRemotePeer() const
 
 void InputSharingCoordinator::updateInputState()
 {
+    if (shouldMonitorLocalPhysicalInput()) {
+        if (!backend_->startPhysicalInputMonitor()) {
+            if (autoInputMonitorFailure_.isEmpty())
+                autoInputMonitorFailure_ = QStringLiteral("Could not start local input monitoring");
+        } else {
+            autoInputMonitorFailure_.clear();
+        }
+    } else {
+        backend_->stopPhysicalInputMonitor();
+        autoInputMonitorFailure_.clear();
+        lastAutoControlActivityAt_.invalidate();
+    }
+
     if (isController()) {
         if (!pollTimer_.isActive())
             pollTimer_.start();
@@ -193,7 +236,9 @@ void InputSharingCoordinator::updateInputState()
 void InputSharingCoordinator::updateStatus()
 {
     QString status;
-    if (!settings_.enabled)
+    if (!autoInputMonitorFailure_.isEmpty())
+        status = QStringLiteral("Input sharing: Auto control unavailable (%1)").arg(autoInputMonitorFailure_);
+    else if (!settings_.enabled)
         status = QStringLiteral("Input sharing is off");
     else if (peerCount_ == 0)
         status = QStringLiteral("Input sharing: waiting for a peer");

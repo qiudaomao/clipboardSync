@@ -3,6 +3,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import IOKit
+import IOKit.hid
 
 /// Private CoreGraphics SPI. `CGDisplayHideCursor` is a no-op for a background
 /// (`.accessory`) app that never owns the foreground — which is exactly our case while
@@ -17,6 +18,9 @@ private func CGSDefaultConnection() -> Int32
 final class InputSharingCoordinator {
     var onMessage: ((InputMessage) -> Void)?
     var onStatus: ((String) -> Void)?
+    /// Fired only for a hardware mouse or touchpad report while this device waits in Auto mode.
+    /// It deliberately bypasses Quartz event injection, so relayed input cannot elect itself.
+    var onLocalPhysicalInput: (() -> Void)?
 
     private let deviceId: String
     private let layoutStore: ScreenLayoutStore
@@ -43,6 +47,7 @@ final class InputSharingCoordinator {
     private var remotePressedModifierKeys: Set<String> = []
     private var eventTap: CFMachPort?
     private var eventSource: CFRunLoopSource?
+    private var hardwareInputManager: IOHIDManager?
     private var lastModifierKeys: Set<String> = []
     private var lastCapsLockOn = false
     private let mouseMoveSendInterval: TimeInterval = 1.0 / 60.0
@@ -54,6 +59,9 @@ final class InputSharingCoordinator {
     private var localCursorHidden = false
     private var didAllowBackgroundCursorHide = false
     private var localCursorDetached = false
+    private var lastAutoActivityAt = Date.distantPast
+    private let autoActivityMinimumInterval: TimeInterval = 0.25
+    private var hardwareInputMonitorUnavailable = false
 
     /// Source for repositioning our own cursor at hand-back. `CGWarpMouseCursorPosition` makes
     /// the window server suppress hardware mouse events for ~0.25s afterwards (and
@@ -79,6 +87,8 @@ final class InputSharingCoordinator {
     func stop() {
         sendPressedModifierKeyUps()
         removeEventTap()
+        removeHardwareInputMonitor()
+        hardwareInputMonitorUnavailable = false
         showLocalCursor()
         reattachLocalMouseToCursor()
         activeScreenId = nil
@@ -111,7 +121,8 @@ final class InputSharingCoordinator {
             deviceAddress: deviceAddress,
             screens: Self.currentScreens(),
             enabled: config.inputSharingEnabled && peerCount > 0,
-            controlDeviceId: effectiveControlDeviceId
+            controlDeviceId: effectiveControlDeviceId,
+            controlDeviceAuto: config.controlDeviceAuto
         )
     }
 
@@ -156,6 +167,12 @@ final class InputSharingCoordinator {
         config.inputSharingEnabled && peerCount > 0 && effectiveControlDeviceId == deviceId
     }
 
+    /// The HID monitor is active only while another device is the current controller. Once this
+    /// device is elected, the regular event tap owns controller-side capture instead.
+    private var shouldMonitorLocalPhysicalInput: Bool {
+        config.inputSharingEnabled && peerCount > 0 && config.controlDeviceAuto && !isController
+    }
+
     private var canReceiveRemoteInput: Bool {
         guard config.inputSharingEnabled, peerCount > 0, hasAccessibilityPermission else {
             return false
@@ -170,6 +187,13 @@ final class InputSharingCoordinator {
     private func updateInputState() {
         if config.inputSharingEnabled {
             requestMissingPermissionsIfNeeded()
+        }
+
+        if shouldMonitorLocalPhysicalInput {
+            ensureHardwareInputMonitor()
+        } else {
+            removeHardwareInputMonitor()
+            hardwareInputMonitorUnavailable = false
         }
 
         if isController, hasAccessibilityPermission, hasInputMonitoringPermission {
@@ -201,8 +225,10 @@ final class InputSharingCoordinator {
             status = AppText.text("input.waitingPeer")
         } else if !hasAccessibilityPermission {
             status = AppText.text("input.grantAccessibility")
-        } else if isController && !hasInputMonitoringPermission {
+        } else if (isController || shouldMonitorLocalPhysicalInput) && !hasInputMonitoringPermission {
             status = AppText.text("input.grantInputMonitoring")
+        } else if shouldMonitorLocalPhysicalInput && hardwareInputMonitorUnavailable {
+            status = AppText.text("input.autoMonitorUnavailable")
         } else if isController && !hasKnownRemotePeer {
             status = AppText.text("input.waitingPeerScreen")
         } else if isController, let activeTargetDeviceId {
@@ -273,6 +299,86 @@ final class InputSharingCoordinator {
         }
         eventTap = nil
         eventSource = nil
+    }
+
+    /// Quartz can carry events injected by this app or another process. Auto election must use a
+    /// lower-level source instead: IOHIDManager reports only incoming HID values from the local
+    /// mouse or touchpad, before CGEvent posting/injection is involved. Keyboard activity never
+    /// elects a controller: a user may deliberately use a mouse on one device and a keyboard on
+    /// another at the same time.
+    private func ensureHardwareInputMonitor() {
+        guard hardwareInputManager == nil else {
+            hardwareInputMonitorUnavailable = false
+            return
+        }
+        guard hasInputMonitoringPermission else {
+            onStatus?(AppText.text("input.grantInputMonitoring"))
+            requestInputMonitoringPermission()
+            return
+        }
+
+        let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
+        let matches: [[String: Any]] = [
+            [kIOHIDDeviceUsagePageKey as String: kHIDPage_GenericDesktop,
+             kIOHIDDeviceUsageKey as String: kHIDUsage_GD_Mouse],
+            [kIOHIDDeviceUsagePageKey as String: kHIDPage_Digitizer,
+             kIOHIDDeviceUsageKey as String: kHIDUsage_Dig_TouchPad]
+        ]
+        IOHIDManagerSetDeviceMatchingMultiple(manager, matches as CFArray)
+        let userInfo = Unmanaged.passUnretained(self).toOpaque()
+        IOHIDManagerRegisterInputValueCallback(manager, Self.hardwareInputCallback, userInfo)
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        guard result == kIOReturnSuccess else {
+            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+            hardwareInputMonitorUnavailable = true
+            NSLog("Failed to start Auto control hardware-input monitor: IOReturn \(result)")
+            return
+        }
+        hardwareInputManager = manager
+        hardwareInputMonitorUnavailable = false
+        NSLog("Auto control hardware-input monitor started")
+    }
+
+    private func removeHardwareInputMonitor() {
+        guard let manager = hardwareInputManager else {
+            return
+        }
+        IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+        IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+        hardwareInputManager = nil
+        NSLog("Auto control hardware-input monitor stopped")
+    }
+
+    private static let hardwareInputCallback: IOHIDValueCallback = { context, result, _, value in
+        guard result == kIOReturnSuccess, let context else {
+            return
+        }
+        let coordinator = Unmanaged<InputSharingCoordinator>.fromOpaque(context).takeUnretainedValue()
+        coordinator.handleHardwareInput(value)
+    }
+
+    private func handleHardwareInput(_ value: IOHIDValue) {
+        let element = IOHIDValueGetElement(value)
+        switch IOHIDElementGetType(element) {
+        case kIOHIDElementTypeInput_Misc,
+             kIOHIDElementTypeInput_Button,
+             kIOHIDElementTypeInput_Axis,
+             kIOHIDElementTypeInput_ScanCodes:
+            break
+        default:
+            return
+        }
+        guard shouldMonitorLocalPhysicalInput else {
+            return
+        }
+        let now = Date()
+        guard now.timeIntervalSince(lastAutoActivityAt) >= autoActivityMinimumInterval else {
+            return
+        }
+        lastAutoActivityAt = now
+        NSLog("Auto control detected local physical mouse input")
+        onLocalPhysicalInput?()
     }
 
     private static let eventCallback: CGEventTapCallBack = { _, type, event, userInfo in
@@ -1413,7 +1519,7 @@ final class InputSharingCoordinator {
         if !hasAccessibilityPermission {
             requestAccessibilityPermission()
         }
-        if isController, !hasInputMonitoringPermission {
+        if (isController || shouldMonitorLocalPhysicalInput), !hasInputMonitoringPermission {
             requestInputMonitoringPermission()
         }
     }

@@ -10,7 +10,7 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.7 REQUIRED COMPONENTS Core DBus Gui Widgets Network WebSockets)
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
-find_package(X11 REQUIRED COMPONENTS Xtst Xfixes)
+find_package(X11 REQUIRED COMPONENTS Xi Xtst Xfixes)
 
 add_executable(clipboard-sync
     src/main.cpp
@@ -64,7 +64,7 @@ target_compile_definitions(clipboard-sync PRIVATE
 target_link_libraries(clipboard-sync PRIVATE
     Qt6::Core Qt6::DBus Qt6::Gui Qt6::Widgets Qt6::Network Qt6::WebSockets
     OpenSSL::Crypto
-    X11::X11 X11::Xtst X11::Xfixes
+    X11::X11 X11::Xi X11::Xtst X11::Xfixes
 )
 
 include(GNUInstallDirs)

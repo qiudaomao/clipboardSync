@@ -24,6 +24,7 @@ public:
     struct Settings {
         bool enabled = false;
         QString controlDeviceId; // empty selects this device
+        bool controlDeviceAuto = false;
         bool reverseMouseVerticalScroll = false;
         KeyboardModifierMap modifierMap;
     };
@@ -52,10 +53,14 @@ public:
 signals:
     void messageReady(const QJsonObject &message, const QString &target);
     void statusChanged(const QString &status);
+    /// Emitted for a genuine local mouse/touchpad event while Auto waits for this device to win.
+    void localPhysicalInput();
 
 private:
     bool isController() const;
     bool canReceiveRemoteInput() const;
+    bool shouldMonitorLocalPhysicalInput() const;
+    void reportLocalPhysicalInput();
     bool hasKnownRemotePeer() const;
     QString effectiveControlDeviceId() const;
     void updateInputState();
@@ -113,6 +118,8 @@ private:
     QHash<QString, bool> deviceEnabled_;
     QHash<QString, QString> deviceNames_;
     QString status_;
+    QString autoInputMonitorFailure_;
+    QElapsedTimer lastAutoControlActivityAt_;
 
     QTimer pollTimer_;
     std::optional<QString> activeScreenId_;
