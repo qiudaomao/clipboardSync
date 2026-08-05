@@ -30,6 +30,7 @@
 		D00000000000000000000004 /* TimePlanWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D00000000000000000000003 /* TimePlanWindowController.swift */; };
 		E00000000000000000000002 /* TunnelFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000001 /* TunnelFrame.swift */; };
 		E00000000000000000000004 /* BulkFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000003 /* BulkFrame.swift */; };
+		F00000000000000000000002 /* ClipboardImageIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000001 /* ClipboardImageIdentity.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +58,7 @@
 		D00000000000000000000003 /* TimePlanWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimePlanWindowController.swift; sourceTree = "<group>"; };
 		E00000000000000000000001 /* TunnelFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelFrame.swift; sourceTree = "<group>"; };
 		E00000000000000000000003 /* BulkFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BulkFrame.swift; sourceTree = "<group>"; };
+		F00000000000000000000001 /* ClipboardImageIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardImageIdentity.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,6 +78,7 @@
 			children = (
 				A00000000000000000000005 /* App */,
 				A00000000000000000000004 /* Sources/ClipboardSyncMac */,
+				F00000000000000000000003 /* Sources/ClipboardSyncCore */,
 				A00000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -114,6 +117,14 @@
 				C00000000000000000000001 /* BetaLicense.swift */,
 			);
 			path = Sources/ClipboardSyncMac;
+			sourceTree = "<group>";
+		};
+		F00000000000000000000003 /* Sources/ClipboardSyncCore */ = {
+			isa = PBXGroup;
+			children = (
+				F00000000000000000000001 /* ClipboardImageIdentity.swift */,
+			);
+			path = Sources/ClipboardSyncCore;
 			sourceTree = "<group>";
 		};
 		A00000000000000000000005 /* App */ = {
@@ -205,6 +216,7 @@
 				D00000000000000000000002 /* SleepPreventionController.swift in Sources */,
 				D00000000000000000000004 /* TimePlanWindowController.swift in Sources */,
 				A00000000000000000000011 /* ClipboardCoordinator.swift in Sources */,
+				F00000000000000000000002 /* ClipboardImageIdentity.swift in Sources */,
 				C00000000000000000000031 /* FileTransferCoordinator.swift in Sources */,
 				A00000000000000000000012 /* Models.swift in Sources */,
 				A00000000000000000000013 /* Transport.swift in Sources */,

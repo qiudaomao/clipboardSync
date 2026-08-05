@@ -13,6 +13,11 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
     ],
     targets: [
-        .executableTarget(name: "ClipboardSyncMac", dependencies: ["Sparkle"])
+        .target(name: "ClipboardSyncCore"),
+        .executableTarget(
+            name: "ClipboardSyncMac",
+            dependencies: ["Sparkle", "ClipboardSyncCore"]
+        ),
+        .testTarget(name: "ClipboardSyncCoreTests", dependencies: ["ClipboardSyncCore"])
     ]
 )

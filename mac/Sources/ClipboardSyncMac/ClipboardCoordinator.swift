@@ -1,16 +1,31 @@
 import AppKit
+#if SWIFT_PACKAGE
+import ClipboardSyncCore
+#endif
 
 final class ClipboardCoordinator {
-    var onLocalContent: ((ClipboardContent) -> Void)?
+    var onLocalContent: ((ClipboardContent, String) -> Void)?
     var onLocalSkipped: ((String) -> Void)?
 
     private var timer: Timer?
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var lastSignature: String?
+    private var imageChangeTraceTimer: Timer?
+    private var tracedChangeCount = NSPasteboard.general.changeCount
+    private var lastTracedChangeUptime: TimeInterval?
+    private var imageChangeTraceDeadlineUptime: TimeInterval = 0
+
+    private static let imageChangeTraceInterval: TimeInterval = 0.01
+    private static let imageChangeTraceDuration: TimeInterval = 3
+
+    private struct Observation {
+        let content: ClipboardContent
+        let signature: String
+    }
 
     func start() {
         lastChangeCount = NSPasteboard.general.changeCount
-        lastSignature = readContent(from: NSPasteboard.general)?.signature
+        lastSignature = readObservation(from: NSPasteboard.general)?.signature
         timer = Timer.scheduledTimer(withTimeInterval: 0.45, repeats: true) { [weak self] _ in
             self?.poll()
         }
@@ -19,6 +34,7 @@ final class ClipboardCoordinator {
     func stop() {
         timer?.invalidate()
         timer = nil
+        stopImageChangeTrace()
     }
 
     /// The file URLs currently on the clipboard, for a chunked transfer. Only regular files are
@@ -91,8 +107,9 @@ final class ClipboardCoordinator {
     }
 
     @discardableResult
-    func applyContent(_ content: ClipboardContent) -> Bool {
-        guard content.signature != lastSignature else {
+    func applyContent(_ content: ClipboardContent, signature providedSignature: String? = nil) -> Bool {
+        let signature = providedSignature ?? content.signature
+        guard signature != lastSignature else {
             return true
         }
 
@@ -100,7 +117,7 @@ final class ClipboardCoordinator {
             return false
         }
 
-        lastSignature = content.signature
+        lastSignature = signature
         lastChangeCount = NSPasteboard.general.changeCount
         return true
     }
@@ -111,26 +128,125 @@ final class ClipboardCoordinator {
             return
         }
 
-        lastChangeCount = pasteboard.changeCount
-        guard let content = readContent(from: pasteboard), content.signature != lastSignature else {
+        let observedChangeCount = pasteboard.changeCount
+        lastChangeCount = observedChangeCount
+        guard let observation = readObservation(from: pasteboard) else {
             return
         }
 
-        lastSignature = content.signature
-        onLocalContent?(content)
+        let content = observation.content
+        let signature = observation.signature
+        let isDuplicate = signature == lastSignature
+        if case .image(let image) = content {
+            let types = pasteboard.types?.map(\.rawValue).joined(separator: ",") ?? "none"
+            startImageChangeTrace(changeCount: observedChangeCount, types: types)
+            NSLog(
+                "Clipboard image observation: eventUnixMs=\(Self.unixMilliseconds()) "
+                    + "changeCount=\(observedChangeCount) "
+                    + "encodedBytes=\(image.size) identity=\(signature) "
+                    + "duplicate=\(isDuplicate) types=\(types)"
+            )
+        }
+        guard !isDuplicate else {
+            return
+        }
+
+        lastSignature = signature
+        onLocalContent?(content, signature)
     }
 
-    private func readContent(from pasteboard: NSPasteboard) -> ClipboardContent? {
+    /// The normal clipboard poll is intentionally low-frequency to avoid idle wakeups. When an
+    /// image is observed, briefly sample only `changeCount` at 10 ms resolution so a screenshot
+    /// reproduction reveals the actual spacing of the pasteboard ownership changes. No image data
+    /// is decoded on this diagnostic timer.
+    private func startImageChangeTrace(changeCount: Int, types: String) {
+        let now = ProcessInfo.processInfo.systemUptime
+        if imageChangeTraceTimer == nil || tracedChangeCount != changeCount {
+            recordTracedChange(
+                changeCount: changeCount,
+                uptime: now,
+                source: "initial",
+                types: types
+            )
+        }
+        imageChangeTraceDeadlineUptime = now + Self.imageChangeTraceDuration
+
+        guard imageChangeTraceTimer == nil else {
+            return
+        }
+
+        let traceTimer = Timer(timeInterval: Self.imageChangeTraceInterval, repeats: true) { [weak self] _ in
+            self?.sampleImageChangeTrace()
+        }
+        traceTimer.tolerance = 0.002
+        RunLoop.main.add(traceTimer, forMode: .common)
+        imageChangeTraceTimer = traceTimer
+    }
+
+    private func sampleImageChangeTrace() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now < imageChangeTraceDeadlineUptime else {
+            stopImageChangeTrace()
+            return
+        }
+
+        let pasteboard = NSPasteboard.general
+        let changeCount = pasteboard.changeCount
+        guard changeCount != tracedChangeCount else {
+            return
+        }
+
+        let types = pasteboard.types?.map(\.rawValue).joined(separator: ",") ?? "none"
+        recordTracedChange(
+            changeCount: changeCount,
+            uptime: now,
+            source: "sample",
+            types: types
+        )
+        imageChangeTraceDeadlineUptime = now + Self.imageChangeTraceDuration
+    }
+
+    private func recordTracedChange(
+        changeCount: Int,
+        uptime: TimeInterval,
+        source: String,
+        types: String
+    ) {
+        let deltaMilliseconds = lastTracedChangeUptime.map { (uptime - $0) * 1_000 }
+        let deltaText = deltaMilliseconds.map { String(format: "%.1f", $0) } ?? "first"
+        tracedChangeCount = changeCount
+        lastTracedChangeUptime = uptime
+        NSLog(
+            "Clipboard change trace: eventUnixMs=\(Self.unixMilliseconds()) "
+                + "deltaMs=\(deltaText) changeCount=\(changeCount) "
+                + "source=\(source) types=\(types)"
+        )
+    }
+
+    private func stopImageChangeTrace() {
+        imageChangeTraceTimer?.invalidate()
+        imageChangeTraceTimer = nil
+        tracedChangeCount = NSPasteboard.general.changeCount
+        lastTracedChangeUptime = nil
+        imageChangeTraceDeadlineUptime = 0
+    }
+
+    private static func unixMilliseconds() -> Int64 {
+        Int64((Date().timeIntervalSince1970 * 1_000).rounded())
+    }
+
+    private func readObservation(from pasteboard: NSPasteboard) -> Observation? {
         if hasFileURLs(in: pasteboard) {
             return nil
         }
 
-        if let imageContent = readImageContent(from: pasteboard) {
-            return imageContent
+        if let imageObservation = readImageObservation(from: pasteboard) {
+            return imageObservation
         }
 
         if let text = pasteboard.string(forType: .string) {
-            return .text(text)
+            let content = ClipboardContent.text(text)
+            return Observation(content: content, signature: content.signature)
         }
 
         return nil
@@ -148,7 +264,7 @@ final class ClipboardCoordinator {
         return !urls.isEmpty
     }
 
-    private func readImageContent(from pasteboard: NSPasteboard) -> ClipboardContent? {
+    private func readImageObservation(from pasteboard: NSPasteboard) -> Observation? {
         let pngData = pasteboard.data(forType: .png) ?? {
             guard
                 let tiffData = pasteboard.data(forType: .tiff),
@@ -168,12 +284,14 @@ final class ClipboardCoordinator {
             return nil
         }
 
-        return .image(ClipboardImagePayload(
+        let content = ClipboardContent.image(ClipboardImagePayload(
             mimeType: "image/png",
             fileName: "clipboard.png",
             dataBase64: data.base64EncodedString(),
             size: data.count
         ))
+        let signature = "image:\(ClipboardImageIdentity.signature(for: data))"
+        return Observation(content: content, signature: signature)
     }
 
     private func write(_ content: ClipboardContent, to pasteboard: NSPasteboard) -> Bool {

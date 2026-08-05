@@ -1,6 +1,9 @@
 import CoreGraphics
 import Foundation
 import SystemConfiguration
+#if SWIFT_PACKAGE
+import ClipboardSyncCore
+#endif
 
 enum ClipboardLimits {
     static let maxFileBytes = 10 * 1024 * 1024
@@ -1989,7 +1992,10 @@ enum ClipboardContent: Equatable {
         case .text(let text):
             return "text:\(text)"
         case .image(let image):
-            return "image:\(image.dataBase64)"
+            guard let data = Data(base64Encoded: image.dataBase64) else {
+                return "image:\(ClipboardImageIdentity.signature(forInvalidBase64: image.dataBase64))"
+            }
+            return "image:\(ClipboardImageIdentity.signature(for: data))"
         case .files(let files):
             return "files:\(files.map { "\($0.name):\($0.size):\($0.dataBase64)" }.joined(separator: "|"))"
         }
@@ -2077,6 +2083,7 @@ extension SyncMessage {
 struct ClipboardHistoryEntry {
     let id: UUID
     let content: ClipboardContent
+    let signature: String
     let createdAt: Date
 }
 

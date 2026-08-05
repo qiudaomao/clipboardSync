@@ -2,6 +2,9 @@ import AppKit
 import Foundation
 import ServiceManagement
 import UserNotifications
+#if SWIFT_PACKAGE
+import ClipboardSyncCore
+#endif
 
 final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -117,6 +120,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var historyMenuItem = NSMenuItem(title: AppText.text("menu.clipboardHistory"), action: nil, keyEquivalent: "")
     private var history: [ClipboardHistoryEntry] = []
     private var historyThumbnails: [UUID: NSImage] = [:]
+    private var lastImageHistoryEventUptime: TimeInterval?
+    private var lastImageHistoryEventSignature: String?
     private lazy var settingsWindowController: SettingsWindowController = {
         let controller = SettingsWindowController()
         controller.onSave = { [weak self] nextConfig in
@@ -294,8 +299,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             name: NSWorkspace.didActivateApplicationNotification,
             object: nil
         )
-        clipboard.onLocalContent = { [weak self] content in
-            self?.publish(content)
+        clipboard.onLocalContent = { [weak self] content, signature in
+            self?.publish(content, historySignature: signature)
         }
         clipboard.onLocalSkipped = { [weak self] reason in
             self?.statusText = reason
@@ -1198,12 +1203,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 size: metaImage.size
             )
             let content = ClipboardContent.image(image)
+            let signature = "image:\(ClipboardImageIdentity.signature(for: decoded.payload))"
             DispatchQueue.main.async { [weak self] in
                 guard let self else {
                     return
                 }
-                if self.clipboard.applyContent(content) {
-                    self.addHistory(content)
+                if self.clipboard.applyContent(content, signature: signature) {
+                    self.addHistory(content, signature: signature, source: "remote-bulk")
                 }
             }
         case .fileChunk:
@@ -1816,7 +1822,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @discardableResult
-    private func publish(_ content: ClipboardContent, recordHistory: Bool = true) -> Bool {
+    private func publish(
+        _ content: ClipboardContent,
+        recordHistory: Bool = true,
+        historySignature: String? = nil
+    ) -> Bool {
         // An image is the one large clipboard payload, so it ships as a binary BulkFrame with the
         // pixels as raw bytes instead of base64 inside JSON. Text and the small inline-files path
         // stay on the JSON envelope, where their size makes the binary framing pointless.
@@ -1827,7 +1837,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sendBulk(message, routedTo: nil)
         }
         if recordHistory {
-            addHistory(content)
+            addHistory(content, signature: historySignature, source: "local")
         }
         return true
     }
@@ -2122,12 +2132,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         else {
             return
         }
+        let signature = content.signature
         DispatchQueue.main.async { [weak self] in
             guard let self else {
                 return
             }
-            if self.clipboard.applyContent(content) {
-                self.addHistory(content)
+            if self.clipboard.applyContent(content, signature: signature) {
+                self.addHistory(content, signature: signature, source: "remote-json")
                 if content.kind == "files" {
                     self.statusText = AppText.text("status.filesReceived")
                     self.postFilesReceivedNotification()
@@ -2322,10 +2333,37 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func addHistory(_ content: ClipboardContent) {
-        let signature = content.signature
-        history.removeAll { $0.content.signature == signature }
-        history.insert(ClipboardHistoryEntry(id: UUID(), content: content, createdAt: Date()), at: 0)
+    private func addHistory(
+        _ content: ClipboardContent,
+        signature providedSignature: String? = nil,
+        source: String
+    ) {
+        let signature = providedSignature ?? content.signature
+        let replacesEquivalentEntry = history.contains { $0.signature == signature }
+        if case .image(let image) = content {
+            let now = ProcessInfo.processInfo.systemUptime
+            let deltaMilliseconds = lastImageHistoryEventUptime.map { (now - $0) * 1_000 }
+            let deltaText = deltaMilliseconds.map { String(format: "%.1f", $0) } ?? "first"
+            let sameAsPrevious = lastImageHistoryEventSignature == signature
+            lastImageHistoryEventUptime = now
+            lastImageHistoryEventSignature = signature
+            NSLog(
+                "Clipboard history image event: eventUnixMs=\(Self.unixMilliseconds()) "
+                    + "deltaMs=\(deltaText) source=\(source) encodedBytes=\(image.size) "
+                    + "sameAsPrevious=\(sameAsPrevious) "
+                    + "replacesEquivalent=\(replacesEquivalentEntry) identity=\(signature)"
+            )
+        }
+        history.removeAll { $0.signature == signature }
+        history.insert(
+            ClipboardHistoryEntry(
+                id: UUID(),
+                content: content,
+                signature: signature,
+                createdAt: Date()
+            ),
+            at: 0
+        )
         if history.count > ClipboardLimits.historyLimit {
             history.removeLast(history.count - ClipboardLimits.historyLimit)
         }
@@ -2392,18 +2430,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
 
-        guard clipboard.applyContent(entry.content) else {
+        guard clipboard.applyContent(entry.content, signature: entry.signature) else {
             statusText = AppText.text("status.restoreHistoryFailed")
             return
         }
 
-        addHistory(entry.content)
+        addHistory(entry.content, signature: entry.signature, source: "history-restore")
         publish(entry.content, recordHistory: false)
     }
 
     @objc private func clearHistory() {
         history.removeAll()
         historyThumbnails.removeAll()
+        lastImageHistoryEventUptime = nil
+        lastImageHistoryEventSignature = nil
         refreshHistoryMenu()
+    }
+
+    private static func unixMilliseconds() -> Int64 {
+        Int64((Date().timeIntervalSince1970 * 1_000).rounded())
     }
 }
