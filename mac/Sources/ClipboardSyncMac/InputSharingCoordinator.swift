@@ -62,6 +62,11 @@ final class InputSharingCoordinator {
     private var lastAutoActivityAt = Date.distantPast
     private let autoActivityMinimumInterval: TimeInterval = 0.25
     private var hardwareInputMonitorUnavailable = false
+    private static let nonPhysicalHIDTransports = [
+        kIOHIDTransportVirtualValue,
+        kIOHIDTransportAirPlayValue,
+        kIOHIDTransportFIFOValue
+    ]
 
     /// Source for repositioning our own cursor at hand-back. `CGWarpMouseCursorPosition` makes
     /// the window server suppress hardware mouse events for ~0.25s afterwards (and
@@ -326,6 +331,8 @@ final class InputSharingCoordinator {
         ]
         IOHIDManagerSetDeviceMatchingMultiple(manager, matches as CFArray)
         let userInfo = Unmanaged.passUnretained(self).toOpaque()
+        IOHIDManagerRegisterDeviceMatchingCallback(manager, Self.hardwareDeviceMatchedCallback, userInfo)
+        IOHIDManagerRegisterDeviceRemovalCallback(manager, Self.hardwareDeviceRemovedCallback, userInfo)
         IOHIDManagerRegisterInputValueCallback(manager, Self.hardwareInputCallback, userInfo)
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
@@ -350,6 +357,22 @@ final class InputSharingCoordinator {
         NSLog("Auto control hardware-input monitor stopped")
     }
 
+    private static let hardwareDeviceMatchedCallback: IOHIDDeviceCallback = { context, result, _, device in
+        guard result == kIOReturnSuccess, let context else {
+            return
+        }
+        let coordinator = Unmanaged<InputSharingCoordinator>.fromOpaque(context).takeUnretainedValue()
+        coordinator.logHardwareDevice(device, action: "matched")
+    }
+
+    private static let hardwareDeviceRemovedCallback: IOHIDDeviceCallback = { context, result, _, device in
+        guard result == kIOReturnSuccess, let context else {
+            return
+        }
+        let coordinator = Unmanaged<InputSharingCoordinator>.fromOpaque(context).takeUnretainedValue()
+        coordinator.logHardwareDevice(device, action: "removed")
+    }
+
     private static let hardwareInputCallback: IOHIDValueCallback = { context, result, _, value in
         guard result == kIOReturnSuccess, let context else {
             return
@@ -369,6 +392,20 @@ final class InputSharingCoordinator {
         default:
             return
         }
+        // Device matching is intentionally broad enough to enumerate composite hardware such
+        // as a MacBook keyboard/trackpad or a keyboard that also exposes a mouse collection.
+        // IOHIDManager then sends every input value from each enumerated device, including its
+        // keyboard collections. Classify the value's application-collection ancestry here so a
+        // keyboard report cannot elect this device merely because the same hardware also has a
+        // pointing collection.
+        guard !IOHIDElementIsVirtual(element),
+              let collection = Self.pointerApplicationCollection(for: element) else {
+            return
+        }
+        let device = IOHIDElementGetDevice(element)
+        guard Self.isPhysicalPointingDevice(device) else {
+            return
+        }
         guard shouldMonitorLocalPhysicalInput else {
             return
         }
@@ -377,8 +414,65 @@ final class InputSharingCoordinator {
             return
         }
         lastAutoActivityAt = now
-        NSLog("Auto control detected local physical mouse input")
+        let product = Self.deviceStringProperty(device, key: kIOHIDProductKey as String) ?? "unknown"
+        let transport = Self.deviceStringProperty(device, key: kIOHIDTransportKey as String) ?? "built-in"
+        NSLog(
+            "Auto control detected local physical pointer input: product=\(product), "
+            + "transport=\(transport), collection=\(collection.usagePage):\(collection.usage), "
+            + "element=\(IOHIDElementGetUsagePage(element)):\(IOHIDElementGetUsage(element))"
+        )
         onLocalPhysicalInput?()
+    }
+
+    /// Returns only the Mouse or Touch Pad application collection that owns this value. A HID
+    /// device can expose several top-level collections, so checking only the device's usage pairs
+    /// is insufficient: a keyboard collection on combined hardware must remain keyboard-only.
+    private static func pointerApplicationCollection(for element: IOHIDElement) -> (usagePage: UInt32, usage: UInt32)? {
+        var current: IOHIDElement? = element
+        while let node = current {
+            if IOHIDElementGetType(node) == kIOHIDElementTypeCollection,
+               IOHIDElementGetCollectionType(node) == kIOHIDElementCollectionTypeApplication {
+                let usagePage = IOHIDElementGetUsagePage(node)
+                let usage = IOHIDElementGetUsage(node)
+                if (usagePage == kHIDPage_GenericDesktop && usage == kHIDUsage_GD_Mouse)
+                    || (usagePage == kHIDPage_Digitizer && usage == kHIDUsage_Dig_TouchPad) {
+                    return (usagePage, usage)
+                }
+            }
+            current = IOHIDElementGetParent(node)
+        }
+        return nil
+    }
+
+    /// Synthetic HID providers are visible to IOHIDManager too. A built-in device is physical;
+    /// otherwise require a real transport and reject transports explicitly used for virtual or
+    /// remotely forwarded devices. This keeps CGEvent injection and virtual-HID remappers from
+    /// electing themselves while retaining USB, Bluetooth, SPI, I2C, and future physical buses.
+    private static func isPhysicalPointingDevice(_ device: IOHIDDevice) -> Bool {
+        if let builtIn = IOHIDDeviceGetProperty(device, kIOHIDBuiltInKey as CFString) as? NSNumber,
+           builtIn.boolValue {
+            return true
+        }
+        guard let transport = deviceStringProperty(device, key: kIOHIDTransportKey as String),
+              !transport.isEmpty else {
+            return false
+        }
+        return !nonPhysicalHIDTransports.contains { $0.caseInsensitiveCompare(transport) == .orderedSame }
+    }
+
+    private static func deviceStringProperty(_ device: IOHIDDevice, key: String) -> String? {
+        IOHIDDeviceGetProperty(device, key as CFString) as? String
+    }
+
+    private func logHardwareDevice(_ device: IOHIDDevice, action: String) {
+        let product = Self.deviceStringProperty(device, key: kIOHIDProductKey as String) ?? "unknown"
+        let transport = Self.deviceStringProperty(device, key: kIOHIDTransportKey as String) ?? "none"
+        let builtIn = (IOHIDDeviceGetProperty(device, kIOHIDBuiltInKey as CFString) as? NSNumber)?.boolValue ?? false
+        let physicalTransport = Self.isPhysicalPointingDevice(device)
+        NSLog(
+            "Auto control HID device \(action): product=\(product), transport=\(transport), "
+            + "builtIn=\(builtIn), physicalTransport=\(physicalTransport)"
+        )
     }
 
     private static let eventCallback: CGEventTapCallBack = { _, type, event, userInfo in
