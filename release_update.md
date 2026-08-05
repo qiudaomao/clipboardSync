@@ -22,6 +22,10 @@ Edit `mac/ClipboardSyncMac.xcodeproj/project.pbxproj`:
 
 Both the Debug and Release `XCBuildConfiguration` blocks carry these keys; update both.
 
+Also refresh the beta license window in `mac/Sources/ClipboardSyncMac/BetaLicense.swift`:
+set `releaseDate` to today (UTC). If it is left stale, the build expires `durationDays`
+after the *old* date and users see “beta expired” even after updating.
+
 ## 2. Archive and export a Developer ID build
 
 ```sh

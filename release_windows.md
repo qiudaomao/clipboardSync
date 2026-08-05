@@ -88,10 +88,14 @@ Edit both `win/ClipboardSyncWin/ClipboardSyncWin.csproj` and
 
 Use numeric .NET versions in the project file, for example `0.1.10`. Use the `v` prefix only for Git tags, GitHub release names, and installer filenames, for example `v0.1.10`.
 
+Also refresh the beta license window in `win/ClipboardSyncWin/BetaLicense.cs`: set
+`ReleaseDateUtc` to today (UTC). If it is left stale, the build expires `DurationDays`
+after the *old* date and users see “beta expired” even after updating.
+
 Commit the version bump before building and publishing artifacts:
 
 ```powershell
-git add win/ClipboardSyncWin/ClipboardSyncWin.csproj win/ClipboardSyncInputService/ClipboardSyncInputService.csproj release_windows.md
+git add win/ClipboardSyncWin/ClipboardSyncWin.csproj win/ClipboardSyncInputService/ClipboardSyncInputService.csproj win/ClipboardSyncWin/BetaLicense.cs release_windows.md
 git commit -m "Bump Windows version to v0.1.10"
 ```
 

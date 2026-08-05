@@ -51,6 +51,7 @@ Update every platform in one commit so the shared release tag is consistent.
 | Linux | `linux/CMakeLists.txt` | `project(... VERSION x.y.z ...)` |
 | Linux | `linux/packaging/io.github.qiudaomao.clipboardsync.metainfo.xml` | prepend `<release version="x.y.z" date="YYYY-MM-DD"/>` |
 | Docs | `release_windows.md` | “current Windows release target” line |
+| Beta license | `mac/Sources/ClipboardSyncMac/BetaLicense.swift`, `win/ClipboardSyncWin/BetaLicense.cs` | set `releaseDate` / `ReleaseDateUtc` to **today (UTC)** — if it goes stale, users hit “beta expired” even on the latest build |
 
 ```sh
 git add mac/ClipboardSyncMac.xcodeproj/project.pbxproj \
@@ -58,7 +59,9 @@ git add mac/ClipboardSyncMac.xcodeproj/project.pbxproj \
   win/ClipboardSyncInputService/ClipboardSyncInputService.csproj \
   linux/CMakeLists.txt \
   linux/packaging/io.github.qiudaomao.clipboardsync.metainfo.xml \
-  release_windows.md
+  release_windows.md \
+  mac/Sources/ClipboardSyncMac/BetaLicense.swift \
+  win/ClipboardSyncWin/BetaLicense.cs
 git commit -m "Bump version to ${TAG}"
 ```
 
@@ -326,6 +329,7 @@ when you upload flatpaks yourself.
 ## 7. Final checklist
 
 - [ ] Version fields bumped on mac / win / linux; commit pushed
+- [ ] Beta license `releaseDate` refreshed to today in `BetaLicense.swift` + `BetaLicense.cs`
 - [ ] macOS zip notarized, stapled, Sparkle-signed
 - [ ] Windows installer built; NetSparkle enclosure signature present
 - [ ] Linux x86_64 + aarch64 flatpaks present
@@ -341,7 +345,7 @@ when you upload flatpaks yourself.
 
 | Step | Command / location |
 |------|--------------------|
-| Bump | pbxproj + 2× csproj + CMake + metainfo |
+| Bump | pbxproj + 2× csproj + CMake + metainfo + 2× BetaLicense release date |
 | Mac build | `xcodebuild archive` → `exportArchive` → `notarytool` → `stapler` → `sign_update` |
 | Win build | `dotnet publish` ×2 → `docker … amake/innosetup` |
 | Linux build | `./build-linux-flatpak.sh aarch64 x86_64` |

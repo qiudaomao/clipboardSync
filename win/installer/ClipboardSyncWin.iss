@@ -30,6 +30,16 @@ OutputDir=..\..\artifacts\windows
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; A complete version resource on Setup.exe itself. Reputation heuristics treat an installer
+; that declares no publisher, product or description as more suspicious than one that does;
+; this costs nothing and is what a shipped installer should carry regardless. It is not a
+; substitute for signing the binaries, which is the only thing that actually builds trust.
+VersionInfoVersion={#MyAppVersion}
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoProductName={#MyAppName}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} Setup
+VersionInfoCopyright=Copyright (c) 2026 {#MyAppPublisher}
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
