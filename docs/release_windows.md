@@ -13,7 +13,7 @@ Releases are published from **this repo**: the installer is uploaded as a GitHub
 > (+ signature + mirror) — otherwise old clients cannot see the update. Keep the old repo
 > online afterwards for the old download URLs.
 
-The current Windows release target is `v0.2.0`, matching the app version `0.2.0`.
+The current Windows release target is `v0.2.2`, matching the app version `0.2.2`.
 
 ## Publishing from macOS
 

@@ -3,7 +3,7 @@ import Foundation
 /// Hardcoded beta window: this build works for `durationDays` after `releaseDate`.
 /// Bump `releaseDate` to today whenever a new build is cut for release.
 enum BetaLicense {
-    static let releaseDate = utcDate(year: 2026, month: 8, day: 5)
+    static let releaseDate = utcDate(year: 2026, month: 8, day: 7)
     static let durationDays = 180
 
     static var expiryDate: Date {

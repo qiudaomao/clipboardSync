@@ -9,7 +9,7 @@ namespace ClipboardSyncWin;
 /// </summary>
 internal static class BetaLicense
 {
-    private static readonly DateTime ReleaseDateUtc = new(2026, 8, 5, 0, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime ReleaseDateUtc = new(2026, 8, 7, 0, 0, 0, DateTimeKind.Utc);
     private const int DurationDays = 180;
 
     public static DateTime ExpiryDateUtc => ReleaseDateUtc.AddDays(DurationDays);
