@@ -28,6 +28,7 @@ macOS 13+ · 64-bit Windows 10/11 · Linux (Flatpak) — free &amp; open source,
 - 🖼️ **Text & images** — synced automatically, no manual steps.
 - 📁 **Click-to-sync files** — copy files, choose *Send Files from Clipboard*, paste on the other device.
 - 🖱️ **Mouse & keyboard sharing** — one mouse and keyboard for all machines, with a drag-based screen layout.
+- 🎯 **Auto control device** — control follows whichever physical mouse or trackpad you touched last; keyboard activity never switches it, so a mouse on one machine and a keyboard on another just work.
 - 🚇 **Port forwarding** — tunnel SSH, VNC, or a dev server between devices over the same encrypted connection.
 - 🕓 **Clipboard history** — browse and reuse recent clipboard items with thumbnails.
 - 🔐 **Private by design** — password-authenticated, encrypted payloads; no account, no cloud.
@@ -44,6 +45,24 @@ macOS 13+ · 64-bit Windows 10/11 · Linux (Flatpak) — free &amp; open source,
 <img src="landingPage/assets/port-forward.png" alt="Port Forward panel" width="640" /><br/>
 <sub>Built-in port forwarding: reach a service on any of your devices as if it were local.</sub>
 </div>
+
+## 🆚 Compared with Synergy
+
+Everything Synergy does, plus the clipboard-first features it doesn't:
+
+| Feature | Clipboard Sync | Synergy |
+|---|:--:|:--:|
+| Mouse & keyboard sharing | ✅ | ✅ |
+| Drag-based screen layout | ✅ | ✅ |
+| Encrypted transport | ✅ | ✅ |
+| Clipboard text sync | ✅ | ✅ |
+| Clipboard image sync | ✅ | Limited |
+| File transfer | ✅ from the clipboard | Limited |
+| Clipboard history with thumbnails | ✅ | ❌ |
+| **Auto control device** — control follows your physical mouse | ✅ | ❌ |
+| TCP port forwarding between devices | ✅ | ❌ |
+| Prevent system sleep (timers & weekly time plan) | ✅ | ❌ |
+| Price | Free & open source | Paid license |
 
 ## 🚀 Connected in three steps
 

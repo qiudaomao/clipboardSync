@@ -426,6 +426,35 @@
   .trust-points { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
   .trust-point { font-size: 14px; font-weight: 600; }
   .trust-point a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+  /* Comparison table */
+  section.compare { padding: 10px 0 90px; }
+  .compare-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--panel);
+  }
+  .compare-table { width: 100%; min-width: 560px; border-collapse: collapse; font-size: 14px; }
+  .compare-table th, .compare-table td {
+    padding: 12px 18px;
+    text-align: center;
+    border-top: 1px solid var(--border);
+  }
+  .compare-table th:first-child, .compare-table td:first-child { text-align: left; }
+  .compare-table thead th {
+    border-top: none;
+    font-size: 13px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .compare-table thead th:nth-child(2) {
+    color: var(--accent);
+    font-weight: 800;
+  }
+  .compare-table td.yes { color: var(--accent-3); font-weight: 800; }
+  .compare-table td.no { color: var(--muted); }
+  .compare-table td.lim { color: var(--muted); font-size: 13px; }
+
   section.faq { padding: 18px 0 80px; }
   .faq-list { max-width: 780px; margin: 0 auto; }
   .faq-list details { border-bottom: 1px solid var(--border); padding: 18px 0; }
@@ -510,6 +539,7 @@
       <a href="#setup" data-i18n="nav.setup">How it works</a>
       <a href="#showcase" data-i18n="nav.preview">Preview</a>
       <a href="#portforward" data-i18n="nav.portforward">Port Forward</a>
+      <a href="#compare" data-i18n="nav.compare">vs Synergy</a>
       <a href="#features" data-i18n="nav.features">Features</a>
     </nav>
     <div class="nav-actions">
@@ -596,9 +626,9 @@
 <section class="highlights wrap">
   <div class="highlight-grid">
     <div class="highlight-card">
-      <div class="highlight-icon">🔀</div>
-      <h3 data-i18n="hl1.t">Free &amp; instant device switching</h3>
-      <p data-i18n="hl1.p">Swap which machine is in control at any moment — no re-pairing, no delay, just a quick switch between control and target device.</p>
+      <div class="highlight-icon">🎯</div>
+      <h3 data-i18n="hl1.t">Auto control device</h3>
+      <p data-i18n="hl1.p">Control follows whichever physical mouse or trackpad you touched last — keyboard activity never switches it, and you can still pin one device manually.</p>
     </div>
     <div class="highlight-card">
       <div class="highlight-icon">🖐️</div>
@@ -620,6 +650,33 @@
       <h3 data-i18n="hl5.t">Fully native</h3>
       <p data-i18n="hl5.p">Swift on macOS, C# on Windows, Qt/C++ on Linux — no Electron, no web wrapper. Fast, lightweight, and easy on your battery.</p>
     </div>
+  </div>
+</section>
+
+<section class="compare wrap" id="compare">
+  <div class="section-head">
+    <h2 data-i18n="cmp.head">Everything Synergy has — and more</h2>
+    <p data-i18n="cmp.sub">A feature-by-feature look at Clipboard Sync next to Synergy.</p>
+  </div>
+  <div class="compare-scroll">
+    <table class="compare-table">
+      <thead>
+        <tr><th data-i18n="cmp.feature">Feature</th><th>Clipboard Sync</th><th>Synergy</th></tr>
+      </thead>
+      <tbody>
+        <tr><td data-i18n="cmp.r1">Mouse &amp; keyboard sharing</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td data-i18n="cmp.r2">Drag-based screen layout</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td data-i18n="cmp.r3">Encrypted transport</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td data-i18n="cmp.r4">Clipboard text sync</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+        <tr><td data-i18n="cmp.r5">Clipboard image sync</td><td class="yes">✓</td><td class="lim" data-i18n="cmp.limited">Limited</td></tr>
+        <tr><td data-i18n="cmp.r6">File transfer</td><td class="yes">✓</td><td class="lim" data-i18n="cmp.limited">Limited</td></tr>
+        <tr><td data-i18n="cmp.r7">Clipboard history with thumbnails</td><td class="yes">✓</td><td class="no">✗</td></tr>
+        <tr><td data-i18n="cmp.r8">Auto control device — control follows your mouse</td><td class="yes">✓</td><td class="no">✗</td></tr>
+        <tr><td data-i18n="cmp.r9">TCP port forwarding between devices</td><td class="yes">✓</td><td class="no">✗</td></tr>
+        <tr><td data-i18n="cmp.r10">Prevent system sleep (timers &amp; weekly time plan)</td><td class="yes">✓</td><td class="no">✗</td></tr>
+        <tr><td data-i18n="cmp.r11">Price</td><td class="yes" data-i18n="cmp.free">Free &amp; open source</td><td class="lim" data-i18n="cmp.paid">Paid license</td></tr>
+      </tbody>
+    </table>
   </div>
 </section>
 
@@ -794,6 +851,7 @@
         "nav.preview": "Preview",
         "nav.setup": "How it works",
         "nav.portforward": "Port Forward",
+        "nav.compare": "vs Synergy",
         "nav.features": "Features",
         "nav.download": "Download",
         "nav.github": "Open source on GitHub",
@@ -818,8 +876,25 @@
         "setup.s3p": "Text and images sync automatically. To send files, copy them first and choose “Send Files from Clipboard.”",
         "shot.macApp": "Menubar app on macOS",
         "shot.winApp": "Native tray app on Windows",
-        "hl1.t": "Free & instant device switching",
-        "hl1.p": "Swap which machine is in control at any moment — no re-pairing, no delay, just a quick switch between control and target device.",
+        "hl1.t": "Auto control device",
+        "hl1.p": "Control follows whichever physical mouse or trackpad you touched last — keyboard activity never switches it, and you can still pin one device manually.",
+        "cmp.head": "Everything Synergy has — and more",
+        "cmp.sub": "A feature-by-feature look at Clipboard Sync next to Synergy.",
+        "cmp.feature": "Feature",
+        "cmp.r1": "Mouse & keyboard sharing",
+        "cmp.r2": "Drag-based screen layout",
+        "cmp.r3": "Encrypted transport",
+        "cmp.r4": "Clipboard text sync",
+        "cmp.r5": "Clipboard image sync",
+        "cmp.r6": "File transfer",
+        "cmp.r7": "Clipboard history with thumbnails",
+        "cmp.r8": "Auto control device — control follows your mouse",
+        "cmp.r9": "TCP port forwarding between devices",
+        "cmp.r10": "Prevent system sleep (timers & weekly time plan)",
+        "cmp.r11": "Price",
+        "cmp.limited": "Limited",
+        "cmp.free": "Free & open source",
+        "cmp.paid": "Paid license",
         "hl2.t": "Drag-based screen layout",
         "hl2.p": "Arrange your devices exactly how they sit on your desk — just drag screens into place and the cursor flows naturally between them.",
         "hl3.t": "Works across routed networks",
@@ -882,6 +957,7 @@
         "nav.preview": "预览",
         "nav.setup": "使用方式",
         "nav.portforward": "端口转发",
+        "nav.compare": "对比 Synergy",
         "nav.features": "功能",
         "nav.download": "下载",
         "nav.github": "GitHub 开源仓库",
@@ -906,8 +982,25 @@
         "setup.s3p": "文本和图片会自动同步。发送文件时，先复制文件，再选择“从剪贴板发送文件”。",
         "shot.macApp": "macOS 菜单栏应用",
         "shot.winApp": "Windows 原生托盘应用",
-        "hl1.t": "自由即时切换控制设备",
-        "hl1.p": "随时切换由哪台机器控制 — 无需重新配对、没有延迟，控制端与被控端一键互换。",
+        "hl1.t": "自动控制设备",
+        "hl1.p": "控制权自动跟随你最后使用的物理鼠标或触控板 — 键盘输入不会切换控制端，也可以随时手动固定某台设备。",
+        "cmp.head": "Synergy 有的都有，还有更多",
+        "cmp.sub": "Clipboard Sync 与 Synergy 的逐项功能对比。",
+        "cmp.feature": "功能",
+        "cmp.r1": "鼠标键盘共享",
+        "cmp.r2": "拖拽式屏幕布局",
+        "cmp.r3": "加密传输",
+        "cmp.r4": "剪贴板文本同步",
+        "cmp.r5": "剪贴板图片同步",
+        "cmp.r6": "文件传输",
+        "cmp.r7": "带缩略图的剪贴板历史",
+        "cmp.r8": "自动控制设备 — 控制权跟随你的鼠标",
+        "cmp.r9": "设备间 TCP 端口转发",
+        "cmp.r10": "阻止系统休眠（定时与每周计划）",
+        "cmp.r11": "价格",
+        "cmp.limited": "有限支持",
+        "cmp.free": "免费开源",
+        "cmp.paid": "付费许可",
         "hl2.t": "拖拽式屏幕布局",
         "hl2.p": "按照设备在桌面上的真实摆放来排列 — 把屏幕拖到相应位置，光标就能自然地在设备间流动。",
         "hl3.t": "支持路由网络",
