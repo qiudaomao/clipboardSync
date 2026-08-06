@@ -13,7 +13,7 @@ namespace ClipboardSyncWin;
 
 internal sealed class WinUpdateController : IDisposable
 {
-    private const string AppCastUrl = "https://raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/win-appcast.xml";
+    private const string AppCastUrl = "https://raw.githubusercontent.com/qiudaomao/clipboardSync/main/assets/win-appcast.xml";
     /// Fallback feeds for networks where GitHub is unreachable, in preference order: the
     /// self-hosted mirror published by push.sh (serves the installer itself too), then a
     /// jsDelivr-served copy whose enclosure goes through a GitHub download proxy. Each feed's
@@ -22,7 +22,7 @@ internal sealed class WinUpdateController : IDisposable
     private static readonly string[] FallbackAppCastUrls =
     [
         "https://clipboardsync.fuzhuo.me/downloads/win-appcast.xml",
-        "https://cdn.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/win-appcast-mirror.xml"
+        "https://cdn.jsdelivr.net/gh/qiudaomao/clipboardSync@main/assets/win-appcast-mirror.xml"
     ];
     private const string PublicKey = "k7ZwP3uSV9hMzqL9PRWagywMtMiXWibcz6QyrFKprtI=";
 

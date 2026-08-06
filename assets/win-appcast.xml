@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Clipboard Sync</title>
+    <description>Most recent changes with links to updates</description>
+    <language>en</language>
+    <item>
+      <title>Clipboard Sync 0.2.0</title>
+      <description>Add optional Auto control-device selection based on the physical mouse currently in use, so mouse activity selects the controller while keyboard activity remains independent across devices.</description>
+      <pubDate>Wed, 05 Aug 2026 19:02:15 +08:00</pubDate>
+      <sparkle:version>0.2.0</sparkle:version>
+      <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.2.0/ClipboardSyncSetup-v0.2.0.exe" sparkle:version="0.2.0" sparkle:shortVersionString="0.2.0" length="3074740" sparkle:os="windows-x64" type="application/x-msdos-program" sparkle:criticalUpdate="false" sparkle:signature="XY2HGMZDryHIOaN+F0s5fvX2tcAcCn/0vqKN7LyHox37qR15Cf1hUnceoFyvNrSMykNmnAxTjf6q1wrkA7cRDw==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.38</title>
+      <description>Refresh the beta license release date and extend beta validity to 180 days.</description>
+      <pubDate>Wed, 05 Aug 2026 12:28:46 +08:00</pubDate>
+      <sparkle:version>0.1.38</sparkle:version>
+      <sparkle:shortVersionString>0.1.38</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.38/ClipboardSyncSetup-v0.1.38.exe" sparkle:version="0.1.38" sparkle:shortVersionString="0.1.38" length="3074252" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="+P3Pizysl0mDRUKDUc1hp+bULtmmgq09s9VJAccZGZf09KCPmnzchX+3NuHGAIL1rY/mSEBPqi3Xb2AxVXedCA==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.37</title>
+      <description>Keep input-sharing drags continuous across peer monitor boundaries, release held remote mouse buttons reliably, and make canonical key mapping deterministic.</description>
+      <pubDate>Mon, 03 Aug 2026 18:38:31 +08:00</pubDate>
+      <sparkle:version>0.1.37</sparkle:version>
+      <sparkle:shortVersionString>0.1.37</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.37/ClipboardSyncSetup-v0.1.37.exe" sparkle:version="0.1.37" sparkle:shortVersionString="0.1.37" length="3073809" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="xRaF6vlGGtuo8mL0iLCArL2s8mXLdjbeWjDKDR/FOEw1Npd3UJOwkxObDTQXye6amtkUuXY7mCb/e1vAKDLfBQ==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.36</title>
+      <description>Relay numeric keypad keys and mouse Back/Forward buttons during input sharing.</description>
+      <pubDate>Thu, 30 Jul 2026 17:49:57 +08:00</pubDate>
+      <sparkle:version>0.1.36</sparkle:version>
+      <sparkle:shortVersionString>0.1.36</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.36/ClipboardSyncSetup-v0.1.36.exe" sparkle:version="0.1.36" sparkle:shortVersionString="0.1.36" length="3071683" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="WDQseE3ByxqsJ/pcM6M9mUs7jKKtpr+zwnSpIK8QfZrI/xzi5SlUe4i6gDAMyFb2b6TxyYUJ97a95gjqzz9JCg==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.35</title>
+      <description>Windows-only release.</description>
+      <pubDate>Mon, 27 Jul 2026 15:15:13 +08:00</pubDate>
+      <sparkle:version>0.1.35</sparkle:version>
+      <sparkle:shortVersionString>0.1.35</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.35/ClipboardSyncSetup-v0.1.35.exe" sparkle:version="0.1.35" sparkle:shortVersionString="0.1.35" length="3073528" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="tT+wUAAyVgJHgofsc4DGcJdkG5bA4xf5C9kQ1UuqwFvRjz5W2K8J329tvTcmRdbt1AeOsSMHxDyfGoQfEYs2Cg==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.34</title>
+      <description>Improve hyper key emulation during remote input sharing on Windows.</description>
+      <pubDate>Mon, 27 Jul 2026 14:44:08 +08:00</pubDate>
+      <sparkle:version>0.1.34</sparkle:version>
+      <sparkle:shortVersionString>0.1.34</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.34/ClipboardSyncSetup-v0.1.34.exe" sparkle:version="0.1.34" sparkle:shortVersionString="0.1.34" length="3073393" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="FUQdwNLXRziUERWactSPdtwhGGMJsMuJLxaw0dhotUykJ6V76igL60LXsexlTc8XECk7Ipy86TbOEKDG7vOpDg==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.33</title>
+      <description>Fix random stuck modifier keys during remote input sharing.</description>
+      <pubDate>Mon, 27 Jul 2026 14:18:45 +08:00</pubDate>
+      <sparkle:version>0.1.33</sparkle:version>
+      <sparkle:shortVersionString>0.1.33</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.33/ClipboardSyncSetup-v0.1.33.exe" sparkle:version="0.1.33" sparkle:shortVersionString="0.1.33" length="3070437" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="mUk4TnO3M8pmYPZEUryNEB72i/0nAiB6eNYKET5nY2mXSYygvdHlFx9NheJ0xA4HKAU4r1mizDR7dhPsBNl/Dg==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.32</title>
+      <description>Add Time Plan sleep-prevention mode: a weekly grid schedule for when Prevent System Sleep is active.</description>
+      <pubDate>Sat, 25 Jul 2026 12:47:58 +08:00</pubDate>
+      <sparkle:version>0.1.32</sparkle:version>
+      <sparkle:shortVersionString>0.1.32</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.32/ClipboardSyncSetup-v0.1.32.exe" sparkle:version="0.1.32" sparkle:shortVersionString="0.1.32" length="3073395" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="2MMLfss1j5sMBGtTu9DOw2/Ox0pADWttE+fj6zgNEqQDnGYo23FMgJmQEskmL7UElWGVYSMtgEuP3K3TIsybAg==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.31</title>
+      <description>Stabilize shared screen layout across sleep/wake so monitor groups no longer drift when displays reconnect.</description>
+      <pubDate>Thu, 23 Jul 2026 11:35:01 +08:00</pubDate>
+      <sparkle:version>0.1.31</sparkle:version>
+      <sparkle:shortVersionString>0.1.31</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.31/ClipboardSyncSetup-v0.1.31.exe" sparkle:version="0.1.31" sparkle:shortVersionString="0.1.31" length="3067907" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="kRXDGoh70kh/ILRGMDjcJlmUOgVxtNNVTxvm+zyf4dmPWmEBVROYnq/gZKGPKZBYzXqUrvZuAdklrcgbY5lRBQ==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.29</title>
+      <description>Add an Apply button to the port-forward panel so rule edits can be committed without closing the window.</description>
+      <pubDate>Wed, 22 Jul 2026 23:25:28 +08:00</pubDate>
+      <sparkle:version>0.1.29</sparkle:version>
+      <sparkle:shortVersionString>0.1.29</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.29/ClipboardSyncSetup-v0.1.29.exe" sparkle:version="0.1.29" sparkle:shortVersionString="0.1.29" length="3066864" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="10K4ll6C7Pm6BPmu3Y+ui18rfwHnlM3oi5ZCk8ui4TcOUGXpX+BCWA7BDZ1TN7/hNoIxxNSh3JLgkR81t1NDAQ==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.28</title>
+      <description>Keep shared screen layouts synchronized when monitors are rearranged or hot-plugged.</description>
+      <pubDate>Wed, 22 Jul 2026 19:44:15 +08:00</pubDate>
+      <sparkle:version>0.1.28</sparkle:version>
+      <sparkle:shortVersionString>0.1.28</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.28/ClipboardSyncSetup-v0.1.28.exe" sparkle:version="0.1.28" sparkle:shortVersionString="0.1.28" length="3066881" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="iS2OSo3dg8tK57z/lzxDYfQmCMACGffoSj23/H0vgrZ7ILjbz03fqojc4zlp6vdOkBzlyHTW5QPnEcJ/R75ABw==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.27</title>
+      <description>Improve cross-device input responsiveness and macOS remote click handling.</description>
+      <pubDate>Wed, 22 Jul 2026 13:42:39 +08:00</pubDate>
+      <sparkle:version>0.1.27</sparkle:version>
+      <sparkle:shortVersionString>0.1.27</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.27/ClipboardSyncSetup-v0.1.27.exe" sparkle:version="0.1.27" sparkle:shortVersionString="0.1.27" length="3066971" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="bXMPaoSE0+ZUC5gQDRe/5VuMKCAq07Y+mzg56aNznvkYpRlcSRqQevWlqob9v7mvHpz3XjwUYv0nVAb2+FvYBg==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.25</title>
+      <description>Speed up port forwarding and move clipboard images and file chunks to authenticated binary frames for faster cross-device transfers.</description>
+      <pubDate>Wed, 22 Jul 2026 10:02:21 +08:00</pubDate>
+      <sparkle:version>0.1.25</sparkle:version>
+      <sparkle:shortVersionString>0.1.25</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.25/ClipboardSyncSetup-v0.1.25.exe" sparkle:version="0.1.25" sparkle:shortVersionString="0.1.25" length="3065249" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="loGY9vuaTKRtZhDDW+n183QmAxbECprVhLbe8qgJuvYwRq9aEPU/UbrECTkivIF9RVxdvYKtK670PrVh5pdlDQ==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.24</title>
+      <description>Add a visible Windows update history. Sleep prevention now shows live remaining time and keeps both the system and display awake from idle on macOS, Windows, and Linux.</description>
+      <pubDate>Wed, 15 Jul 2026 14:56:40 +08:00</pubDate>
+      <sparkle:version>0.1.24</sparkle:version>
+      <sparkle:shortVersionString>0.1.24</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.24/ClipboardSyncSetup-v0.1.24.exe" sparkle:version="0.1.24" sparkle:shortVersionString="0.1.24" length="3055210" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="KoHF11kOvSIzGSrQeyGplIrI5xfCfJOeEzqaxLnItNmZZ6moY9W3CKjfJWb029HI9kkVENkLv7A7KoHwT7HhAQ==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.23</title>
+      <description>Add Prevent System Sleep with timed and forever options, plus an optional low-battery safeguard that pauses below 20% while running on battery power.</description>
+      <pubDate>Wed, 15 Jul 2026 13:25:16 +08:00</pubDate>
+      <sparkle:version>0.1.23</sparkle:version>
+      <sparkle:shortVersionString>0.1.23</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.23/ClipboardSyncSetup-v0.1.23.exe" sparkle:version="0.1.23" sparkle:shortVersionString="0.1.23" length="3051109" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="85fkxbtiD09tThyQsEiJ+aP3mUKlS6UPkBLsvVYnZqeQZ+zUBGfWJbS8jWk8SNywMLUsWVK2o+qcylvS5EeODg==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.22</title>
+      <description>Maintenance release to keep platform versions aligned; no macOS-specific changes in this version.</description>
+      <pubDate>Tue, 14 Jul 2026 16:29:39 +08:00</pubDate>
+      <sparkle:version>0.1.22</sparkle:version>
+      <sparkle:shortVersionString>0.1.22</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.22/ClipboardSyncSetup-v0.1.22.exe" sparkle:version="0.1.22" sparkle:shortVersionString="0.1.22" length="3044703" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="tFa7NoRNXtjDehnO//hFXndCPaTlxza4YpJCjS7ZeGooqRQQX+gqsPPmj99q/C1iYL2v3S1XB8C6sATMKw1lBg==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.21</title>
+      <description>new About (version and copyright), Project Homepage, and Send Feedback menu items on every platform; Linux now ships for x86_64 and ARM64</description>
+      <pubDate>Sat, 11 Jul 2026 20:19:03 +08:00</pubDate>
+      <sparkle:version>0.1.21</sparkle:version>
+      <sparkle:shortVersionString>0.1.21</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.21/ClipboardSyncSetup-v0.1.21.exe" sparkle:version="0.1.21" sparkle:shortVersionString="0.1.21" length="3022293" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="GVZ1x6p9MboFBP08ByitDHxQl+FC+mtzrMduYf9Il4ziNgHElJzELDIvu0jyGPT1OkxEfFzj/lKHwwOMPEQMAA==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.20</title>
+      <description>optional transport encryption: an Encrypt transport checkbox keeps password authentication (HMAC-signed envelopes) while skipping payload encryption on trusted networks; Screen Layout drags freely and snaps flush edge-to-edge on release; interop with the new Linux client</description>
+      <pubDate>Sat, 11 Jul 2026 18:56:44 +08:00</pubDate>
+      <sparkle:version>0.1.20</sparkle:version>
+      <sparkle:shortVersionString>0.1.20</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.20/ClipboardSyncSetup-v0.1.20.exe" sparkle:version="0.1.20" sparkle:shortVersionString="0.1.20" length="3022292" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="eHFYA4+wOnLmgTBqfWNx+KdoGcTiCuuf/Q3xlejH45BHGvfd2eAjHqKmM5jQ/GpY7rPpJwPXiNDuM0KuHyIgCw==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.18</title>
+      <pubDate>Fri, 10 Jul 2026 17:10:29 +08:00</pubDate>
+      <sparkle:version>0.1.18</sparkle:version>
+      <sparkle:shortVersionString>0.1.18</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.18/ClipboardSyncWinSetup-v0.1.18.exe" sparkle:version="0.1.18" sparkle:shortVersionString="0.1.18" length="2897994" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="uUMWikZ2scCoRBsvyRt7+0byBMjRZtbzzqQo02PXFeyaK+xwDhv2Rm/qgFNEETDlg6biq2Zn47doqCswtZvgDw==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.17</title>
+      <description>smooth mouse control while clipboard images, files, or port-forward data are in flight: input rides a dedicated connection on the same port (auto-negotiated, falls back with older peers) and heavy encryption moved off the input thread; caps lock now syncs in both directions</description>
+      <pubDate>Fri, 10 Jul 2026 15:29:15 +08:00</pubDate>
+      <sparkle:version>0.1.17</sparkle:version>
+      <sparkle:shortVersionString>0.1.17</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.17/ClipboardSyncWinSetup-v0.1.17.exe" sparkle:version="0.1.17" sparkle:shortVersionString="0.1.17" length="2899011" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="jtGfVjjRJ2RLjEBbZqIBlV2aFo1Pygmc+mPeIWA4IMzi9BfJkwTpnuzIL0cYk9t3I7k1zNV6uNpV+E1QsyQcCw==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.14</title>
+      <description>clipboard history shows a thumbnail for copied images; Send Files menu now shows the copied file name, or grays out with "no file copied" when nothing is copied</description>
+      <pubDate>Thu, 09 Jul 2026 12:43:43 +08:00</pubDate>
+      <sparkle:version>0.1.14</sparkle:version>
+      <sparkle:shortVersionString>0.1.14</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.14/ClipboardSyncWinSetup-v0.1.14.exe" sparkle:version="0.1.14" sparkle:shortVersionString="0.1.14" length="2896557" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="3Djz2quq/DMw/EpnIiHXv4C+XkwMcdAV0U3YFvfgjKVT7kgiUXb4Yne91hg9QPg+fNLhe4yBcCVFpts18fNOBA==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.12</title>
+      <description>chunked targeted file transfer (no size limit, per-file checksum, progress); fix silent transfer failures (1 MiB client cap, WebSocket fragmentation)</description>
+      <pubDate>Wed, 08 Jul 2026 18:03:35 +08:00</pubDate>
+      <sparkle:version>0.1.12</sparkle:version>
+      <sparkle:shortVersionString>0.1.12</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.12/ClipboardSyncWinSetup-v0.1.12.exe" sparkle:version="0.1.12" sparkle:shortVersionString="0.1.12" length="2895682" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="KdxX5D0NcwOl0QCgfjqHPx9kftWLPF2WKuzIUsC34DZVADsWzfPDjRjz5KtrN2T+QEPkIBlxVo6doP8D8GBXCQ==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.11</title>
+      <description>add port forward feature</description>
+      <pubDate>Wed, 08 Jul 2026 12:51:51 +08:00</pubDate>
+      <sparkle:version>0.1.11</sparkle:version>
+      <sparkle:shortVersionString>0.1.11</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.11/ClipboardSyncWinSetup-v0.1.11.exe" sparkle:version="0.1.11" sparkle:shortVersionString="0.1.11" length="2886291" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="LtGUTVpAsSg7J7jKTp7rW87piTi2iOw7kUqdmvQmWcWCXSek8tyDFFQ8TQytHJ9EBSDJB42tUqgd4LiN3R7WBw==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.10</title>
+      <pubDate>Wed, 08 Jul 2026 10:17:43 +08:00</pubDate>
+      <sparkle:version>0.1.10</sparkle:version>
+      <sparkle:shortVersionString>0.1.10</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.10/ClipboardSyncWinSetup-v0.1.10.exe" sparkle:version="0.1.10" sparkle:shortVersionString="0.1.10" length="2868672" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="WpTUzBb7RQee10jVkVyMrvFSVTGVL/IS8DMfPkLLh5mAXfAr2+wBRBhk16npW4hvhJo63WuN6r+N5WGt1WfODA==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.9</title>
+      <pubDate>Tue, 07 Jul 2026 20:29:12 +08:00</pubDate>
+      <sparkle:version>0.1.9</sparkle:version>
+      <sparkle:shortVersionString>0.1.9</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.9/ClipboardSyncWinSetup-v0.1.9.exe" sparkle:version="0.1.9" sparkle:shortVersionString="0.1.9" length="2865646" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="CHTU5A4Zt+nrJdiHl3KJXrHVni/zXEQz5xYisg2yo7cIEI2zhbX86ekyptV+ub4ZfDjPsR/h6Jrcrz2JRVfBDw==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.8</title>
+      <pubDate>Tue, 07 Jul 2026 17:51:40 +08:00</pubDate>
+      <sparkle:version>0.1.8</sparkle:version>
+      <sparkle:shortVersionString>0.1.8</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.8/ClipboardSyncWinSetup-v0.1.8.exe" sparkle:version="0.1.8" sparkle:shortVersionString="0.1.8" length="2866026" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="YLMJ2UBtzdtNABN80eQj0jf1GVCd89BjyGK73IVxPc6G88XdNeo/e01TwZSH71spqX8VCTM9Bnh26TKfbEsuDA==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.7</title>
+      <pubDate>Tue, 07 Jul 2026 17:47:32 +08:00</pubDate>
+      <sparkle:version>0.1.7</sparkle:version>
+      <sparkle:shortVersionString>0.1.7</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.7/ClipboardSyncWinSetup-v0.1.7.exe" sparkle:version="0.1.7" sparkle:shortVersionString="0.1.7" length="2867576" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="lo4+aLa6PSSOc8AhHkkySkv/RCT13eR0TXlJiIMWGfS64PZP2g7fZyqPki/ALWrQ1Xh2ic76DRJjTJIGTMwsCQ==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.6</title>
+      <pubDate>Tue, 07 Jul 2026 17:30:23 +08:00</pubDate>
+      <sparkle:version>0.1.6</sparkle:version>
+      <sparkle:shortVersionString>0.1.6</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.6/ClipboardSyncWinSetup-v0.1.6.exe" sparkle:version="0.1.6" sparkle:shortVersionString="0.1.6" length="2865941" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="qrOdgQkI321vkvKiOnHiAeGnfdW2MZcfRYsrAaOxNlmsQzoVBFbeCAFcP49k/J3eHKHknE5/XQJxj4xhqz+4Cg==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.5</title>
+      <pubDate>Mon, 06 Jul 2026 16:38:37 +08:00</pubDate>
+      <sparkle:version>0.1.5</sparkle:version>
+      <sparkle:shortVersionString>0.1.5</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.5/ClipboardSyncWinSetup-v0.1.5.exe" sparkle:version="0.1.5" sparkle:shortVersionString="0.1.5" length="2866650" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="2LDLZZWNhi4dT7cp9cGwaa9xGgSfPzL4PP9zVr/HYB9QClWgyoacJg2JH0fh1B6ilGY0mNGyTGO4anLf9huVCw==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.4</title>
+      <pubDate>Mon, 06 Jul 2026 10:21:53 +08:00</pubDate>
+      <sparkle:version>0.1.4</sparkle:version>
+      <sparkle:shortVersionString>0.1.4</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.4/ClipboardSyncWinSetup-v0.1.4.exe" sparkle:version="0.1.4" sparkle:shortVersionString="0.1.4" length="2861363" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="DkHGqxm07+oUKGhbmAhhlnXmPuWgOWaKSTvZiHAUkL9lr0sL6X88N+6/FFBEb7ez34EI5PIMwewN34llXlQ5CA==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.3</title>
+      <pubDate>Fri, 03 Jul 2026 15:20:28 +08:00</pubDate>
+      <sparkle:version>0.1.3</sparkle:version>
+      <sparkle:shortVersionString>0.1.3</sparkle:shortVersionString>
+      <enclosure url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.3/ClipboardSyncWinSetup-v0.1.3.exe" sparkle:version="0.1.3" sparkle:shortVersionString="0.1.3" length="2861294" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="/m6WBqMaeWq/kvNZtKV5igB6uGfiQZTdF8KkZPsyEud/EYcXcHqC+yXR7g7YEoNAlRpqq3S62iPaWvrd2sWQDg==" />
+    </item>
+  </channel>
+</rss>

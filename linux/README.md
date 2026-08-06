@@ -60,8 +60,8 @@ from the project root (same container image the CI release workflow uses; on
 Apple silicon the aarch64 build is native and x86_64 runs emulated):
 
 ```sh
-./build-linux-flatpak.sh                # both arches → artifacts/linux/
-./build-linux-flatpak.sh -u v0.1.20     # also upload to clipboardSyncRelease
+./script/build-linux-flatpak.sh                # both arches → artifacts/linux/
+./script/build-linux-flatpak.sh -u v0.1.20     # also upload to this repo's release
 ```
 
 Or from an existing ostree repo (e.g. on the Steam Deck):

@@ -9,9 +9,9 @@ import Sparkle
 /// source is reachable can also serve the download.
 final class UpdateController: NSObject, SPUUpdaterDelegate {
     private static let feedCandidates = [
-        "https://raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/appcast.xml",
+        "https://raw.githubusercontent.com/qiudaomao/clipboardSync/main/assets/appcast.xml",
         "https://clipboardsync.fuzhuo.me/downloads/appcast.xml",
-        "https://cdn.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/appcast-mirror.xml"
+        "https://cdn.jsdelivr.net/gh/qiudaomao/clipboardSync@main/assets/appcast-mirror.xml"
     ]
 
     private var controller: SPUStandardUpdaterController!

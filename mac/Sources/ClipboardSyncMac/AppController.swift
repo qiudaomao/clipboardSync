@@ -469,11 +469,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func setupMenu() {
-        if let image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: AppText.text("app.name")) {
+        // The menu bar glyph mirrors the app icon: a clipboard with sync arrows on its
+        // board (Assets.xcassets/MenuBarIcon, rendered from IconSources/MenuBarIcon.svg
+        // by script/render-menubar-icon.swift).
+        if let image = NSImage(named: "MenuBarIcon") {
             image.isTemplate = true
+            image.accessibilityDescription = AppText.text("app.name")
             statusItem.button?.image = image
             statusItem.button?.imagePosition = .imageOnly
-        } else if let image = NSImage(named: "MenuBarIcon") {
+        } else if let image = NSImage(systemSymbolName: "clipboard", accessibilityDescription: AppText.text("app.name")) {
             image.isTemplate = true
             statusItem.button?.image = image
             statusItem.button?.imagePosition = .imageOnly

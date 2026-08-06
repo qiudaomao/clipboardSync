@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mirror of win-appcast.xml for networks where GitHub is unreachable; the app falls back to
+     this feed via jsDelivr. jsDelivr refuses to serve .exe files, so the enclosure goes through
+     a GitHub download proxy instead — swap the proxy host here any time it stops working; no
+     app update is needed. The Ed25519 signature check protects the download against tampering
+     regardless of which host serves it. Keep the newest item(s) in sync with win-appcast.xml
+     when releasing (same signature and length; only the URL differs).
+     Items up to v0.2.0 predate the move from the clipboardSyncRelease repo into this repo and
+     keep their original download URLs; that repo stays online to serve them. -->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Clipboard Sync</title>
+    <language>en</language>
+    <item>
+      <title>Clipboard Sync 0.2.0</title>
+      <description>Add optional Auto control-device selection based on the physical mouse currently in use, so mouse activity selects the controller while keyboard activity remains independent across devices.</description>
+      <pubDate>Wed, 05 Aug 2026 19:02:15 +08:00</pubDate>
+      <sparkle:version>0.2.0</sparkle:version>
+      <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.2.0/ClipboardSyncSetup-v0.2.0.exe" sparkle:version="0.2.0" sparkle:shortVersionString="0.2.0" length="3074740" sparkle:os="windows-x64" type="application/x-msdos-program" sparkle:criticalUpdate="false" sparkle:signature="zSp298umoGH2UEZKj0Ze6YslTLPayEWuo0JcJxh3cbzu9RIBNAfS4cMVtLPVmz5FQe+GWaM6Qhv0/FnzP/YTAw==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.38</title>
+      <description>Refresh the beta license release date and extend beta validity to 180 days.</description>
+      <pubDate>Wed, 05 Aug 2026 12:28:46 +08:00</pubDate>
+      <sparkle:version>0.1.38</sparkle:version>
+      <sparkle:shortVersionString>0.1.38</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.38/ClipboardSyncSetup-v0.1.38.exe" sparkle:version="0.1.38" sparkle:shortVersionString="0.1.38" length="3074252" sparkle:os="windows-x64" type="application/x-msdos-program" sparkle:criticalUpdate="false" sparkle:signature="+P3Pizysl0mDRUKDUc1hp+bULtmmgq09s9VJAccZGZf09KCPmnzchX+3NuHGAIL1rY/mSEBPqi3Xb2AxVXedCA==" />
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.37</title>
+      <description>Keep input-sharing drags continuous across peer monitor boundaries, release held remote mouse buttons reliably, and make canonical key mapping deterministic.</description>
+      <pubDate>Mon, 03 Aug 2026 18:38:31 +08:00</pubDate>
+      <sparkle:version>0.1.37</sparkle:version>
+      <sparkle:shortVersionString>0.1.37</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.37/ClipboardSyncSetup-v0.1.37.exe" sparkle:version="0.1.37" sparkle:shortVersionString="0.1.37" length="3073809" sparkle:os="windows-x64" type="application/x-msdos-program" sparkle:criticalUpdate="false" sparkle:signature="xRaF6vlGGtuo8mL0iLCArL2s8mXLdjbeWjDKDR/FOEw1Npd3UJOwkxObDTQXye6amtkUuXY7mCb/e1vAKDLfBQ==" />
+    </item>
+
+    <item>
+      <title>Clipboard Sync 0.1.36</title>
+      <description>Relay numeric keypad keys and mouse Back/Forward buttons during input sharing.</description>
+      <pubDate>Thu, 30 Jul 2026 17:49:57 +08:00</pubDate>
+      <sparkle:version>0.1.36</sparkle:version>
+      <sparkle:shortVersionString>0.1.36</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.36/ClipboardSyncSetup-v0.1.36.exe" sparkle:version="0.1.36" sparkle:shortVersionString="0.1.36" length="3071683" sparkle:os="windows-x64" type="application/x-msdos-program" sparkle:criticalUpdate="false" sparkle:signature="WDQseE3ByxqsJ/pcM6M9mUs7jKKtpr+zwnSpIK8QfZrI/xzi5SlUe4i6gDAMyFb2b6TxyYUJ97a95gjqzz9JCg==" />
+    </item>
+
+    <item>
+      <title>Clipboard Sync 0.1.35</title>
+      <description>Windows-only release.</description>
+      <pubDate>Mon, 27 Jul 2026 15:15:13 +08:00</pubDate>
+      <sparkle:version>0.1.35</sparkle:version>
+      <sparkle:shortVersionString>0.1.35</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.35/ClipboardSyncSetup-v0.1.35.exe" sparkle:version="0.1.35" sparkle:shortVersionString="0.1.35" length="3073528" sparkle:os="windows-x64" type="application/x-msdos-program" sparkle:criticalUpdate="false" sparkle:signature="tT+wUAAyVgJHgofsc4DGcJdkG5bA4xf5C9kQ1UuqwFvRjz5W2K8J329tvTcmRdbt1AeOsSMHxDyfGoQfEYs2Cg==" />
+    </item>
+
+    <item>
+      <title>Clipboard Sync 0.1.34</title>
+      <description>Improve hyper key emulation during remote input sharing on Windows.</description>
+      <pubDate>Mon, 27 Jul 2026 14:44:08 +08:00</pubDate>
+      <sparkle:version>0.1.34</sparkle:version>
+      <sparkle:shortVersionString>0.1.34</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.34/ClipboardSyncSetup-v0.1.34.exe" sparkle:version="0.1.34" sparkle:shortVersionString="0.1.34" length="3073393" sparkle:os="windows-x64" type="application/x-msdos-program" sparkle:criticalUpdate="false" sparkle:signature="FUQdwNLXRziUERWactSPdtwhGGMJsMuJLxaw0dhotUykJ6V76igL60LXsexlTc8XECk7Ipy86TbOEKDG7vOpDg==" />
+    </item>
+
+    <item>
+      <title>Clipboard Sync 0.1.33</title>
+      <description>Fix random stuck modifier keys during remote input sharing.</description>
+      <pubDate>Mon, 27 Jul 2026 14:18:45 +08:00</pubDate>
+      <sparkle:version>0.1.33</sparkle:version>
+      <sparkle:shortVersionString>0.1.33</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.33/ClipboardSyncSetup-v0.1.33.exe" sparkle:version="0.1.33" sparkle:shortVersionString="0.1.33" length="3070437" sparkle:os="windows-x64" type="application/x-msdos-program" sparkle:criticalUpdate="false" sparkle:signature="mUk4TnO3M8pmYPZEUryNEB72i/0nAiB6eNYKET5nY2mXSYygvdHlFx9NheJ0xA4HKAU4r1mizDR7dhPsBNl/Dg=="/>
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.32</title>
+      <description>Add Time Plan sleep-prevention mode: a weekly grid schedule for when Prevent System Sleep is active.</description>
+      <pubDate>Sat, 25 Jul 2026 12:47:58 +08:00</pubDate>
+      <sparkle:version>0.1.32</sparkle:version>
+      <sparkle:shortVersionString>0.1.32</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.32/ClipboardSyncSetup-v0.1.32.exe" sparkle:version="0.1.32" sparkle:shortVersionString="0.1.32" length="3073395" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="2MMLfss1j5sMBGtTu9DOw2/Ox0pADWttE+fj6zgNEqQDnGYo23FMgJmQEskmL7UElWGVYSMtgEuP3K3TIsybAg=="/>
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.31</title>
+      <description>Stabilize shared screen layout across sleep/wake so monitor groups no longer drift when displays reconnect.</description>
+      <pubDate>Thu, 23 Jul 2026 11:35:01 +08:00</pubDate>
+      <sparkle:version>0.1.31</sparkle:version>
+      <sparkle:shortVersionString>0.1.31</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.31/ClipboardSyncSetup-v0.1.31.exe" sparkle:version="0.1.31" sparkle:shortVersionString="0.1.31" length="3067907" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="kRXDGoh70kh/ILRGMDjcJlmUOgVxtNNVTxvm+zyf4dmPWmEBVROYnq/gZKGPKZBYzXqUrvZuAdklrcgbY5lRBQ=="/>
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.29</title>
+      <description>Add an Apply button to the port-forward panel so rule edits can be committed without closing the window.</description>
+      <pubDate>Wed, 22 Jul 2026 23:25:28 +08:00</pubDate>
+      <sparkle:version>0.1.29</sparkle:version>
+      <sparkle:shortVersionString>0.1.29</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.29/ClipboardSyncSetup-v0.1.29.exe" sparkle:version="0.1.29" sparkle:shortVersionString="0.1.29" length="3066864" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="10K4ll6C7Pm6BPmu3Y+ui18rfwHnlM3oi5ZCk8ui4TcOUGXpX+BCWA7BDZ1TN7/hNoIxxNSh3JLgkR81t1NDAQ=="/>
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.28</title>
+      <description>Keep shared screen layouts synchronized when monitors are rearranged or hot-plugged.</description>
+      <pubDate>Wed, 22 Jul 2026 19:44:15 +08:00</pubDate>
+      <sparkle:version>0.1.28</sparkle:version>
+      <sparkle:shortVersionString>0.1.28</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.28/ClipboardSyncSetup-v0.1.28.exe" sparkle:version="0.1.28" sparkle:shortVersionString="0.1.28" length="3066881" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="iS2OSo3dg8tK57z/lzxDYfQmCMACGffoSj23/H0vgrZ7ILjbz03fqojc4zlp6vdOkBzlyHTW5QPnEcJ/R75ABw=="/>
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.27</title>
+      <description>Improve cross-device input responsiveness and macOS remote click handling.</description>
+      <pubDate>Wed, 22 Jul 2026 13:42:39 +08:00</pubDate>
+      <sparkle:version>0.1.27</sparkle:version>
+      <sparkle:shortVersionString>0.1.27</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.27/ClipboardSyncSetup-v0.1.27.exe" sparkle:version="0.1.27" sparkle:shortVersionString="0.1.27" length="3066971" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="bXMPaoSE0+ZUC5gQDRe/5VuMKCAq07Y+mzg56aNznvkYpRlcSRqQevWlqob9v7mvHpz3XjwUYv0nVAb2+FvYBg=="/>
+    </item>
+    <item>
+      <title>Clipboard Sync 0.1.25</title>
+      <description>Speed up port forwarding and move clipboard images and file chunks to authenticated binary frames for faster cross-device transfers.</description>
+      <pubDate>Wed, 22 Jul 2026 10:02:21 +08:00</pubDate>
+      <sparkle:version>0.1.25</sparkle:version>
+      <sparkle:shortVersionString>0.1.25</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.25/ClipboardSyncSetup-v0.1.25.exe" sparkle:version="0.1.25" sparkle:shortVersionString="0.1.25" length="3065249" sparkle:os="windows-x64" type="application/octet-stream" sparkle:criticalUpdate="false" sparkle:signature="loGY9vuaTKRtZhDDW+n183QmAxbECprVhLbe8qgJuvYwRq9aEPU/UbrECTkivIF9RVxdvYKtK670PrVh5pdlDQ=="/>
+    </item>
+  </channel>
+</rss>

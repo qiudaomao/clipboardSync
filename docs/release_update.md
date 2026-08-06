@@ -5,7 +5,14 @@
 
 Steps to cut a new macOS release, notarize it, and publish it through Sparkle 2 auto-update.
 
-Release artifacts (the zipped app and `appcast.xml`) live in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo (`git@github.com:qiudaomao/clipboardSyncRelease.git`), not in this repo. The app's `SUFeedURL` in `mac/App/Info.plist` points at `appcast.xml` there.
+Releases are published from **this repo**: the zipped app is uploaded as a GitHub release asset here, and the update feeds live in [`assets/`](../assets) (`appcast.xml`, `appcast-mirror.xml`). The app's `SUFeedURL` in `mac/App/Info.plist` points at `https://raw.githubusercontent.com/qiudaomao/clipboardSync/main/assets/appcast.xml`.
+
+> **Migration note:** installs of v0.2.1 and earlier still poll the old
+> [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) feeds, so the
+> **next two releases must also be prepended** to the old repo's `appcast.xml` /
+> `appcast-mirror.xml` (their enclosure URLs may point at this repo's release assets) —
+> otherwise old clients cannot see the update. Keep the old repo online afterwards; it serves
+> the old download URLs and remains the jsDelivr mirror bucket.
 
 The EdDSA private signing key (Sparkle) lives in the login Keychain on the machine that ran `generate_keys` (see [Build.md](Build.md)). Every release must be signed with that same key or existing installs will reject the update.
 
@@ -89,11 +96,11 @@ mac/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update mac/Der
 
 Note the printed `sparkle:edSignature` and file `length` — both go into the appcast entry. Sign the zip *after* stapling — stapling changes the file, so any signature taken before it won't match.
 
-## 5. Upload the zip to a release in clipboardSyncRelease
+## 5. Upload the zip to a GitHub release on this repo
 
 ```sh
 gh release create v<version> mac/DerivedData/Export/ClipboardSync-<version>.zip \
-  --repo qiudaomao/clipboardSyncRelease \
+  --repo qiudaomao/clipboardSync \
   --title "v<version>" \
   --notes "release notes here"
 ```
@@ -101,12 +108,12 @@ gh release create v<version> mac/DerivedData/Export/ClipboardSync-<version>.zip 
 This gives the public download URL:
 
 ```
-https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v<version>/ClipboardSync-<version>.zip
+https://github.com/qiudaomao/clipboardSync/releases/download/v<version>/ClipboardSync-<version>.zip
 ```
 
 ## 6. Add the appcast entry and publish
 
-In your local checkout of `clipboardSyncRelease`, add a new `<item>` to `appcast.xml`, newest first:
+Add a new `<item>` to [`assets/appcast.xml`](../assets/appcast.xml), newest first:
 
 ```xml
 <item>
@@ -116,43 +123,51 @@ In your local checkout of `clipboardSyncRelease`, add a new `<item>` to `appcast
     <sparkle:shortVersionString><version></sparkle:shortVersionString>
     <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
     <enclosure
-        url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v<version>/ClipboardSync-<version>.zip"
+        url="https://github.com/qiudaomao/clipboardSync/releases/download/v<version>/ClipboardSync-<version>.zip"
         sparkle:edSignature="<signature from sign_update>"
         length="<file length from sign_update>"
         type="application/octet-stream" />
 </item>
 ```
 
-Commit and push `appcast.xml` to `main` in `clipboardSyncRelease`. Since `SUFeedURL` points at `raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/appcast.xml`, pushing to `main` there is what makes the update live for everyone currently running the app — do this last, once the release asset is uploaded, notarized, stapled, and the signature is verified.
+Commit and push `assets/appcast.xml` to `main`. Since `SUFeedURL` points at `raw.githubusercontent.com/qiudaomao/clipboardSync/main/assets/appcast.xml`, pushing to `main` is what makes the update live for everyone currently running the app — do this last, once the release asset is uploaded, notarized, stapled, and the signature is verified.
+
+While older installs still poll the old feed, prepend the same `<item>` to `appcast.xml` in the `clipboardSyncRelease` repo too (see the migration note at the top).
 
 ## 7. Refresh the jsDelivr mirror
 
 The app falls back to a jsDelivr-served mirror feed when GitHub is unreachable (see
-`UpdateController.swift`). In `clipboardSyncRelease`:
+`UpdateController.swift`):
 
-1. Copy the final zip into `releases/` (jsDelivr serves repo files up to 20 MB; zips are fine,
-   `.exe` is refused — Windows uses a download proxy instead, see `win-appcast-mirror.xml`).
-2. Replace the newest `<item>` in `appcast-mirror.xml` with the new release: same fields and
+Release binaries stay out of this repo's git history (`releases/` is gitignored), so the
+jsDelivr-served zips live in the old `clipboardSyncRelease` repo, which stays online as the
+mirror bucket:
+
+1. Commit the final zip into `releases/` in a checkout of `clipboardSyncRelease` and push
+   (jsDelivr serves repo files up to 20 MB; zips are fine, `.exe` is refused — Windows uses a
+   download proxy instead, see `assets/win-appcast-mirror.xml`).
+2. Prepend the new `<item>` to `assets/appcast-mirror.xml` in this repo: same fields and
    signature as `appcast.xml`, but the enclosure URL is
    `https://cdn.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/releases/ClipboardSync-<version>.zip`.
-3. Commit and push together with `appcast.xml`, then purge the CDN cache so the mirror updates
-   immediately instead of after ~12h:
+3. Commit and push together with `assets/appcast.xml`, then purge the CDN caches so the mirror
+   updates immediately instead of after ~12h:
 
 ```sh
-curl -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/appcast-mirror.xml"
+curl -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSync@main/assets/appcast-mirror.xml"
+curl -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/releases/ClipboardSync-<version>.zip"
 ```
 
-Old zips in `releases/` can be deleted once a newer release is mirrored; the mirror only needs
-the entries the mirror appcast still references.
+Old zips in the release repo's `releases/` can be deleted once a newer release is mirrored; the
+mirror only needs the entries the mirror appcast still references.
 
 ## 8. Publish the self-hosted mirror
 
-Run `./push.sh`. By default the **mirror host pulls large assets from GitHub** (or
+Run `./script/push.sh`. By default the **mirror host pulls large assets from GitHub** (or
 `GH_PROXY`), skips files that already match size+sha256, rewrites appcast enclosures to
 `https://clipboardsync.fuzhuo.me/downloads/`, scp’s only the small appcasts + landing page,
 then verifies with remote `sha256sum` and a public HTTP HEAD — no full re-download.
 
-- `./push.sh --retry` — skip assets already correct on the server.
-- `./push.sh --verify-only` — hash + HEAD only.
-- `./push.sh --scp` — force laptop download + scp (fallback).
+- `./script/push.sh --retry` — skip assets already correct on the server.
+- `./script/push.sh --verify-only` — hash + HEAD only.
+- `./script/push.sh --scp` — force laptop download + scp (fallback).
 - See [release_all.md](release_all.md) §5 for the full efficiency notes.

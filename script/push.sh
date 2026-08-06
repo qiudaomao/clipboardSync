@@ -2,7 +2,7 @@
 # Publish the self-hosted update mirror and landing page at clipboardsync.fuzhuo.me.
 #
 # Default strategy (efficient):
-#  1. Resolve the newest macOS / Windows / Linux assets in qiudaomao/clipboardSyncRelease.
+#  1. Resolve the newest macOS / Windows / Linux assets in qiudaomao/clipboardSync releases.
 #  2. On the mirror host (ssh), curl/wget each large binary from GitHub (or GH_PROXY),
 #     skipping the download when a remote file already matches the expected size + sha256.
 #  3. Create fixed-name aliases (clipboardSyncMac.zip, …) on the server with ln/cp.
@@ -14,12 +14,12 @@
 # cannot reach GitHub, or when LINUX_BUNDLE supplies a local-only flatpak).
 #
 # Usage:
-#   ./push.sh                 # remote-fetch large assets, scp appcasts + site, verify
-#   ./push.sh --retry         # same, but skip remote downloads that already match hash/size
-#   ./push.sh --upload-only   # alias of --retry
-#   ./push.sh --scp           # force local download + scp of large assets
-#   ./push.sh --verify-only   # remote hash + public HEAD only (no fetch/upload)
-#   ./push.sh --help
+#   ./script/push.sh                 # remote-fetch large assets, scp appcasts + site, verify
+#   ./script/push.sh --retry         # same, but skip remote downloads that already match hash/size
+#   ./script/push.sh --upload-only   # alias of --retry
+#   ./script/push.sh --scp           # force local download + scp of large assets
+#   ./script/push.sh --verify-only   # remote hash + public HEAD only (no fetch/upload)
+#   ./script/push.sh --help
 #
 # Environment:
 #   PUSH_CACHE=/path     local cache for --scp / fallback (default: artifacts/push-cache)
@@ -31,8 +31,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-REPO="qiudaomao/clipboardSyncRelease"
+REPO="qiudaomao/clipboardSync"
 MIRROR_SSH="${MIRROR_SSH:-hk}"
 MIRROR_DIR="${MIRROR_DIR:-/usr/share/nginx/html/static/clipboardSync}"
 DOWNLOADS_DIR="$MIRROR_DIR/downloads"
@@ -40,7 +41,7 @@ SITE_REMOTE="$MIRROR_SSH:$MIRROR_DIR"
 DOWNLOADS_REMOTE="$MIRROR_SSH:$DOWNLOADS_DIR"
 PUBLIC_SITE="https://clipboardsync.fuzhuo.me"
 PUBLIC_BASE="$PUBLIC_SITE/downloads"
-CACHE_DIR="${PUSH_CACHE:-$SCRIPT_DIR/artifacts/push-cache}"
+CACHE_DIR="${PUSH_CACHE:-$REPO_ROOT/artifacts/push-cache}"
 GH_PROXY="${GH_PROXY:-}"
 
 MODE="full"          # full | retry | verify-only
@@ -48,14 +49,14 @@ TRANSFER="remote"    # remote | scp
 
 usage() {
   cat <<'EOF'
-Publish clipboardsync.fuzhuo.me downloads + landing page from clipboardSyncRelease.
+Publish clipboardsync.fuzhuo.me downloads + landing page from this repo's releases.
 
-  ./push.sh                 server-side curl/wget of release assets + scp appcasts/site
-  ./push.sh --retry         skip assets already correct on the server (hash/size match)
-  ./push.sh --upload-only   alias of --retry
-  ./push.sh --scp           force local download + scp (fallback when server cannot pull)
-  ./push.sh --verify-only   remote sha256 + public HEAD only
-  ./push.sh --help
+  ./script/push.sh                 server-side curl/wget of release assets + scp appcasts/site
+  ./script/push.sh --retry         skip assets already correct on the server (hash/size match)
+  ./script/push.sh --upload-only   alias of --retry
+  ./script/push.sh --scp           force local download + scp (fallback when server cannot pull)
+  ./script/push.sh --verify-only   remote sha256 + public HEAD only
+  ./script/push.sh --help
 
 Environment:
   PUSH_CACHE=/path     local cache used by --scp / fallback (default: artifacts/push-cache)
@@ -435,10 +436,12 @@ fi
 # ---------------------------------------------------------------------------
 # Appcasts (always rewritten locally — small; enclosures must point at this host)
 # ---------------------------------------------------------------------------
-echo "==> Fetching appcasts and rewriting enclosures to $PUBLIC_BASE"
+echo "==> Rewriting appcast enclosures to $PUBLIC_BASE"
 for feed in appcast.xml win-appcast.xml; do
-  retry gh api -H "Accept: application/vnd.github.raw" "/repos/$REPO/contents/$feed" > "$WORKDIR/$feed"
-  sed -i '' -E "s#https://github.com/$REPO/releases/download/[^/\"]+/#$PUBLIC_BASE/#g" "$WORKDIR/$feed"
+  # Appcasts are authored under assets/ in this repo; the local checkout is the source of truth.
+  cp "$REPO_ROOT/assets/$feed" "$WORKDIR/$feed"
+  # Rewrite both current (this repo) and pre-move (clipboardSyncRelease) enclosure URLs.
+  sed -i '' -E "s#https://github.com/qiudaomao/(clipboardSyncRelease|clipboardSync)/releases/download/[^/\"]+/#$PUBLIC_BASE/#g" "$WORKDIR/$feed"
   grep -q "$PUBLIC_BASE/" "$WORKDIR/$feed" || { echo "!! $feed rewrite produced no local URLs" >&2; exit 1; }
 done
 
@@ -448,8 +451,8 @@ if [ "$MODE" != "verify-only" ]; then
   win_sha="$(local_sha256 "$WORKDIR/win-appcast.xml")"
   scp_file "$WORKDIR/appcast.xml" "appcast.xml" "$app_sha"
   scp_file "$WORKDIR/win-appcast.xml" "win-appcast.xml" "$win_sha"
-  retry scp "$SCRIPT_DIR/landingPage/index.html" "$SITE_REMOTE/"
-  retry scp -r "$SCRIPT_DIR/landingPage/assets" "$SITE_REMOTE/"
+  retry scp "$REPO_ROOT/landingPage/index.html" "$SITE_REMOTE/"
+  retry scp -r "$REPO_ROOT/landingPage/assets" "$SITE_REMOTE/"
   echo "    landing page uploaded"
 fi
 
@@ -553,8 +556,8 @@ done
 
 if [ "$failures" -gt 0 ]; then
   echo "!! $failures check(s) failed" >&2
-  echo "   Retry without re-pulling good assets: ./push.sh --retry" >&2
-  echo "   Force local scp path:               ./push.sh --scp --retry" >&2
+  echo "   Retry without re-pulling good assets: ./script/push.sh --retry" >&2
+  echo "   Force local scp path:               ./script/push.sh --scp --retry" >&2
   exit 1
 fi
 

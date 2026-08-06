@@ -5,7 +5,13 @@
 
 Steps to cut a Windows release and publish it through NetSparkle auto-update.
 
-Release artifacts and `win-appcast.xml` live in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo (`git@github.com:qiudaomao/clipboardSyncRelease.git`), not in this repo.
+Releases are published from **this repo**: the installer is uploaded as a GitHub release asset here, and the feeds (`win-appcast.xml` + signature + mirror) live in [`assets/`](../assets). The app polls `https://raw.githubusercontent.com/qiudaomao/clipboardSync/main/assets/win-appcast.xml`.
+
+> **Migration note:** installs of v0.2.1 and earlier still poll the old
+> [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) feeds, so the
+> **next two releases must also be published** to the old repo's `win-appcast.xml`
+> (+ signature + mirror) — otherwise old clients cannot see the update. Keep the old repo
+> online afterwards for the old download URLs.
 
 The current Windows release target is `v0.2.0`, matching the app version `0.2.0`.
 
@@ -51,8 +57,8 @@ Windows flow below:
      installer unless you pass **`--file-extract-version`** (derives `0.1.20` from
      `...-v0.1.20.exe`).
    - Run the generator against a scratch directory (its output file is named `appcast.xml`,
-     which would collide with the macOS appcast in the release checkout); copy the existing
-     `win-appcast.xml` in as `appcast.xml` first so `--reparse-existing` keeps old items.
+     which would collide with the macOS appcast in `assets/`); copy the existing
+     `assets/win-appcast.xml` in as `appcast.xml` first so `--reparse-existing` keeps old items.
    - Supply each release's user-facing note as `<version>.md` through `--change-log-path`
      (for example, `0.1.38.md`). The generator writes it into the item's `<description>`
      before producing the detached feed signature; do not patch the generated XML afterward.
@@ -95,7 +101,7 @@ after the *old* date and users see “beta expired” even after updating.
 Commit the version bump before building and publishing artifacts:
 
 ```powershell
-git add win/ClipboardSyncWin/ClipboardSyncWin.csproj win/ClipboardSyncInputService/ClipboardSyncInputService.csproj win/ClipboardSyncWin/BetaLicense.cs release_windows.md
+git add win/ClipboardSyncWin/ClipboardSyncWin.csproj win/ClipboardSyncInputService/ClipboardSyncInputService.csproj win/ClipboardSyncWin/BetaLicense.cs docs/release_windows.md
 git commit -m "Bump Windows version to v0.1.10"
 ```
 
@@ -104,7 +110,7 @@ git commit -m "Bump Windows version to v0.1.10"
 Install Inno Setup 6, then run:
 
 ```powershell
-.\build-windows-installer.ps1 -Version 0.1.10 -ReleaseVersion v0.1.10 -StopRunning
+.\script\build-windows-installer.ps1 -Version 0.1.10 -ReleaseVersion v0.1.10 -StopRunning
 ```
 
 If `-ReleaseVersion` is omitted, the script uses `v<Version>`.
@@ -121,11 +127,11 @@ artifacts/windows/ClipboardSyncSetup-v0.1.10.exe
 
 ## 4. Upload the installer
 
-Create a GitHub Release in `clipboardSyncRelease` and attach the installer:
+Create a GitHub Release on this repo and attach the installer:
 
 ```powershell
 gh release create v0.1.10 artifacts/windows/ClipboardSyncSetup-v0.1.10.exe `
-  --repo qiudaomao/clipboardSyncRelease `
+  --repo qiudaomao/clipboardSync `
   --title "v0.1.10" `
   --notes "release notes here"
 ```
@@ -133,12 +139,12 @@ gh release create v0.1.10 artifacts/windows/ClipboardSyncSetup-v0.1.10.exe `
 This gives the public download URL:
 
 ```text
-https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.10/ClipboardSyncSetup-v0.1.10.exe
+https://github.com/qiudaomao/clipboardSync/releases/download/v0.1.10/ClipboardSyncSetup-v0.1.10.exe
 ```
 
 ## 5. Generate and publish the appcast
 
-In a local checkout of `clipboardSyncRelease`, place the installer in a temporary folder and generate or update `win-appcast.xml`:
+Place the installer in a temporary folder and generate or update `assets/win-appcast.xml`:
 
 ```powershell
 netsparkle-generate-appcast `
@@ -147,12 +153,12 @@ netsparkle-generate-appcast `
   -e exe `
   -o windows-x64 `
   -n "Clipboard Sync" `
-  -u "https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.10" `
+  -u "https://github.com/qiudaomao/clipboardSync/releases/download/v0.1.10" `
   --reparse-existing `
   --overwrite-old-items
 ```
 
-Rename the generated appcast to `win-appcast.xml` if needed, then normalize it to LF line endings before generating the appcast signature. The release repo serves appcasts from GitHub raw with LF bytes, so the signature must be generated from the same bytes users will download:
+Rename the generated appcast to `win-appcast.xml` if needed, then normalize it to LF line endings before generating the appcast signature. GitHub raw serves the feed with LF bytes (enforced by `.gitattributes`), so the signature must be generated from the same bytes users will download:
 
 ```powershell
 $path = "win-appcast.xml"
@@ -166,25 +172,25 @@ Generate the appcast signature:
 netsparkle-generate-appcast --generate-signature win-appcast.xml
 ```
 
-Save the printed signature as `win-appcast.xml.signature` beside `win-appcast.xml`.
+Save the printed signature as `win-appcast.xml.signature` beside `win-appcast.xml`, and place both in `assets/`.
 
-Commit and push `win-appcast.xml` and `win-appcast.xml.signature` to `main` in `clipboardSyncRelease`. Since the Windows app points at `raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/win-appcast.xml`, pushing those files makes the update live.
+Commit and push `assets/win-appcast.xml` and `assets/win-appcast.xml.signature` to `main`. Since the Windows app points at `raw.githubusercontent.com/qiudaomao/clipboardSync/main/assets/win-appcast.xml`, pushing those files makes the update live.
 
 ## Mirror note
 
 The app falls back to `win-appcast-mirror.xml` served via jsDelivr when GitHub is unreachable
 (see `WinUpdateController.cs`). After publishing, update the newest `<item>` in
-`win-appcast-mirror.xml` in `clipboardSyncRelease` to match `win-appcast.xml`, with the
+`assets/win-appcast-mirror.xml` to match `win-appcast.xml`, with the
 enclosure URL routed through the GitHub download proxy (jsDelivr refuses `.exe` files):
 
 ```
-https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v<version>/ClipboardSyncSetup-v<version>.exe
+https://gh-proxy.com/https://github.com/qiudaomao/clipboardSync/releases/download/v<version>/ClipboardSyncSetup-v<version>.exe
 ```
 
 Then purge the feed cache:
 
 ```powershell
-curl.exe -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/win-appcast-mirror.xml"
+curl.exe -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSync@main/assets/win-appcast-mirror.xml"
 ```
 
 The proxy host can be swapped in that file at any time without an app update; the Ed25519

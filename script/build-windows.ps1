@@ -11,7 +11,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+# The script lives in script/; the repo root is one level up.
+$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Project = Join-Path $Root "win\ClipboardSyncWin\ClipboardSyncWin.csproj"
 $ServiceProject = Join-Path $Root "win\ClipboardSyncInputService\ClipboardSyncInputService.csproj"
 $Dotnet = Join-Path $Root ".dotnet\dotnet.exe"

@@ -1,10 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="54" height="54" viewBox="0 0 54 54">
-  <g fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="14" y="12" width="26" height="32" rx="5" stroke-width="4"/>
-    <path d="M22 13.5h10c2.2 0 4 1.8 4 4v1.5H18v-1.5c0-2.2 1.8-4 4-4z" fill="#000" stroke-width="0"/>
-    <path d="M20 30a8.5 8.5 0 0 1 13.9-6.6" stroke-width="4"/>
-    <path d="M33.6 18.8l.7 6.8-6.7-.9" fill="#000" stroke-width="0"/>
-    <path d="M34 30a8.5 8.5 0 0 1-13.9 6.6" stroke-width="4"/>
-    <path d="M20.4 41.2l-.7-6.8 6.7.9" fill="#000" stroke-width="0"/>
+  <!-- Menu bar template glyph mirroring the app icon: a clipboard with sync arrows.
+       Source of truth for Assets.xcassets/MenuBarIcon.imageset. Render the PNGs with
+       script/render-menubar-icon.swift (ImageMagick's built-in SVG renderer drops strokes). -->
+  <rect x="10.5" y="8.5" width="33" height="40" rx="6.5" fill="none" stroke="#000" stroke-width="4"/>
+  <rect x="19.5" y="3.5" width="15" height="10" rx="3.5" fill="#000"/>
+  <g fill="none" stroke="#000" stroke-width="3.5" stroke-linecap="round">
+    <path d="M20.03 29.89 A7.0 7.0 0 0 1 31.95 25.55"/>
+    <path d="M33.97 31.11 A7.0 7.0 0 0 1 22.05 35.45"/>
+  </g>
+  <g fill="#000">
+    <path d="M36.05 29.65 L29.05 27.46 L33.86 22.65 Z"/>
+    <path d="M17.95 31.35 L24.95 33.54 L20.14 38.35 Z"/>
   </g>
 </svg>

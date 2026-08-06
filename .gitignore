@@ -35,3 +35,7 @@ artifacts/
 *.log
 
 .keys
+
+# Release zips staged for the jsDelivr mirror live in the clipboardSyncRelease
+# repo, not in this repo's history — keep local copies untracked.
+releases/

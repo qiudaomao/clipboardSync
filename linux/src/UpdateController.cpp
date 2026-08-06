@@ -12,8 +12,8 @@
 #include <QVersionNumber>
 
 namespace {
-const QUrl ReleasesPage(QStringLiteral("https://github.com/qiudaomao/clipboardSyncRelease/releases"));
-const QUrl LatestReleaseUrl(QStringLiteral("https://github.com/qiudaomao/clipboardSyncRelease/releases/latest"));
+const QUrl ReleasesPage(QStringLiteral("https://github.com/qiudaomao/clipboardSync/releases"));
+const QUrl LatestReleaseUrl(QStringLiteral("https://github.com/qiudaomao/clipboardSync/releases/latest"));
 }
 
 UpdateController::UpdateController(QObject *parent)

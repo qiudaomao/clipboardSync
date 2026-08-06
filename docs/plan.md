@@ -30,7 +30,7 @@ stage5:
 - macOS: Sparkle 2 framework, appcast-based
 - Windows: NetSparkle (Sparkle-equivalent for .NET), reusing an appcast-style feed to keep update-server logic similar across platforms
 - macOS implemented first, Windows to follow
-- release artifacts (zipped app builds, appcast.xml) are hosted in a separate repo, clipboardSyncRelease (git@github.com:qiudaomao/clipboardSyncRelease.git), not in this repo
+- release artifacts (zipped app builds) are attached to this repo's GitHub Releases, and the appcast feeds live in assets/ (previously hosted in the separate clipboardSyncRelease repo; migrated when the project went open source)
 
 current implementation focus:
 - Shared JSON protocol documented in docs/protocol.md.

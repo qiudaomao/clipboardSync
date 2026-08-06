@@ -1,14 +1,13 @@
 name: Linux Release
 
-# Builds the x86_64 Flatpak on a GitHub-hosted runner and uploads it to the
-# public qiudaomao/clipboardSyncRelease repo, where push.sh picks it up for the
+# Builds the x86_64 Flatpak on a GitHub-hosted runner and uploads it to this
+# repo's GitHub release for the tag, where push.sh picks it up for the
 # self-hosted download mirror. Build the aarch64 bundle on a native ARM host
-# with `./build-linux-flatpak.sh aarch64 -u v<version>`: QEMU on a hosted x86
+# with `./script/build-linux-flatpak.sh aarch64 -u v<version>`: QEMU on a hosted x86
 # runner cannot create the user namespace required by Flatpak's bwrap sandbox.
 #
-# Required secret: RELEASE_TOKEN — a PAT with "contents: write" on
-# qiudaomao/clipboardSyncRelease (the default GITHUB_TOKEN cannot upload to
-# another repository).
+# Releases live on this repo, so the default GITHUB_TOKEN (with the
+# `contents: write` permission below) is enough — no PAT required.
 
 on:
   push:
@@ -16,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "clipboardSyncRelease tag to upload the bundles to (e.g. v0.1.19)"
+        description: "Release tag to upload the bundles to (e.g. v0.1.19)"
         required: true
 
 jobs:
@@ -25,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build and verify Flatpak bundle
-        run: ./build-linux-flatpak.sh x86_64
+        run: ./script/build-linux-flatpak.sh x86_64
       - uses: actions/upload-artifact@v4
         with:
           name: clipboard-sync-linux-x86_64
@@ -35,19 +34,21 @@ jobs:
   publish:
     needs: flatpak
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - name: Download bundles
         uses: actions/download-artifact@v4
         with:
           path: bundles
           merge-multiple: true
-      - name: Upload to clipboardSyncRelease
+      - name: Upload to this repo's release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${{ github.event.inputs.release_tag || github.ref_name }}"
           find bundles -name '*.flatpak' -print
-          gh release view "$tag" --repo qiudaomao/clipboardSyncRelease >/dev/null \
-            || gh release create "$tag" --repo qiudaomao/clipboardSyncRelease --title "$tag" --notes "Linux flatpak bundles for $tag"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null \
+            || gh release create "$tag" --repo "$GITHUB_REPOSITORY" --title "$tag" --notes "Linux flatpak bundles for $tag"
           find bundles -name '*.flatpak' -exec \
-            gh release upload "$tag" {} --repo qiudaomao/clipboardSyncRelease --clobber \;
+            gh release upload "$tag" {} --repo "$GITHUB_REPOSITORY" --clobber \;

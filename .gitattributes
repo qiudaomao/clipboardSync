@@ -1,0 +1,5 @@
+# Update feeds must stay LF: the NetSparkle appcast signature is computed over the
+# exact bytes, and Sparkle/NetSparkle fetch these files raw from GitHub.
+appcast*.xml text eol=lf
+win-appcast*.xml text eol=lf
+*.xml.signature -text

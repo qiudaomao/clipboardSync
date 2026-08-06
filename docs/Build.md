@@ -1,6 +1,7 @@
-# Clipboard Sync
+# Building Clipboard Sync
 
-Native clipboard sync over WebSocket.
+How to build and run each platform's app from source. Release/publishing steps
+live in [release_all.md](release_all.md).
 
 ## Stage 1 Goal
 
@@ -19,10 +20,14 @@ Stage 1 intentionally excludes clipboard history, images, files, encryption, and
 
 ## Project Layout
 
-- `docs/protocol.md`: shared WebSocket message contract.
+- `docs/`: this guide, [protocol.md](protocol.md) (shared WebSocket message contract), and the release guides.
 - `mac/`: Xcode app project and Swift source for the macOS menu bar app.
 - `win/ClipboardSyncWin/`: .NET WinForms Windows tray app.
 - `linux/`: Qt 6/CMake Linux app, tests, desktop metadata, and Flatpak manifest.
+- `script/`: build and publish scripts (`build-windows*.ps1`, `build-linux-flatpak.sh`, `push.sh`).
+- `assets/`: screenshots and the Sparkle/NetSparkle update feeds (`appcast*.xml`, `win-appcast*.xml`).
+- `releases/`: gitignored local staging for mirror zips (the jsDelivr-served copies are committed to the `clipboardSyncRelease` repo).
+- `landingPage/`: the clipboardsync.fuzhuo.me site.
 
 ## Run Linux
 
@@ -68,7 +73,7 @@ The Swift Package in `mac/Package.swift` is kept as a lightweight compiler check
 
 ### Auto-update (Sparkle 2)
 
-The macOS app checks for updates via [Sparkle 2](https://sparkle-project.org/), added as a Swift Package dependency in the Xcode project (and mirrored in `mac/Package.swift` for the compiler check). It reads `SUFeedURL` from `mac/App/Info.plist`, which points at `appcast.xml` in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo, served via `raw.githubusercontent.com`. Release zips are also uploaded as GitHub release assets on that repo, keeping release artifacts out of the main source repo.
+The macOS app checks for updates via [Sparkle 2](https://sparkle-project.org/), added as a Swift Package dependency in the Xcode project (and mirrored in `mac/Package.swift` for the compiler check). It reads `SUFeedURL` from `mac/App/Info.plist`, which points at `assets/appcast.xml` in this repo, served via `raw.githubusercontent.com`. Release zips are uploaded as GitHub release assets on this repo.
 
 One-time setup, from Xcode after the Sparkle package has resolved (Xcode places its tools under `~/Library/Developer/Xcode/DerivedData/.../SourcePackages/artifacts/sparkle/Sparkle/bin/`, or build `generate_keys`/`sign_update` from the Sparkle repo directly):
 
@@ -97,9 +102,9 @@ input is ignored.
 
 ### Auto-update (NetSparkle)
 
-The Windows app checks for updates via [NetSparkleUpdater](https://github.com/NetSparkleUpdater/NetSparkle). It points at `win-appcast.xml` in the separate [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo and expects installer-only releases named like `ClipboardSyncWinSetup-v0.1.0.exe`. The tray menu exposes both an on-demand update check and a native update-history window backed by the same primary and fallback feeds.
+The Windows app checks for updates via [NetSparkleUpdater](https://github.com/NetSparkleUpdater/NetSparkle). It points at `assets/win-appcast.xml` in this repo and expects installer-only releases named like `ClipboardSyncWinSetup-v0.1.0.exe`. The tray menu exposes both an on-demand update check and a native update-history window backed by the same primary and fallback feeds.
 
-Use `build-windows-installer.ps1` to publish a small framework-dependent build and package it with Inno Setup 6. Users must have the .NET 8 Desktop Runtime (x64); if it is missing, the .NET app host shows Microsoft's runtime install guidance when the app launches. For a full cross-platform release, see [release_all.md](release_all.md); Windows-only details are in [release_windows.md](release_windows.md).
+Use `script/build-windows-installer.ps1` to publish a small framework-dependent build and package it with Inno Setup 6. Users must have the .NET 8 Desktop Runtime (x64); if it is missing, the .NET app host shows Microsoft's runtime install guidance when the app launches. For a full cross-platform release, see [release_all.md](release_all.md); Windows-only details are in [release_windows.md](release_windows.md).
 
 ## Notes
 

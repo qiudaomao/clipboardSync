@@ -12,7 +12,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+# The script lives in script/; the repo root is one level up.
+$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $InnoScript = Join-Path $Root "win\installer\ClipboardSyncWin.iss"
 
 if ([string]::IsNullOrWhiteSpace($ReleaseVersion)) {
@@ -40,7 +41,7 @@ if (-not $isccPath) {
     throw "Inno Setup 6 compiler was not found. Install Inno Setup 6 or add ISCC.exe to PATH."
 }
 
-& (Join-Path $Root "build-windows.ps1") -Configuration Release -Runtime $Runtime -SelfContained:$SelfContained -StopRunning:$StopRunning
+& (Join-Path $Root "script\build-windows.ps1") -Configuration Release -Runtime $Runtime -SelfContained:$SelfContained -StopRunning:$StopRunning
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

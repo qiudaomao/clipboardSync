@@ -7,17 +7,18 @@
 # Output: artifacts/linux/clipboardSyncLinux-<arch>.flatpak
 #
 # Usage:
-#   ./build-linux-flatpak.sh                 # build both arches
-#   ./build-linux-flatpak.sh x86_64          # build one arch
-#   ./build-linux-flatpak.sh -u v0.1.20      # build both and upload to the
-#                                            # clipboardSyncRelease tag (for push.sh)
+#   ./script/build-linux-flatpak.sh          # build both arches
+#   ./script/build-linux-flatpak.sh x86_64   # build one arch
+#   ./script/build-linux-flatpak.sh -u v0.1.20   # build both and upload to this
+#                                                # repo's release tag (for push.sh)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 IMAGE="ghcr.io/flathub-infra/flatpak-github-actions:kde-6.9"
 MANIFEST="linux/packaging/io.github.qiudaomao.clipboardsync.yml"
 APP_ID="io.github.qiudaomao.clipboardsync"
-OUT_DIR="$SCRIPT_DIR/artifacts/linux"
+OUT_DIR="$REPO_ROOT/artifacts/linux"
 
 UPLOAD_TAG=""
 ARCHES=()
@@ -39,7 +40,7 @@ for arch in "${ARCHES[@]}"; do
   bundle="clipboardSyncLinux-$arch.flatpak"
   echo "==> Building $bundle (docker platform $platform)"
   docker run --rm --privileged --platform "$platform" \
-    -v "$SCRIPT_DIR:/work" -w /work "$IMAGE" bash -ec "
+    -v "$REPO_ROOT:/work" -w /work "$IMAGE" bash -ec "
       flatpak-builder --arch=$arch --force-clean --disable-rofiles-fuse \
         --state-dir=/tmp/flatpak-state \
         --repo=/tmp/flatpak-repo /tmp/flatpak-build $MANIFEST >/tmp/build.log 2>&1 \
@@ -57,10 +58,10 @@ for arch in "${ARCHES[@]}"; do
 done
 
 if [ -n "$UPLOAD_TAG" ]; then
-  echo "==> Uploading bundles to clipboardSyncRelease $UPLOAD_TAG"
+  echo "==> Uploading bundles to qiudaomao/clipboardSync $UPLOAD_TAG"
   for arch in "${ARCHES[@]}"; do
     gh release upload "$UPLOAD_TAG" "$OUT_DIR/clipboardSyncLinux-$arch.flatpak" \
-      --repo qiudaomao/clipboardSyncRelease --clobber
+      --repo qiudaomao/clipboardSync --clobber
   done
-  echo "==> Done. Run ./push.sh to publish the mirror."
+  echo "==> Done. Run ./script/push.sh to publish the mirror."
 fi

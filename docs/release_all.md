@@ -7,11 +7,19 @@ Platform-specific deep dives still live in:
 - [release_windows.md](release_windows.md) — Windows NetSparkle / Inno Setup details
 - [linux/README.md](linux/README.md) — Flatpak / update details
 
-Artifacts and appcasts are published to
-[clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease)
-(`git@github.com:qiudaomao/clipboardSyncRelease.git`), not this repo. The
-self-hosted mirror at `https://clipboardsync.fuzhuo.me` is refreshed with
-[`./push.sh`](push.sh).
+Artifacts are attached to **this repo's GitHub Releases**, and the update feeds
+(`appcast.xml`, `win-appcast.xml`, + mirrors) live in [`assets/`](../assets).
+The self-hosted mirror at `https://clipboardsync.fuzhuo.me` is refreshed with
+[`./script/push.sh`](../script/push.sh).
+
+> **Migration note:** installs of v0.2.1 and earlier still poll the feeds in the old
+> [clipboardSyncRelease](https://github.com/qiudaomao/clipboardSyncRelease) repo, so the
+> **next two releases must be published to both repos**: prepend each release's items to the
+> old repo's `appcast.xml` / `appcast-mirror.xml` / `win-appcast.xml` (+ signature + win
+> mirror) as well — the enclosure URLs there may point at this repo's release assets.
+> Otherwise old clients cannot see the update. After those two releases the old feeds can be
+> left frozen, but keep the repo online: it serves the old download URLs and remains the
+> jsDelivr mirror bucket for macOS zips.
 
 Set these once per release:
 
@@ -19,7 +27,6 @@ Set these once per release:
 VERSION=0.1.30          # numeric, no v
 TAG=v${VERSION}
 NOTES="One-line user-facing summary of what changed."
-RELEASE_REPO="$HOME/proj/github/clipboardSyncRelease"   # local checkout
 ```
 
 ---
@@ -35,7 +42,7 @@ RELEASE_REPO="$HOME/proj/github/clipboardSyncRelease"   # local checkout
 | NetSparkle Ed25519 keys | `~/Library/Application Support/netsparkle/NetSparkle_Ed25519.{priv,pub}` matching `WinUpdateController.cs` |
 | NetSparkle appcast generator | `~/.dotnet/tools/.store/netsparkleupdater.tools.appcastgenerator/**/NetSparkleUpdater.Tools.AppCastGenerator.dll` |
 | Docker (Inno Setup + Flatpak) | `docker info` (OrbStack/Colima fine) |
-| `gh` auth with write on release repo | `gh auth status` |
+| `gh` auth with write on this repo | `gh auth status` |
 | SSH host `hk` for the self-hosted mirror | `ssh hk 'echo ok'` |
 
 ---
@@ -50,7 +57,7 @@ Update every platform in one commit so the shared release tag is consistent.
 | Windows | `win/ClipboardSyncWin/ClipboardSyncWin.csproj`, `win/ClipboardSyncInputService/ClipboardSyncInputService.csproj` | `Version`, `AssemblyVersion`, `FileVersion`, `InformationalVersion` |
 | Linux | `linux/CMakeLists.txt` | `project(... VERSION x.y.z ...)` |
 | Linux | `linux/packaging/io.github.qiudaomao.clipboardsync.metainfo.xml` | prepend `<release version="x.y.z" date="YYYY-MM-DD"/>` |
-| Docs | `release_windows.md` | “current Windows release target” line |
+| Docs | `docs/release_windows.md` | “current Windows release target” line |
 | Beta license | `mac/Sources/ClipboardSyncMac/BetaLicense.swift`, `win/ClipboardSyncWin/BetaLicense.cs` | set `releaseDate` / `ReleaseDateUtc` to **today (UTC)** — if it goes stale, users hit “beta expired” even on the latest build |
 
 ```sh
@@ -59,7 +66,7 @@ git add mac/ClipboardSyncMac.xcodeproj/project.pbxproj \
   win/ClipboardSyncInputService/ClipboardSyncInputService.csproj \
   linux/CMakeLists.txt \
   linux/packaging/io.github.qiudaomao.clipboardsync.metainfo.xml \
-  release_windows.md \
+  docs/release_windows.md \
   mac/Sources/ClipboardSyncMac/BetaLicense.swift \
   win/ClipboardSyncWin/BetaLicense.cs
 git commit -m "Bump version to ${TAG}"
@@ -146,7 +153,7 @@ ls -la "artifacts/windows/ClipboardSyncSetup-${TAG}.exe"
 ### 2c. Linux Flatpaks (both arches, local Docker)
 
 ```sh
-./build-linux-flatpak.sh aarch64 x86_64
+./script/build-linux-flatpak.sh aarch64 x86_64
 ls -la artifacts/linux/clipboardSyncLinux-*.flatpak
 ```
 
@@ -155,7 +162,7 @@ can also build x86_64 on tag push; aarch64 still needs a native ARM host or this
 
 ---
 
-## 3. Upload assets to clipboardSyncRelease
+## 3. Upload assets to this repo's GitHub release
 
 Create one GitHub release that carries **all four** assets:
 
@@ -165,7 +172,7 @@ gh release create "${TAG}" \
   "artifacts/windows/ClipboardSyncSetup-${TAG}.exe" \
   artifacts/linux/clipboardSyncLinux-x86_64.flatpak \
   artifacts/linux/clipboardSyncLinux-aarch64.flatpak \
-  --repo qiudaomao/clipboardSyncRelease \
+  --repo qiudaomao/clipboardSync \
   --title "${TAG}" \
   --notes "${NOTES}"
 ```
@@ -178,17 +185,17 @@ gh release upload "${TAG}" \
   "artifacts/windows/ClipboardSyncSetup-${TAG}.exe" \
   artifacts/linux/clipboardSyncLinux-x86_64.flatpak \
   artifacts/linux/clipboardSyncLinux-aarch64.flatpak \
-  --repo qiudaomao/clipboardSyncRelease --clobber
+  --repo qiudaomao/clipboardSync --clobber
 ```
 
 ---
 
-## 4. Update appcasts in clipboardSyncRelease
+## 4. Update the appcasts in `assets/`
 
-Work in the local `clipboardSyncRelease` checkout. Commit **after** the release
+The feeds are versioned in this repo under `assets/`. Commit **after** the release
 assets are uploaded so enclosure URLs resolve.
 
-### 4a. macOS `appcast.xml` + `appcast-mirror.xml`
+### 4a. macOS `assets/appcast.xml` + `assets/appcast-mirror.xml`
 
 Prepend a new `<item>` (newest first). Use the `sign_update` signature/length and
 `CURRENT_PROJECT_VERSION` as `sparkle:version`:
@@ -202,7 +209,7 @@ Prepend a new `<item>` (newest first). Use the `sign_update` signature/length an
     <sparkle:shortVersionString>0.1.30</sparkle:shortVersionString>
     <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
     <enclosure
-        url="https://github.com/qiudaomao/clipboardSyncRelease/releases/download/v0.1.30/ClipboardSync-0.1.30.zip"
+        url="https://github.com/qiudaomao/clipboardSync/releases/download/v0.1.30/ClipboardSync-0.1.30.zip"
         sparkle:edSignature="…"
         length="…"
         type="application/octet-stream" />
@@ -213,13 +220,15 @@ Mirror feed: same item, enclosure URL =
 
 `https://cdn.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/releases/ClipboardSync-${VERSION}.zip`
 
-Also copy the stapled zip into `releases/` for jsDelivr:
+Release binaries stay out of this repo's history (`releases/` is gitignored), so commit the
+stapled zip into `releases/` in a checkout of the old `clipboardSyncRelease` repo (kept online
+as the jsDelivr mirror bucket) and push it there:
 
 ```sh
-cp "…/ClipboardSync-${VERSION}.zip" "${RELEASE_REPO}/releases/"
+cp "mac/DerivedData/Export-v${VERSION}/ClipboardSync-${VERSION}.zip" <clipboardSyncRelease checkout>/releases/
 ```
 
-### 4b. Windows `win-appcast.xml` + signature + mirror
+### 4b. Windows `assets/win-appcast.xml` + signature + mirror
 
 Generate from macOS (tool 2.9.0 quirks — see [release_windows.md](release_windows.md)):
 
@@ -235,7 +244,7 @@ cp "artifacts/windows/ClipboardSyncSetup-${TAG}.exe" "$WORKDIR/"
 # Seed with existing feed (LF) so --reparse-existing keeps history:
 python3 - <<PY
 from pathlib import Path
-src = Path("${RELEASE_REPO}/win-appcast.xml").read_text().replace("\r\n", "\n")
+src = Path("assets/win-appcast.xml").read_text().replace("\r\n", "\n")
 Path("${WORKDIR}/appcast.xml").write_bytes(src.encode())
 PY
 # Place the exact user-facing release note in "$CHANGELOG_DIR/${VERSION}.md" before
@@ -244,45 +253,49 @@ PY
 ~/.dotnet/dotnet exec --fx-version "$FX" "$APPCAST_GEN" \
   -a "$WORKDIR" -b "$WORKDIR" -e exe -o windows-x64 \
   -n "Clipboard Sync" \
-  -u "https://github.com/qiudaomao/clipboardSyncRelease/releases/download/${TAG}" \
+  -u "https://github.com/qiudaomao/clipboardSync/releases/download/${TAG}" \
   -p "$CHANGELOG_DIR" \
   --reparse-existing --overwrite-old-items --file-extract-version
 
 # Use the signature file written *with* the appcast (already LF on macOS):
-cp "$WORKDIR/appcast.xml" "${RELEASE_REPO}/win-appcast.xml"
-cp "$WORKDIR/appcast.xml.signature" "${RELEASE_REPO}/win-appcast.xml.signature"
+cp "$WORKDIR/appcast.xml" assets/win-appcast.xml
+cp "$WORKDIR/appcast.xml.signature" assets/win-appcast.xml.signature
 ```
 
-Update `win-appcast-mirror.xml`: same newest item as `win-appcast.xml`, but enclosure URL through the GitHub download proxy (jsDelivr refuses `.exe`):
+Update `assets/win-appcast-mirror.xml`: same newest item as `win-appcast.xml`, but enclosure URL through the GitHub download proxy (jsDelivr refuses `.exe`):
 
 ```
-https://gh-proxy.com/https://github.com/qiudaomao/clipboardSyncRelease/releases/download/${TAG}/ClipboardSyncSetup-${TAG}.exe
+https://gh-proxy.com/https://github.com/qiudaomao/clipboardSync/releases/download/${TAG}/ClipboardSyncSetup-${TAG}.exe
 ```
 
 ### 4c. Commit, push, purge jsDelivr
 
 ```sh
-cd "${RELEASE_REPO}"
-git add appcast.xml appcast-mirror.xml \
-  win-appcast.xml win-appcast.xml.signature win-appcast-mirror.xml \
-  "releases/ClipboardSync-${VERSION}.zip"
+git add assets/appcast.xml assets/appcast-mirror.xml \
+  assets/win-appcast.xml assets/win-appcast.xml.signature assets/win-appcast-mirror.xml
 git commit -m "Publish macOS, Windows, and Linux ${TAG}"
 git push origin main
 
-curl -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/appcast-mirror.xml"
-curl -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/win-appcast-mirror.xml"
+# In the clipboardSyncRelease checkout (jsDelivr mirror bucket):
+#   git add releases/ClipboardSync-${VERSION}.zip && git commit -m "Mirror ${TAG}" && git push
+
+curl -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSync@main/assets/appcast-mirror.xml"
+curl -s "https://purge.jsdelivr.net/gh/qiudaomao/clipboardSync@main/assets/win-appcast-mirror.xml"
 ```
 
 Confirm raw feeds show the new version:
 
 ```sh
-curl -sL https://raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/appcast.xml | head -25
-curl -sL https://raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/win-appcast.xml | head -15
+curl -sL https://raw.githubusercontent.com/qiudaomao/clipboardSync/main/assets/appcast.xml | head -25
+curl -sL https://raw.githubusercontent.com/qiudaomao/clipboardSync/main/assets/win-appcast.xml | head -15
 ```
+
+While older installs still poll the old feeds, mirror the same items into the
+`clipboardSyncRelease` repo's feeds too (see the migration note at the top).
 
 ---
 
-## 5. Self-hosted mirror (`./push.sh`)
+## 5. Self-hosted mirror (`./script/push.sh`)
 
 Default path is **server-side fetch**, not laptop download → scp:
 
@@ -293,11 +306,11 @@ Default path is **server-side fetch**, not laptop download → scp:
 5. Verify with **`sha256sum` over SSH** (no body re-download) plus a cheap public HTTP **HEAD** (Content-Length only).
 
 ```sh
-./push.sh                              # remote-fetch assets, scp appcasts/site, verify
-./push.sh --retry                      # skip assets already correct on the server
-./push.sh --verify-only                # hash + HEAD only
-./push.sh --scp                        # force old local-download + scp path
-GH_PROXY=https://gh-proxy.com/ ./push.sh   # if the host reaches GitHub slowly
+./script/push.sh                              # remote-fetch assets, scp appcasts/site, verify
+./script/push.sh --retry                      # skip assets already correct on the server
+./script/push.sh --verify-only                # hash + HEAD only
+./script/push.sh --scp                        # force old local-download + scp path
+GH_PROXY=https://gh-proxy.com/ ./script/push.sh   # if the host reaches GitHub slowly
 ```
 
 ### Why this is better
@@ -314,7 +327,10 @@ GH_PROXY=https://gh-proxy.com/ ./push.sh   # if the host reaches GitHub slowly
 
 ---
 
-## 6. Source repo push
+## 6. Push
+
+The version bump, appcasts, and mirror zip all live in this repo, so one push
+publishes everything:
 
 ```sh
 git push origin main
@@ -334,9 +350,10 @@ when you upload flatpaks yourself.
 - [ ] Windows installer built; NetSparkle enclosure signature present
 - [ ] Linux x86_64 + aarch64 flatpaks present
 - [ ] GitHub release `${TAG}` has all four assets
-- [ ] `appcast.xml` / `win-appcast.xml` (+ mirrors + signature) on release repo `main`
+- [ ] `assets/appcast.xml` / `assets/win-appcast.xml` (+ mirrors + signature) pushed to `main`
+- [ ] Old `clipboardSyncRelease` feeds updated too (required for the next two releases)
 - [ ] jsDelivr purged
-- [ ] `./push.sh` succeeded (or `./push.sh --retry` after a flake)
+- [ ] `./script/push.sh` succeeded (or `./script/push.sh --retry` after a flake)
 - [ ] Spot-check: https://clipboardsync.fuzhuo.me/ and a sample download URL
 
 ---
@@ -348,7 +365,7 @@ when you upload flatpaks yourself.
 | Bump | pbxproj + 2× csproj + CMake + metainfo + 2× BetaLicense release date |
 | Mac build | `xcodebuild archive` → `exportArchive` → `notarytool` → `stapler` → `sign_update` |
 | Win build | `dotnet publish` ×2 → `docker … amake/innosetup` |
-| Linux build | `./build-linux-flatpak.sh aarch64 x86_64` |
-| Release assets | `gh release create/upload … --repo qiudaomao/clipboardSyncRelease` |
-| Appcasts | edit + NetSparkle generator in release checkout |
-| Mirror | `./push.sh` then `./push.sh --retry` if needed |
+| Linux build | `./script/build-linux-flatpak.sh aarch64 x86_64` |
+| Release assets | `gh release create/upload … --repo qiudaomao/clipboardSync` |
+| Appcasts | edit `assets/*.xml` + NetSparkle generator (§4b) |
+| Mirror | `./script/push.sh` then `./script/push.sh --retry` if needed |

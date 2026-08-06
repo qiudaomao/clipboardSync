@@ -42,7 +42,7 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>SUFeedURL</key>
-	<string>https://raw.githubusercontent.com/qiudaomao/clipboardSyncRelease/main/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/qiudaomao/clipboardSync/main/assets/appcast.xml</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>

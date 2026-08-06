@@ -48,7 +48,6 @@
   }
   :root[data-theme="light"] .glow { opacity: 0.5; }
   :root[data-theme="light"] header.nav { background: rgba(255,255,255,0.72); }
-  :root[data-theme="light"] .beta-tag,
   :root[data-theme="light"] .shot-label span.badge { background: rgba(15,23,42,0.05); }
   :root[data-theme="light"] .btn-ghost,
   :root[data-theme="light"] .eyebrow { background: rgba(15,23,42,0.03); }
@@ -62,7 +61,7 @@
   :root[data-theme="light"] .hero-img img { filter: drop-shadow(0 24px 50px rgba(15,23,42,0.22)); }
 
   * { box-sizing: border-box; }
-  body, header.nav, .beta-tag, .eyebrow, .shot-card, .shot-label span.badge, .cta-band {
+  body, header.nav, .eyebrow, .shot-card, .shot-label span.badge, .cta-band {
     transition: background-color .3s ease, color .3s ease, border-color .3s ease;
   }
   html { scroll-behavior: smooth; }
@@ -118,17 +117,6 @@
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     display: inline-flex; align-items: center; justify-content: center;
     font-size: 14px;
-  }
-  .beta-tag {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: var(--accent);
-    background: rgba(255,255,255,0.06);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 2px 8px;
-    text-transform: uppercase;
   }
   .nav-actions { display: flex; align-items: center; gap: 10px; }
   .lang-btn { cursor: pointer; font-family: inherit; }
@@ -435,8 +423,9 @@
   }
   .trust-band h2 { margin: 0 0 10px; font-size: 25px; }
   .trust-band > p { color: var(--muted); line-height: 1.65; margin: 0 0 20px; }
-  .trust-points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .trust-points { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
   .trust-point { font-size: 14px; font-weight: 600; }
+  .trust-point a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
   section.faq { padding: 18px 0 80px; }
   .faq-list { max-width: 780px; margin: 0 auto; }
   .faq-list details { border-bottom: 1px solid var(--border); padding: 18px 0; }
@@ -481,7 +470,8 @@
     .brand { font-size: 15px; }
     .brand { white-space: nowrap; }
     .brand-mark { width: 24px; height: 24px; font-size: 12px; }
-    .beta-tag, .gh-btn, .theme-btn { display: none; }
+    .theme-btn { display: none; }
+    .gh-btn { padding: 8px 10px; }
     .nav-actions { gap: 6px; }
     .nav-actions .btn { white-space: nowrap; padding: 8px 10px; }
     .btn { padding: 9px 14px; font-size: 13px; }
@@ -515,7 +505,6 @@
     <div class="brand">
       <span class="brand-mark">📋</span>
       Clipboard Sync
-      <span class="beta-tag">Beta</span>
     </div>
     <nav class="links">
       <a href="#setup" data-i18n="nav.setup">How it works</a>
@@ -524,8 +513,8 @@
       <a href="#features" data-i18n="nav.features">Features</a>
     </nav>
     <div class="nav-actions">
-      <a class="btn btn-ghost gh-btn" href="https://github.com/qiudaomao/clipboardSyncRelease" target="_blank" rel="noopener"
-         data-i18n-title="nav.reportIssue" title="Report an issue" aria-label="Report an issue">
+      <a class="btn btn-ghost gh-btn" href="https://github.com/qiudaomao/clipboardSync" target="_blank" rel="noopener"
+         data-i18n-title="nav.github" title="Open source on GitHub" aria-label="Open source on GitHub">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
       </a>
       <button class="btn btn-ghost theme-btn" id="themeToggle" type="button" data-i18n-title="theme.toggle" title="Switch color theme" aria-label="Switch color theme">🌙</button>
@@ -536,7 +525,7 @@
 </header>
 
 <section class="hero wrap">
-  <div class="eyebrow"><span class="dot"></span> <span data-i18n="hero.eyebrow">macOS, Windows &amp; Linux · Free in beta</span></div>
+  <div class="eyebrow"><span class="dot"></span> <span data-i18n="hero.eyebrow">macOS, Windows &amp; Linux · Free &amp; open source</span></div>
   <h1 data-i18n-html="hero.title">Your clipboard,<br /><span class="gradient">everywhere on your LAN.</span></h1>
   <p class="subtitle" data-i18n="hero.subtitle">
     A lightweight menubar app that syncs text, images, and files across your Mac and PC,
@@ -560,7 +549,7 @@
       </div>
     </details>
   </div>
-  <div class="platform-note" data-i18n="hero.note">Free during beta · No account required · Your data stays on your network</div>
+  <div class="platform-note" data-i18n="hero.note">Free &amp; open source · No account required · Your data stays on your network</div>
   <div class="platform-note dl-counter" id="dlCounter" hidden>⬇ <span id="dlCounterNum">0</span> <span data-i18n="hero.downloads">downloads</span></div>
 
   <div class="hero-img">
@@ -600,6 +589,7 @@
     <div class="trust-point" data-i18n="trust.p1">✓ Password-protected payloads</div>
     <div class="trust-point" data-i18n="trust.p2">✓ No account required</div>
     <div class="trust-point" data-i18n="trust.p3">✓ Native automatic updates</div>
+    <div class="trust-point">✓ <a href="https://github.com/qiudaomao/clipboardSync" target="_blank" rel="noopener" data-i18n="trust.p4">Open source on GitHub</a></div>
   </div>
 </section>
 
@@ -640,6 +630,7 @@
     <details><summary data-i18n="faq.q2">What if the devices are not on the same subnet?</summary><p data-i18n="faq.a2">Direct LAN setup is simplest. Advanced users can connect across routed networks or a proxy they control; only use endpoints you trust.</p></details>
     <details><summary data-i18n="faq.q3">Where do received files go?</summary><p data-i18n="faq.a3">Received files are placed on your clipboard. Paste them into the folder where you want to keep them.</p></details>
     <details><summary data-i18n="faq.q4">Why does macOS ask for permissions?</summary><p data-i18n="faq.a4">Accessibility and Input Monitoring are only needed for mouse and keyboard sharing. Clipboard sync works independently.</p></details>
+    <details><summary data-i18n="faq.q5">Is Clipboard Sync open source?</summary><p data-i18n-html="faq.a5">Yes — the full source code lives at <a href="https://github.com/qiudaomao/clipboardSync" target="_blank" rel="noopener">github.com/qiudaomao/clipboardSync</a>, including all three native clients and the release pipeline. Issues and pull requests are welcome.</p></details>
   </div>
 </section>
 
@@ -735,6 +726,10 @@
     Clipboard Sync — native clipboard sync over WebSocket.
   </div>
   <div class="wrap footer-credit">
+    <a href="https://github.com/qiudaomao/clipboardSync" target="_blank" rel="noopener" data-i18n="footer.github">Open source on GitHub</a>
+    · <a href="https://github.com/qiudaomao/clipboardSync/issues" target="_blank" rel="noopener" data-i18n="footer.issues">Report an issue</a>
+  </div>
+  <div class="wrap footer-credit">
     © 2026 · <span data-i18n="footer.credit">dev with</span> ❤️ <span data-i18n="footer.by">by</span>
     <a href="https://x.com/droidfu" target="_blank" rel="noopener">Zhuo Fu</a>
   </div>
@@ -801,9 +796,9 @@
         "nav.portforward": "Port Forward",
         "nav.features": "Features",
         "nav.download": "Download",
-        "nav.reportIssue": "Report an issue on GitHub",
+        "nav.github": "Open source on GitHub",
         "theme.toggle": "Switch color theme",
-        "hero.eyebrow": "macOS, Windows & Linux · Free in beta",
+        "hero.eyebrow": "macOS, Windows & Linux · Free & open source",
         "hero.title": 'Your clipboard,<br /><span class="gradient">everywhere on your LAN.</span>',
         "hero.subtitle": "A lightweight menubar app that syncs text, images, and files across your Mac and PC, and lets you share one mouse and keyboard between them — over WebSocket, instantly, encrypted, and without the cloud.",
         "dl.mac": "Download for macOS",
@@ -811,7 +806,7 @@
         "dl.linux": "Download for Linux",
         "dl.linuxX64": "x86_64",
         "dl.linuxArm": "ARM64",
-        "hero.note": "Free during beta · No account required · Password-protected connections",
+        "hero.note": "Free & open source · No account required · Password-protected connections",
         "hero.downloads": "downloads",
         "setup.head": "Connected in three steps",
         "setup.sub": "No account and no cloud dashboard — just your devices and a shared password.",
@@ -834,6 +829,7 @@
         "trust.p1": "✓ Password-protected payloads",
         "trust.p2": "✓ No account required",
         "trust.p3": "✓ Native automatic updates",
+        "trust.p4": "Open source on GitHub",
         "faq.head": "Before you install",
         "faq.q1": "What systems are supported?",
         "faq.a1": "macOS 13 or later, 64-bit Windows 10/11, and Linux via Flatpak (x86_64 and ARM64; mouse/keyboard sharing needs an X11 session).",
@@ -843,6 +839,8 @@
         "faq.a3": "Received files are placed on your clipboard. Paste them into the folder where you want to keep them.",
         "faq.q4": "Why does macOS ask for permissions?",
         "faq.a4": "Accessibility and Input Monitoring are only needed for mouse and keyboard sharing. Clipboard sync works independently.",
+        "faq.q5": "Is Clipboard Sync open source?",
+        "faq.a5": 'Yes — the full source code lives at <a href="https://github.com/qiudaomao/clipboardSync" target="_blank" rel="noopener">github.com/qiudaomao/clipboardSync</a>, including all three native clients and the release pipeline. Issues and pull requests are welcome.',
         "hl4.t": "Automatic updates",
         "hl4.p": "Built-in auto-update on macOS, Windows, and Linux keeps every device on the latest version — no manual downloads, ever.",
         "hl5.t": "Fully native",
@@ -874,6 +872,8 @@
         "cta.t": "Sync your clipboard in minutes",
         "cta.p": "Set one device as the server, connect the others as child devices, and start copying across your network.",
         "footer.text": "Clipboard Sync — native clipboard sync over WebSocket.",
+        "footer.github": "Open source on GitHub",
+        "footer.issues": "Report an issue",
         "footer.credit": "dev with",
         "footer.by": "by"
       },
@@ -884,9 +884,9 @@
         "nav.portforward": "端口转发",
         "nav.features": "功能",
         "nav.download": "下载",
-        "nav.reportIssue": "在 GitHub 上报告问题",
+        "nav.github": "GitHub 开源仓库",
         "theme.toggle": "切换主题",
-        "hero.eyebrow": "macOS、Windows 和 Linux · 公测期免费",
+        "hero.eyebrow": "macOS、Windows 和 Linux · 免费开源",
         "hero.title": '你的剪贴板，<br /><span class="gradient">在局域网中<span class="mobile-break"><br /></span>无处不在。</span>',
         "hero.subtitle": "一款轻量的菜单栏应用，在 Mac 和 PC 之间即时同步文本、图片和文件，还能让它们共享一套鼠标和键盘 — 基于 WebSocket，即时、加密、无需云端。",
         "dl.mac": "下载 macOS 版",
@@ -894,7 +894,7 @@
         "dl.linux": "下载 Linux 版",
         "dl.linuxX64": "x86_64",
         "dl.linuxArm": "ARM64",
-        "hero.note": "公测期免费 · 无需账号 · 密码保护连接",
+        "hero.note": "免费开源 · 无需账号 · 密码保护连接",
         "hero.downloads": "次下载",
         "setup.head": "三步完成连接",
         "setup.sub": "无需账号和云端控制台，只需要你的设备与一个共享密码。",
@@ -917,6 +917,7 @@
         "trust.p1": "✓ 密码保护传输内容",
         "trust.p2": "✓ 无需注册账号",
         "trust.p3": "✓ 原生自动更新",
+        "trust.p4": "在 GitHub 上开源",
         "faq.head": "安装前须知",
         "faq.q1": "支持哪些系统？",
         "faq.a1": "macOS 13 及以上版本、64 位 Windows 10/11，以及通过 Flatpak 的 Linux（提供 x86_64 与 ARM64；鼠标键盘共享需要 X11 会话）。",
@@ -926,6 +927,8 @@
         "faq.a3": "收到的文件会进入系统剪贴板，你可以在需要保存它们的文件夹中粘贴。",
         "faq.q4": "为什么 macOS 会请求权限？",
         "faq.a4": "只有鼠标键盘共享需要辅助功能和输入监控权限；剪贴板同步可以独立工作。",
+        "faq.q5": "Clipboard Sync 开源吗？",
+        "faq.a5": '是的 — 完整源代码托管在 <a href="https://github.com/qiudaomao/clipboardSync" target="_blank" rel="noopener">github.com/qiudaomao/clipboardSync</a>，包含三个平台的原生客户端和发布流程。欢迎提交 Issue 和 Pull Request。',
         "hl4.t": "自动更新",
         "hl4.p": "macOS、Windows 和 Linux 全平台内置自动更新，每台设备始终保持最新版本 — 永远无需手动下载。",
         "hl5.t": "完全原生",
@@ -957,6 +960,8 @@
         "cta.t": "几分钟内同步你的剪贴板",
         "cta.p": "将一台设备设为服务端，其它设备设为子设备，然后开始跨设备复制粘贴。",
         "footer.text": "剪贴板同步 — 基于 WebSocket 的原生剪贴板同步。",
+        "footer.github": "GitHub 开源仓库",
+        "footer.issues": "报告问题",
         "footer.credit": "用",
         "footer.by": "开发 · 作者"
       }

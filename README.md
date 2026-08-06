@@ -1,47 +1,67 @@
+<div align="center">
+
+<img src="landingPage/assets/hero.svg" alt="Clipboard, mouse and keyboard syncing between a MacBook and a Windows PC" width="720" />
+
 # Clipboard Sync
 
-Native, password-protected clipboard sync for macOS, Windows, and Linux. The app runs in the menu bar or system tray and does not require an account or a hosted cloud dashboard. The Linux Qt 6 client supports text, image and explicit clipboard-file transfer, port forwarding, and keyboard/mouse input sharing with the shared screen layout on X11 sessions; Wayland sessions detect but do not yet offer input sharing.
+**Your clipboard, everywhere on your LAN.**
 
-## Getting connected
+A lightweight native app that syncs text, images, and files across your Mac, PC, and Linux box —
+and lets you share one mouse and keyboard between them.
+Instant, encrypted, and without the cloud.
 
-1. Install Clipboard Sync on both devices. The macOS build requires macOS 13 or later; the Windows installer targets 64-bit Windows 10/11; Linux requires Qt 6.7+ or the KDE 6.9 Flatpak runtime.
-2. Choose **Server** on one device. Configure the other devices as **Child Device** using the shown LAN address and the same password. The password is always required; an **Encrypt transport** checkbox in Settings can be unchecked on trusted networks to skip payload encryption (messages stay password-authenticated) and save CPU.
-3. Copy and paste normally. Text and images sync automatically.
+[![GitHub](https://img.shields.io/badge/GitHub-clipboardSync-181717?logo=github)](https://github.com/qiudaomao/clipboardSync)
+[![Website](https://img.shields.io/badge/website-clipboardsync.fuzhuo.me-6ea8fe)](https://clipboardsync.fuzhuo.me)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-a78bfa)](https://clipboardsync.fuzhuo.me/#download)
 
-Files remain an explicit clipboard workflow: copy files in Finder or Explorer, choose **Send Files from Clipboard**, select the destination device, then paste received files wherever you want to keep them.
+[**Website**](https://clipboardsync.fuzhuo.me) · [**Downloads**](https://clipboardsync.fuzhuo.me/#download) · [**Releases**](https://github.com/qiudaomao/clipboardSync/releases) · [**Report an issue**](https://github.com/qiudaomao/clipboardSync/issues)
 
-## Key features
+macOS 13+ · 64-bit Windows 10/11 · Linux (Flatpak) — free &amp; open source, no account required.
 
-1. Clipboard sync over LAN or another trusted routed connection you configure.
-2. Automatic text and image sync.
-3. Explicit file transfer from the clipboard.
-4. Clipboard history with image thumbnails and timestamps.
-5. Password-authenticated payloads, with optional transport encryption (uncheck on trusted networks to save CPU).
-6. Mouse and keyboard sharing with a visual screen layout.
-7. Advanced TCP port forwarding between connected devices.
-8. Native system-sleep and display-idle prevention for a chosen duration, indefinitely, or on a weekly time plan.
+</div>
 
-The ordinary menu focuses on connection status, clipboard tasks, input sharing, and pausing/resuming sync. The work mode is selected only in Settings. Port forwarding, **Prevent System Sleep**, and launch-at-login live under **More Features**. Sleep prevention keeps both the system and display awake from idle, shows its live state and remaining time as the first submenu row, and can be left disabled, enabled forever, enabled for 1, 2, 4, 6, or 8 hours, or driven by a **Time Plan**. The Time Plan editor is a weekly grid of 7 days by 24 hours in the device's local time: blue blocks prevent sleep, gray blocks allow it. Click a block to switch it or drag to switch a rectangle of blocks; changes save as they are applied. An independent option can pause it while running on battery below 20%; reconnecting power or recovering to 20% resumes the original choice, while timed choices keep their original deadline. Explicit user sleep and laptop-lid actions remain under operating-system control. First launch opens Settings automatically; incomplete configuration remains actionable from the status row.
+---
 
-For input sharing, **Control Device** can be fixed to one device or set to **Auto**. Auto follows
-the computer whose physical mouse or touchpad was most recently used; keyboard activity does not
-switch it, so it is safe to use a mouse on one computer and a keyboard on another. The server
-authoritatively synchronizes the current Auto controller and ignores relayed/synthetic input.
+## ✨ Highlights
 
-![mac](assets/mac.png)
+- 🔄 **LAN clipboard sync** — copy on one machine, paste on another, instantly.
+- 🖼️ **Text & images** — synced automatically, no manual steps.
+- 📁 **Click-to-sync files** — copy files, choose *Send Files from Clipboard*, paste on the other device.
+- 🖱️ **Mouse & keyboard sharing** — one mouse and keyboard for all machines, with a drag-based screen layout.
+- 🚇 **Port forwarding** — tunnel SSH, VNC, or a dev server between devices over the same encrypted connection.
+- 🕓 **Clipboard history** — browse and reuse recent clipboard items with thumbnails.
+- 🔐 **Private by design** — password-authenticated, encrypted payloads; no account, no cloud.
+- ⚡ **Fully native** — Swift on macOS, C# on Windows, Qt/C++ on Linux. No Electron.
+- ⟳ **Auto-updates** — built in on all three platforms.
 
-![win](assets/win.png)
+## 🖥️ Preview
 
-## Run Linux
+| macOS | Windows |
+|:--:|:--:|
+| ![Clipboard Sync on macOS](landingPage/assets/macOS.png) | ![Clipboard Sync on Windows](landingPage/assets/win.png) |
 
-The Linux client requires Qt 6.7+, OpenSSL 3, CMake 3.24+, and Ninja. Build and
-run it with:
+<div align="center">
+<img src="landingPage/assets/port-forward.png" alt="Port Forward panel" width="640" /><br/>
+<sub>Built-in port forwarding: reach a service on any of your devices as if it were local.</sub>
+</div>
 
-```sh
-cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build linux/build
-ctest --test-dir linux/build --output-on-failure
-./linux/build/clipboard-sync
-```
+## 🚀 Connected in three steps
 
-See [linux/README.md](linux/README.md) for desktop capability and update-channel details.
+1. **Install on your devices** — grab it from [clipboardsync.fuzhuo.me](https://clipboardsync.fuzhuo.me/#download) or [GitHub Releases](https://github.com/qiudaomao/clipboardSync/releases).
+2. **Pick a server** — choose **Server** on one device, then connect the others as **Child Devices** with the shown LAN address and a shared password.
+3. **Copy and paste** — text and images sync automatically; files go over with *Send Files from Clipboard*.
+
+## 🛠️ Open source
+
+Clipboard Sync is open source. Build it yourself, poke at the protocol, or send a fix:
+
+- [Building from source](docs/Build.md) — macOS, Windows, and Linux
+- [Wire protocol](docs/protocol.md) — the shared WebSocket message contract
+- [Linux client details](linux/README.md) — Flatpak, updates, X11/Wayland notes
+- [Release guides](docs/release_all.md) — how releases and auto-update feeds are published
+
+---
+
+<div align="center">
+<sub>© 2026 · dev with ❤️ by <a href="https://x.com/droidfu">Zhuo Fu</a></sub>
+</div>
