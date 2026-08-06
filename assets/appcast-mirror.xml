@@ -11,6 +11,19 @@
         <description>Clipboard Sync macOS release feed (mirror)</description>
         <language>en</language>
         <item>
+            <title>0.2.2</title>
+            <description>Clipboard Sync is now open source and releases have moved to the clipboardSync project. This transition release is published in both projects; it also delivers automatic physical mouse/trackpad Control Device selection, keeps keyboard activity independent, and improves macOS trackpad detection.</description>
+            <pubDate>Thu, 06 Aug 2026 16:13:53 +0000</pubDate>
+            <sparkle:version>42</sparkle:version>
+            <sparkle:shortVersionString>0.2.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://cdn.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/releases/ClipboardSync-0.2.2.zip"
+                sparkle:edSignature="0Wd77FrHQekv4x4aSk2noE24zfHec7/3OIK71p1TK39i1pHc1t0mQNdhaqZgOtvv3GRJPajEc2NFJMJdzi+OBg=="
+                length="4695167"
+                type="application/octet-stream" />
+        </item>
+        <item>
             <title>0.2.1</title>
             <description>Fix macOS Auto control-device selection so only physical mouse or trackpad HID collection events can elect the controller; keyboard and virtual HID reports are ignored.</description>
             <pubDate>Wed, 05 Aug 2026 13:56:02 +0000</pubDate>
