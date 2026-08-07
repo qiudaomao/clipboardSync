@@ -79,6 +79,11 @@ Clipboard Sync is open source. Build it yourself, poke at the protocol, or send 
 - [Linux client details](linux/README.md) — Flatpak, updates, X11/Wayland notes
 - [Release guides](docs/release_all.md) — how releases and auto-update feeds are published
 
+## 🔗 links
+
+- [v2ex clipboardSync topic](https://www.v2ex.com/t/1225377) - try get users from v2ex
+- [linux.do](https://linux.do/) - try get users from linux.do
+
 ---
 
 <div align="center">
