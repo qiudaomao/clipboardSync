@@ -42,6 +42,7 @@ InputSharingCoordinator::InputSharingCoordinator(InputBackend *backend, ScreenLa
     lastMouseMoveSentAt_.start();
     lastRemoteMouseMoveAt_.start();
 
+    connect(backend_, &InputBackend::captureActivated, this, &InputSharingCoordinator::handleCaptureActivated);
     connect(backend_, &InputBackend::captureMotion, this, [this](double deltaX, double deltaY) {
         if (!activeScreenId_)
             return;
@@ -154,6 +155,8 @@ void InputSharingCoordinator::deactivate()
     remoteMouseMoveTimer_.stop();
     mouseMoveSendTimer_.stop();
     pollTimer_.stop();
+    if (backend_->usesEdgeTriggeredCapture())
+        backend_->armCaptureEdges({});
     backend_->stopPhysicalInputMonitor();
 }
 
@@ -216,11 +219,20 @@ void InputSharingCoordinator::updateInputState()
     }
 
     if (isController()) {
-        if (!pollTimer_.isActive())
+        if (backend_->usesEdgeTriggeredCapture()) {
+            pollTimer_.stop();
+            // Never re-arm mid-capture: replacing barriers disables the
+            // session and would drop the active grab.
+            if (!activeScreenId_)
+                backend_->armCaptureEdges(computeCaptureBarriers());
+        } else if (!pollTimer_.isActive()) {
             pollTimer_.start();
+        }
     } else {
         if (activeScreenId_)
             endRemoteCapture(std::nullopt);
+        if (backend_->usesEdgeTriggeredCapture())
+            backend_->armCaptureEdges({});
         pollTimer_.stop();
     }
     if (!canReceiveRemoteInput()) {
@@ -277,6 +289,136 @@ void InputSharingCoordinator::pollLocalCursor()
     const QRectF realRect = current->second;
     localAnchor_ = realRect.center();
     startRemoteCapture(match->neighbor, match->canvasPoint, match->edge);
+}
+
+void InputSharingCoordinator::handleCaptureActivated(double x, double y)
+{
+    if (!isController() || activeScreenId_ || captureStarting_) {
+        backend_->stopCapture();
+        return;
+    }
+    // The compositor reports the position where the cursor hit the barrier,
+    // which can sit marginally past the screen edge; clamp onto the nearest
+    // local screen so the edge and neighbor lookups see an on-screen point.
+    const QPointF rawPoint(x, y);
+    QPointF point = rawPoint;
+    std::optional<QPair<QString, QRectF>> current;
+    double bestDistance = std::numeric_limits<double>::max();
+    const QList<ScreenMetrics> screens = backend_->screens();
+    for (int index = 0; index < screens.size(); ++index) {
+        const QRectF rect = backend_->screenRect(index);
+        if (!rect.isValid())
+            continue;
+        const QPointF clamped(std::clamp(rawPoint.x(), rect.left(), rect.right() - 1),
+            std::clamp(rawPoint.y(), rect.top(), rect.bottom() - 1));
+        const QPointF offset = clamped - rawPoint;
+        const double distance = offset.x() * offset.x() + offset.y() * offset.y();
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            point = clamped;
+            current = QPair<QString, QRectF>(screenIdFor(deviceId_, index), rect);
+        }
+    }
+    const auto entryIt = current ? layout_->entries().constFind(current->first)
+                                 : layout_->entries().constEnd();
+    if (entryIt == layout_->entries().constEnd()) {
+        qInfo().noquote() << "Edge capture activated outside a known screen at" << rawPoint << "- releasing";
+        backend_->stopCapture();
+        return;
+    }
+    const auto match = crossingNeighbor(point, *entryIt, current->second);
+    if (!match) {
+        qInfo().noquote() << "Edge capture activated with no eligible neighbor at" << point << "- releasing";
+        backend_->stopCapture();
+        return;
+    }
+    localAnchor_ = current->second.center();
+    startRemoteCapture(match->neighbor, match->canvasPoint, match->edge);
+}
+
+QList<CaptureBarrier> InputSharingCoordinator::computeCaptureBarriers() const
+{
+    // One compositor barrier per local screen edge that leads to an enabled
+    // remote screen in the shared layout. Edges shared between two of this
+    // machine's own real monitors are never armed: the cursor must keep
+    // flowing between them, and such a barrier is ambiguous to the compositor
+    // anyway. Barriers span the full real edge; a crossing that has no remote
+    // neighbor at that height is released again in handleCaptureActivated.
+    QList<CaptureBarrier> barriers;
+    const QList<ScreenMetrics> screens = backend_->screens();
+    QList<QRectF> realRects;
+    for (int index = 0; index < screens.size(); ++index)
+        realRects.append(backend_->screenRect(index));
+
+    constexpr double epsilon = 48.0;
+    const auto spansOverlap = [](double a1, double a2, double b1, double b2) {
+        return a1 < b2 && b1 < a2;
+    };
+    int id = 1;
+    for (int index = 0; index < screens.size(); ++index) {
+        const QRectF real = realRects.at(index);
+        const auto entryIt = layout_->entries().constFind(screenIdFor(deviceId_, index));
+        if (!real.isValid() || entryIt == layout_->entries().constEnd())
+            continue;
+        const QRectF canvas = entryIt->rect();
+
+        for (const ScreenEdge edge : {ScreenEdge::Left, ScreenEdge::Right, ScreenEdge::Top, ScreenEdge::Bottom}) {
+            const bool horizontalEdge = edge == ScreenEdge::Top || edge == ScreenEdge::Bottom;
+
+            bool internal = false;
+            for (int other = 0; other < realRects.size() && !internal; ++other) {
+                if (other == index || !realRects.at(other).isValid())
+                    continue;
+                const QRectF o = realRects.at(other);
+                const double gap = edge == ScreenEdge::Right ? o.left() - real.right()
+                    : edge == ScreenEdge::Left               ? real.left() - o.right()
+                    : edge == ScreenEdge::Bottom             ? o.top() - real.bottom()
+                                                             : real.top() - o.bottom();
+                const bool overlap = horizontalEdge ? spansOverlap(real.left(), real.right(), o.left(), o.right())
+                                                    : spansOverlap(real.top(), real.bottom(), o.top(), o.bottom());
+                internal = overlap && std::abs(gap) <= 1.0;
+            }
+            if (internal)
+                continue;
+
+            bool hasRemoteNeighbor = false;
+            for (const auto &entry : layout_->entries()) {
+                if (entry.deviceId == deviceId_ || !deviceEnabled_.value(entry.deviceId, false))
+                    continue;
+                const QRectF o = entry.rect();
+                const double gap = edge == ScreenEdge::Right ? o.left() - canvas.right()
+                    : edge == ScreenEdge::Left               ? canvas.left() - o.right()
+                    : edge == ScreenEdge::Bottom             ? o.top() - canvas.bottom()
+                                                             : canvas.top() - o.bottom();
+                const bool overlap = horizontalEdge ? spansOverlap(canvas.left(), canvas.right(), o.left(), o.right())
+                                                    : spansOverlap(canvas.top(), canvas.bottom(), o.top(), o.bottom());
+                if (overlap && gap >= -epsilon) {
+                    hasRemoteNeighbor = true;
+                    break;
+                }
+            }
+            if (!hasRemoteNeighbor)
+                continue;
+
+            // The compositor validates barriers against real monitor rects:
+            // vertical lines sit at x or x+width, horizontal at y or y+height,
+            // and the other axis spans corner to corner inclusive.
+            CaptureBarrier barrier;
+            barrier.id = id++;
+            const int left = static_cast<int>(std::lround(real.left()));
+            const int top = static_cast<int>(std::lround(real.top()));
+            const int right = static_cast<int>(std::lround(real.left() + real.width()));
+            const int bottom = static_cast<int>(std::lround(real.top() + real.height()));
+            switch (edge) {
+            case ScreenEdge::Left: barrier.x1 = barrier.x2 = left; barrier.y1 = top; barrier.y2 = bottom - 1; break;
+            case ScreenEdge::Right: barrier.x1 = barrier.x2 = right; barrier.y1 = top; barrier.y2 = bottom - 1; break;
+            case ScreenEdge::Top: barrier.y1 = barrier.y2 = top; barrier.x1 = left; barrier.x2 = right - 1; break;
+            case ScreenEdge::Bottom: barrier.y1 = barrier.y2 = bottom; barrier.x1 = left; barrier.x2 = right - 1; break;
+            }
+            barriers.append(barrier);
+        }
+    }
+    return barriers;
 }
 
 std::optional<QPair<QString, QRectF>> InputSharingCoordinator::currentLocalScreen(const QPointF &point) const

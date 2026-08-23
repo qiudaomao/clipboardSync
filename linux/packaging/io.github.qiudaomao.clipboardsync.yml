@@ -19,6 +19,43 @@ finish-args:
   - --system-talk-name=org.freedesktop.UPower
 
 modules:
+  # Build-only python deps for libei's protocol code generator.
+  - name: python3-libei-build-deps
+    buildsystem: simple
+    build-commands:
+      - pip3 install --no-index --no-build-isolation --find-links=file://${PWD}
+        --prefix=${FLATPAK_DEST} attrs jinja2 MarkupSafe
+    cleanup: ['*']
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/6a/21/5b6702a7f963e95456c0de2d495f67bf5fd62840ac655dc451586d23d39a/attrs-24.2.0-py3-none-any.whl
+        sha256: 81921eb96de3191c8258c199618104dd27ac608d9366f5e35d011eae1867ede2
+      - type: file
+        url: https://files.pythonhosted.org/packages/31/80/3a54838c3fb461f6fec263ebf3a3a41771bd05190238de3486aae8540c36/jinja2-3.1.4-py3-none-any.whl
+        sha256: bc5dd2abb727a5319567b7a813e6a2e7318c39f4f487cfe6c89c6f9c7d25197d
+      - type: file
+        url: https://files.pythonhosted.org/packages/87/5b/aae44c6655f3801e81aa3eef09dbbf012431987ba564d7231722f68df02d/MarkupSafe-2.1.5.tar.gz
+        sha256: d283d37a890ba4c1ae73ffadf8046435c76e7bc2247bbb63c00bd1a709c6544b
+
+  # libei client library: consumes the EIS event stream of the Hyprland
+  # input-capture protocol. The KDE runtime does not ship it.
+  - name: libei
+    buildsystem: meson
+    config-opts:
+      - -Dtests=disabled
+      - -Ddocumentation=[]
+      - -Dliboeffis=disabled
+    build-options:
+      env:
+        PYTHONPATH: /app/lib/python3.12/site-packages
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: archive
+        url: https://gitlab.freedesktop.org/libinput/libei/-/archive/1.6.0/libei-1.6.0.tar.gz
+        sha256: 81b4b967f0e5938492434a04f7ea2e6c6d96d3e6c44700bc691821f82281e602
+
   - name: clipboard-sync
     buildsystem: cmake-ninja
     subdir: linux

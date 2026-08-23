@@ -6,6 +6,17 @@
 #include <QPointF>
 #include <QRectF>
 
+// One armed capture edge as a compositor barrier, in real global logical
+// screen coordinates (a full screen edge, corner to corner).
+struct CaptureBarrier {
+    int id = 0;
+    int x1 = 0;
+    int y1 = 0;
+    int x2 = 0;
+    int y2 = 0;
+    bool operator==(const CaptureBarrier &) const = default;
+};
+
 // Platform seam for the input-sharing coordinator. The coordinator owns the
 // shared-layout geometry; a backend supplies local screens, the local cursor,
 // exclusive capture of local input while controlling a peer, and injection of
@@ -15,6 +26,14 @@ class InputBackend : public QObject {
     Q_OBJECT
 public:
     using QObject::QObject;
+
+    // Compositor-side edge-triggered capture (Wayland). When true, the global
+    // cursor cannot be polled: the coordinator arms the shared-layout edges
+    // with armCaptureEdges() and the compositor grabs input when the cursor
+    // crosses one, reported via captureActivated(). startCapture() then only
+    // acknowledges the already-active grab.
+    virtual bool usesEdgeTriggeredCapture() { return false; }
+    virtual void armCaptureEdges(const QList<CaptureBarrier> &) {}
 
     // Local screens ordered by position (left-to-right, then top-to-bottom) so
     // index-based screen ids stay stable across relaunches.
@@ -44,6 +63,9 @@ public:
     virtual void injectKey(const QString &canonicalKey, bool down) = 0;
 
 signals:
+    // Edge-triggered capture only: the compositor grabbed local input because
+    // the cursor hit an armed edge at this global logical position.
+    void captureActivated(double x, double y);
     void captureMotion(double deltaX, double deltaY);
     void captureButton(const QString &button, bool down);
     void captureWheel(double deltaX, double deltaY);

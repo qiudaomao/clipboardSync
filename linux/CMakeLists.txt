@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ClipboardSyncLinux VERSION 0.2.2 LANGUAGES CXX)
+project(ClipboardSyncLinux VERSION 0.2.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,6 +11,27 @@ set(CMAKE_AUTORCC ON)
 find_package(Qt6 6.7 REQUIRED COMPONENTS Core DBus Gui Widgets Network WebSockets)
 find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
 find_package(X11 REQUIRED COMPONENTS Xi Xtst Xfixes)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)
+pkg_check_modules(XKBCOMMON REQUIRED IMPORTED_TARGET xkbcommon)
+pkg_check_modules(LIBEI REQUIRED IMPORTED_TARGET libei-1.0)
+find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
+
+# Client glue for the wlroots virtual-input protocols, generated from the XMLs
+# vendored under protocols/ (they ship with wlroots, not wayland-protocols).
+set(WAYLAND_PROTOCOL_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols)
+file(MAKE_DIRECTORY ${WAYLAND_PROTOCOL_GEN_DIR})
+set(WAYLAND_PROTOCOL_SOURCES "")
+foreach(proto wlr-virtual-pointer-unstable-v1 virtual-keyboard-unstable-v1 hyprland-input-capture-v1)
+    set(proto_xml ${CMAKE_CURRENT_SOURCE_DIR}/protocols/${proto}.xml)
+    set(proto_header ${WAYLAND_PROTOCOL_GEN_DIR}/${proto}-client-protocol.h)
+    set(proto_source ${WAYLAND_PROTOCOL_GEN_DIR}/${proto}-protocol.c)
+    add_custom_command(OUTPUT ${proto_header} ${proto_source}
+        COMMAND ${WAYLAND_SCANNER} client-header ${proto_xml} ${proto_header}
+        COMMAND ${WAYLAND_SCANNER} private-code ${proto_xml} ${proto_source}
+        DEPENDS ${proto_xml} VERBATIM)
+    list(APPEND WAYLAND_PROTOCOL_SOURCES ${proto_header} ${proto_source})
+endforeach()
 
 add_executable(clipboard-sync
     src/main.cpp
@@ -51,9 +72,13 @@ add_executable(clipboard-sync
     src/TunnelFrame.h
     src/UpdateController.cpp
     src/UpdateController.h
+    src/WaylandInputBackend.cpp
+    src/WaylandInputBackend.h
     src/X11InputBackend.cpp
     src/X11InputBackend.h
+    ${WAYLAND_PROTOCOL_SOURCES}
 )
+target_include_directories(clipboard-sync PRIVATE ${WAYLAND_PROTOCOL_GEN_DIR})
 
 target_compile_definitions(clipboard-sync PRIVATE
     CLIPBOARD_SYNC_VERSION="${PROJECT_VERSION}"
@@ -65,6 +90,7 @@ target_link_libraries(clipboard-sync PRIVATE
     Qt6::Core Qt6::DBus Qt6::Gui Qt6::Widgets Qt6::Network Qt6::WebSockets
     OpenSSL::Crypto
     X11::X11 X11::Xi X11::Xtst X11::Xfixes
+    PkgConfig::WAYLAND_CLIENT PkgConfig::XKBCOMMON PkgConfig::LIBEI
 )
 
 include(GNUInstallDirs)

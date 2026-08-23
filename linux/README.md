@@ -19,7 +19,8 @@ selection without extending a timed deadline.
 
 Dependencies: CMake 3.24+, Qt 6.7+ (`Core`, `DBus`, `Gui`, `Widgets`, `Network`,
 and `WebSockets`), OpenSSL 3, X11 client libraries (`libX11`, `libXi`, `libXtst`,
-`libXfixes`), and a C++20 compiler.
+`libXfixes`), `wayland-client` plus `wayland-scanner`, `libxkbcommon`, `libei`,
+and a C++20 compiler.
 
 ```sh
 cmake -S linux -B linux/build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -91,9 +92,61 @@ device, events are injected with XTest. `Receive Key Mapping` in Settings
 remaps modifier keys on the receiving side, and `Reverse mouse vertical
 scroll` flips injected wheel direction.
 
+On Wayland sessions a separate backend injects remote input through the
+wlroots virtual-input protocols (`zwlr_virtual_pointer_v1` and
+`zwp_virtual_keyboard_v1`), which Hyprland, Sway, and other wlroots-based
+compositors implement. The virtual keyboard carries its own fixed us keymap,
+so the position-based canonical key names resolve the same way on every
+receiver.
+
+Controlling other devices from Wayland uses `hyprland_input_capture_v1`
+(Hyprland only): the app arms compositor pointer barriers on the shared-layout
+edges, the compositor grabs input when the cursor crosses one, and the
+captured events arrive over an EIS socket consumed with libei. Because the
+compositor detects the crossing itself, no global cursor polling is needed.
+The Auto control device election monitors local mouse activity by polling the
+Hyprland IPC `cursorpos` (movement right after the app's own injections is
+ignored so relayed input can never elect this device).
+
+### Wayland input sharing from the Flatpak
+
+Compositors treat the virtual-input protocols as privileged and hide them from
+sandboxed clients: Flatpak connects the app through a
+`wp_security_context_v1`-tagged socket, and Hyprland (unconditionally, as of
+0.56) filters every non-whitelisted global for such clients. The app detects
+this and falls back to the X11 backend, which cannot reach the compositor —
+so a stock Flatpak install cannot be controlled on Hyprland. To opt out of
+the sandbox filtering, hand the app the real session socket under a separate
+name (a hardlink, so neither Flatpak's symlink nor the security context
+applies):
+
+```sh
+ln -f "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" "$XDG_RUNTIME_DIR/wayland-real"
+flatpak override --user \
+  --filesystem=xdg-run/wayland-real \
+  --env=WAYLAND_DISPLAY=wayland-real \
+  io.github.qiudaomao.clipboardsync
+```
+
+The hardlink lives in a tmpfs, so recreate it at each session start (e.g. a
+user service or `exec-once`). At startup the app logs
+`Input backend: Wayland virtual pointer/keyboard` when injection is
+available, and `Input backend: X11 XTest` when it is not. Native
+(non-sandboxed) builds need none of this.
+
 ## Current limitations
 
-- Input sharing requires an X11 session (XTest/XFixes grabs and injection). On
-  Wayland the InputCapture/RemoteDesktop portals are detected but the feature
-  is not offered yet.
+- On Wayland, controlling other devices and Auto-control monitoring are
+  Hyprland-specific (`hyprland_input_capture_v1` and the Hyprland IPC
+  socket). On other wlroots compositors this device can only be controlled;
+  on compositors without the wlroots virtual-input protocols (e.g. GNOME)
+  input sharing is unavailable entirely. Every missing piece fails with an
+  explicit status message.
+- Inside the Flatpak sandbox the compositor hides the privileged
+  virtual-input protocols; see “Wayland input sharing from the Flatpak”
+  above for the opt-out. The Auto-control monitor additionally needs
+  `flatpak override --user --filesystem=xdg-run/hypr` for the Hyprland IPC
+  socket.
+- X11 sessions keep the original XTest/XFixes implementation for both
+  directions.
 - Wayland compositors may prevent reliable background clipboard observation.

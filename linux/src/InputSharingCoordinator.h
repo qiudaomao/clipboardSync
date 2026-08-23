@@ -68,6 +68,8 @@ private:
 
     // Controller side.
     void pollLocalCursor();
+    void handleCaptureActivated(double x, double y);
+    QList<CaptureBarrier> computeCaptureBarriers() const;
     std::optional<QPair<QString, QRectF>> currentLocalScreen(const QPointF &point) const;
     struct Crossing {
         ScreenEdge edge;

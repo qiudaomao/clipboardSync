@@ -1,24 +1,10 @@
 #include "LinuxCapabilities.h"
 
-#include <QDBusConnection>
-#include <QDBusInterface>
-#include <QDBusReply>
+#include "WaylandInputBackend.h"
+
 #include <QGuiApplication>
 #include <QProcessEnvironment>
 #include <QSystemTrayIcon>
-
-namespace {
-bool portalHasInterface(const QString &name)
-{
-    QDBusInterface properties(
-        QStringLiteral("org.freedesktop.portal.Desktop"),
-        QStringLiteral("/org/freedesktop/portal/desktop"),
-        QStringLiteral("org.freedesktop.DBus.Introspectable"),
-        QDBusConnection::sessionBus());
-    const QDBusReply<QString> reply = properties.call(QStringLiteral("Introspect"));
-    return reply.isValid() && reply.value().contains(name);
-}
-}
 
 LinuxCapabilities LinuxCapabilities::detect()
 {
@@ -33,13 +19,18 @@ LinuxCapabilities LinuxCapabilities::detect()
     if (session == QStringLiteral("wayland") || platform.contains(QStringLiteral("wayland"))) {
         result.session = Session::Wayland;
         result.clipboardBackgroundMonitoring = false;
-        result.inputCapture = portalHasInterface(QStringLiteral("org.freedesktop.portal.InputCapture"));
-        result.inputInjection = portalHasInterface(QStringLiteral("org.freedesktop.portal.RemoteDesktop"));
+        // Injection runs over the wlroots virtual pointer/keyboard protocols
+        // (Hyprland, Sway, ...); capture over hyprland_input_capture_v1 with
+        // events consumed via libei (Hyprland only).
+        result.inputInjection = WaylandInputBackend::available();
+        result.inputCapture = WaylandInputBackend::captureAvailable();
         result.limitations << QStringLiteral("Wayland may prevent reliable background clipboard observation");
-        if (!result.inputCapture)
-            result.limitations << QStringLiteral("InputCapture portal is unavailable");
         if (!result.inputInjection)
-            result.limitations << QStringLiteral("RemoteDesktop portal is unavailable");
+            result.limitations << QStringLiteral(
+                "Remote input injection is unavailable: the compositor offers no virtual pointer/keyboard protocols");
+        if (!result.inputCapture)
+            result.limitations << QStringLiteral(
+                "This device cannot control other devices: the compositor offers no input-capture protocol");
     } else if (session == QStringLiteral("x11") || platform == QStringLiteral("xcb")) {
         result.session = Session::X11;
         result.clipboardBackgroundMonitoring = true;

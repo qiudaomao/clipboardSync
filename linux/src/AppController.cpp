@@ -13,6 +13,7 @@
 #include "SyncTransport.h"
 #include "TunnelFrame.h"
 #include "UpdateController.h"
+#include "WaylandInputBackend.h"
 #include "X11InputBackend.h"
 
 #include <QAction>
@@ -73,7 +74,16 @@ AppController::AppController(QObject *parent)
       portForward_(new PortForwardCoordinator(this)), transport_(new SyncTransport(this)),
       updates_(new UpdateController(this)), sleepPrevention_(new SleepPreventionController(this))
 {
-    inputBackend_ = new X11InputBackend(this);
+    // On Wayland sessions XTest only reaches XWayland clients, never the
+    // compositor, so injection needs the wlroots virtual-input protocols
+    // (Hyprland, Sway, ...). X11 sessions keep the full XTest backend.
+    if (capabilities_.session == LinuxCapabilities::Session::Wayland && WaylandInputBackend::available()) {
+        qInfo() << "Input backend: Wayland virtual pointer/keyboard";
+        inputBackend_ = new WaylandInputBackend(this);
+    } else {
+        qInfo() << "Input backend: X11 XTest";
+        inputBackend_ = new X11InputBackend(this);
+    }
     input_ = new InputSharingCoordinator(inputBackend_, &layoutStore_, this);
 }
 

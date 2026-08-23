@@ -38,11 +38,15 @@ ctest --test-dir linux/build --output-on-failure
 ./linux/build/clipboard-sync
 ```
 
-Linux requires Qt 6.7+, OpenSSL 3, CMake 3.24+, Ninja, and the X11 client
-libraries (`libX11`, `libXi`, `libXtst`, `libXfixes`). The supported features are
-encrypted text/image sync, legacy and chunked clipboard-file receive/transfer,
-TCP port forwarding, and keyboard/mouse input sharing with the shared screen
-layout on X11 sessions (capability-detected only on Wayland). The Flatpak
+Linux requires Qt 6.7+, OpenSSL 3, CMake 3.24+, Ninja, the X11 client
+libraries (`libX11`, `libXi`, `libXtst`, `libXfixes`), `wayland-client` with
+`wayland-scanner`, `libxkbcommon`, and `libei`. The supported features are
+encrypted text/image sync, legacy and chunked clipboard-file
+receive/transfer, TCP port forwarding, and keyboard/mouse input sharing with
+the shared screen layout — both directions on X11 sessions; on Wayland this
+device can be controlled via the wlroots virtual-input protocols (Hyprland,
+Sway, ...) and can control other devices on Hyprland via
+`hyprland_input_capture_v1`. The Flatpak
 packaging and update behavior are documented in `linux/README.md`.
 
 ## Run macOS
