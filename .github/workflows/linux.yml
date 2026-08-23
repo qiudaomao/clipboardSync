@@ -19,7 +19,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes appstream cmake desktop-file-utils ninja-build libssl-dev \
-            libx11-dev libxtst-dev libxfixes-dev
+            libx11-dev libxtst-dev libxfixes-dev libwayland-dev libxkbcommon-dev libei-dev
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
