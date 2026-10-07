@@ -12,6 +12,14 @@
     <title>Clipboard Sync</title>
     <language>en</language>
     <item>
+      <title>Clipboard Sync 0.2.3</title>
+      <description>Adds a "Show Key Event HUD (Debug)" tray option that overlays every key event input sharing sends, receives, and injects, for diagnosing stuck modifiers. Off by default and session-only.</description>
+      <pubDate>Wed, 07 Oct 2026 21:24:53 +08:00</pubDate>
+      <sparkle:version>0.2.3</sparkle:version>
+      <sparkle:shortVersionString>0.2.3</sparkle:shortVersionString>
+      <enclosure url="https://gh-proxy.com/https://github.com/qiudaomao/clipboardSync/releases/download/v0.2.3/ClipboardSyncSetup-v0.2.3.exe" sparkle:version="0.2.3" sparkle:shortVersionString="0.2.3" length="3078253" sparkle:os="windows-x64" type="application/x-msdos-program" sparkle:criticalUpdate="false" sparkle:signature="JI82QIUCleoV5QdiXYlpxgrN4mn1hVQwOSVzXLcYeg5qaCGYomVsNFzAC2IbC3T3W893pnkelKjFvrZBJ+Q0BQ==" />
+    </item>
+    <item>
       <title>Clipboard Sync 0.2.2</title>
       <description>Clipboard Sync is now open source and releases have moved to the clipboardSync project. This transition release is published in both projects; it also delivers automatic physical mouse/trackpad Control Device selection, keeps keyboard activity independent, and improves macOS trackpad detection.</description>
       <pubDate>Fri, 07 Aug 2026 00:13:17 +08:00</pubDate>
