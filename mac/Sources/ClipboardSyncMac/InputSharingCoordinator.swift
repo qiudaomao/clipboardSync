@@ -21,6 +21,9 @@ final class InputSharingCoordinator {
     /// Fired only for a hardware mouse or touchpad report while this device waits in Auto mode.
     /// It deliberately bypasses Quartz event injection, so relayed input cannot elect itself.
     var onLocalPhysicalInput: (() -> Void)?
+    /// Debug key-event trace (sent, received, injected) for the key HUD; nil when the HUD is off.
+    /// May fire off the main thread.
+    var onKeyEvent: ((KeyEventHUD.Direction, String) -> Void)?
 
     private let deviceId: String
     private let layoutStore: ScreenLayoutStore
@@ -1008,6 +1011,7 @@ final class InputSharingCoordinator {
         guard let target = activeTargetDeviceId else {
             return
         }
+        onKeyEvent?(.sent, Self.describeKey(key, action: action, modifiers: modifiers))
         onMessage?(InputMessage(
             type: "input",
             origin: deviceId,
@@ -1205,6 +1209,10 @@ final class InputSharingCoordinator {
     }
 
     private func handleRemoteKey(_ key: InputKeyPayload?) {
+        if let key, let onKeyEvent {
+            let summary = Self.describeKey(key.key, action: key.action, modifiers: key.modifiers)
+            onKeyEvent(.received, receivingRemote ? summary : summary + "  (dropped: not receiving)")
+        }
         guard receivingRemote, let key else {
             return
         }
@@ -1229,6 +1237,7 @@ final class InputSharingCoordinator {
         }
 
         guard let keyCode = Self.canonicalToMacKey[key.key] else {
+            onKeyEvent?(.injected, "\(key.key): no macOS key mapping, skipped")
             return
         }
         // The controller stamps every key message with its live modifier snapshot, so treat it
@@ -1255,6 +1264,7 @@ final class InputSharingCoordinator {
             flags.insert(.maskNumericPad)
         }
         event.flags = flags
+        onKeyEvent?(.injected, "keyCode \(keyCode) \(key.action == "down" ? "↓" : "↑")  flags=\(Self.describeFlags(flags))")
         post(event)
     }
 
@@ -1271,9 +1281,11 @@ final class InputSharingCoordinator {
         defer { IOServiceClose(connect) }
         var on = false
         guard IOHIDGetModifierLockState(connect, Int32(kIOHIDCapsLockState), &on) == KERN_SUCCESS else {
+            onKeyEvent?(.injected, "CapsLock: reading the lock state failed, skipped")
             return
         }
         IOHIDSetModifierLockState(connect, Int32(kIOHIDCapsLockState), !on)
+        onKeyEvent?(.injected, "CapsLock lock \(on ? "on → off" : "off → on")")
     }
 
     private func reconcileRemoteModifierState() {
@@ -1301,6 +1313,7 @@ final class InputSharingCoordinator {
         }
         event.type = .flagsChanged
         event.flags = Self.flags(from: Array(remotePressedModifierKeys))
+        onKeyEvent?(.injected, "\(modifier) keyCode \(keyCode) \(keyDown ? "↓" : "↑") flagsChanged  flags=\(Self.describeFlags(event.flags))")
         post(event)
     }
 
@@ -1662,6 +1675,21 @@ final class InputSharingCoordinator {
     /// identify which modifier key to forward from those device bits, so synthetic events
     /// without them type fine in local apps but the modifiers vanish inside a Screen
     /// Sharing window. Left-hand bits, matching the left-hand keycodes we inject.
+    private static func describeKey(_ key: String, action: String, modifiers: [String]) -> String {
+        let arrow = action == "down" ? "↓" : action == "up" ? "↑" : action
+        return "\(key) \(arrow)  mods=[\(modifiers.joined(separator: ","))]"
+    }
+
+    private static func describeFlags(_ flags: CGEventFlags) -> String {
+        let names: [(CGEventFlags, String)] = [
+            (.maskShift, "shift"), (.maskControl, "ctrl"), (.maskAlternate, "opt"),
+            (.maskCommand, "cmd"), (.maskAlphaShift, "caps"), (.maskSecondaryFn, "fn"),
+            (.maskNumericPad, "numpad"),
+        ]
+        let present = names.filter { flags.contains($0.0) }.map(\.1)
+        return present.isEmpty ? "none" : present.joined(separator: "+")
+    }
+
     private static func flags(from modifiers: [String]) -> CGEventFlags {
         var flags: CGEventFlags = [.maskNonCoalesced]
         if modifiers.contains("Shift") {

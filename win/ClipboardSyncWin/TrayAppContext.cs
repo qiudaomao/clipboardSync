@@ -28,6 +28,8 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly ToolStripMenuItem historyItem;
     private readonly ToolStripMenuItem inputStatusItem;
     private readonly ToolStripMenuItem inputSharingItem;
+    private readonly ToolStripMenuItem keyEventHudItem;
+    private KeyEventHudForm? keyEventHud;
     private readonly ToolStripMenuItem controlDeviceItem;
     private readonly ToolStripMenuItem checkForUpdatesItem;
     private readonly Dictionary<string, InputDeviceMenuDevice> inputDevices = [];
@@ -125,6 +127,7 @@ internal sealed class TrayAppContext : ApplicationContext
         historyItem = new ToolStripMenuItem(AppText.Text("menu.clipboardHistory"));
         inputStatusItem = new ToolStripMenuItem(AppText.Text("input.off")) { Enabled = false };
         inputSharingItem = new ToolStripMenuItem(AppText.Text("menu.enableInputSharing"), null, (_, _) => ToggleInputSharing());
+        keyEventHudItem = new ToolStripMenuItem(AppText.Text("menu.keyEventHUD"), null, (_, _) => ToggleKeyEventHud());
         controlDeviceItem = new ToolStripMenuItem(AppText.Text("menu.controlDevice"));
         startStopItem = new ToolStripMenuItem(AppText.Text("menu.resumeSync"), null, (_, _) => ToggleTransport());
         launchAtLoginItem = new ToolStripMenuItem(AppText.Text("menu.launchAtLogin"), null, (_, _) => ToggleLaunchAtLogin());
@@ -426,6 +429,7 @@ internal sealed class TrayAppContext : ApplicationContext
         menu.Items.Add(inputSharingItem);
         menu.Items.Add(controlDeviceItem);
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.screenLayout"), null, (_, _) => ShowScreenLayout()));
+        menu.Items.Add(keyEventHudItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem(AppText.Text("menu.configure"), null, (_, _) => ShowConfiguration()));
 
@@ -1595,6 +1599,29 @@ internal sealed class TrayAppContext : ApplicationContext
         RefreshScreenLayoutFormIfVisible();
         UpdateInputCoordinator();
     }
+
+    /// <summary>Session-only debug toggle: the HUD shows every keystroke, so it never survives a relaunch.</summary>
+    private void ToggleKeyEventHud()
+    {
+        if (keyEventHud is not null)
+        {
+            inputCoordinator.KeyEvent -= OnKeyEventForHud;
+            keyEventHud.Close();
+            keyEventHud.Dispose();
+            keyEventHud = null;
+            keyEventHudItem.Checked = false;
+            System.Diagnostics.Trace.WriteLine("Key event HUD disabled");
+            return;
+        }
+        keyEventHud = new KeyEventHudForm();
+        keyEventHud.Show();
+        inputCoordinator.KeyEvent += OnKeyEventForHud;
+        keyEventHudItem.Checked = true;
+        System.Diagnostics.Trace.WriteLine("Key event HUD enabled");
+    }
+
+    private void OnKeyEventForHud(KeyHudDirection direction, string detail) =>
+        OnUi(() => keyEventHud?.Record(direction, detail));
 
     private void ToggleInputSharing()
     {

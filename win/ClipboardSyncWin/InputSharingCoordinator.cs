@@ -106,6 +106,11 @@ internal sealed class InputSharingCoordinator : IDisposable
     public event Action<string>? StatusChanged;
     /// <summary>Raised only for a non-injected local mouse event while Auto waits.</summary>
     public event Action? LocalPhysicalInput;
+    /// <summary>
+    /// Debug key-event trace (sent, received, injected) for the key HUD. Raised on whatever
+    /// thread produced the event; subscribers marshal to the UI themselves.
+    /// </summary>
+    public event Action<KeyHudDirection, string>? KeyEvent;
 
     public InputSharingCoordinator(string deviceId, ScreenLayoutStore layoutStore)
     {
@@ -1008,6 +1013,8 @@ internal sealed class InputSharingCoordinator : IDisposable
             return;
         }
         UpdatePressedModifiers(key, action);
+        var modifiers = CurrentPressedModifiers();
+        KeyEvent?.Invoke(KeyHudDirection.Sent, DescribeKey(key, action, modifiers));
 
         MessageReady?.Invoke(new InputMessage
         {
@@ -1019,7 +1026,7 @@ internal sealed class InputSharingCoordinator : IDisposable
             {
                 Action = action,
                 Key = key,
-                Modifiers = CurrentPressedModifiers()
+                Modifiers = modifiers
             },
             SentAt = Now()
         });
@@ -1035,6 +1042,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         {
             if (pressedModifierKeys.Contains(modifier))
             {
+                KeyEvent?.Invoke(KeyHudDirection.Sent, DescribeKey(modifier, "up", []));
                 MessageReady?.Invoke(new InputMessage
                 {
                     Type = "input",
@@ -1155,6 +1163,11 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     private void HandleRemoteKey(InputKeyPayload? key)
     {
+        if (key is not null && KeyEvent is { } keyEvent)
+        {
+            var summary = DescribeKey(key.Key, key.Action, key.Modifiers);
+            keyEvent(KeyHudDirection.Received, receivingRemote ? summary : summary + "  (dropped: not receiving)");
+        }
         if (!receivingRemote || key is null)
         {
             return;
@@ -1171,6 +1184,7 @@ internal sealed class InputSharingCoordinator : IDisposable
 
         if (!CanonicalToWindowsKey.TryGetValue(key.Key, out var virtualKey))
         {
+            KeyEvent?.Invoke(KeyHudDirection.Injected, $"{key.Key}: no Windows key mapping, skipped");
             return;
         }
 
@@ -1593,11 +1607,44 @@ internal sealed class InputSharingCoordinator : IDisposable
     private void SendKeyboardInput(ushort virtualKey, bool keyUp)
     {
         var extended = ExtendedKeys.Contains((Keys)virtualKey);
+        string path;
         if (TryInjectViaService(client => client.TryInjectKeyboard(virtualKey, keyUp, extended)))
         {
-            return;
+            path = "service";
         }
-        SendKeyboardInputLocal(virtualKey, keyUp);
+        else
+        {
+            path = SendKeyboardInputLocal(virtualKey, keyUp)
+                ? "SendInput"
+                : $"SendInput FAILED (error {Marshal.GetLastWin32Error()})";
+        }
+        if (KeyEvent is { } keyEvent)
+        {
+            keyEvent(KeyHudDirection.Injected,
+                $"{(Keys)virtualKey} {(keyUp ? "↑" : "↓")} via {path}  system=[{DescribeSystemKeyState()}]");
+        }
+    }
+
+    private static string DescribeKey(string key, string action, IEnumerable<string>? modifiers)
+    {
+        var arrow = action switch { "down" => "↓", "up" => "↑", _ => action };
+        return $"{key} {arrow}  mods=[{string.Join(",", modifiers ?? [])}]";
+    }
+
+    /// <summary>
+    /// The system-wide key state right after an injection: which modifiers Windows believes are
+    /// held (async state) and whether Caps Lock is toggled on. A modifier listed here with no
+    /// matching remote press is a stuck key on this machine.
+    /// </summary>
+    private static string DescribeSystemKeyState()
+    {
+        var held = new List<string>();
+        if (GetAsyncKeyState((int)Keys.ShiftKey) < 0) held.Add("Shift");
+        if (GetAsyncKeyState((int)Keys.ControlKey) < 0) held.Add("Ctrl");
+        if (GetAsyncKeyState((int)Keys.Menu) < 0) held.Add("Alt");
+        if (GetAsyncKeyState((int)Keys.LWin) < 0 || GetAsyncKeyState((int)Keys.RWin) < 0) held.Add("Win");
+        if ((GetKeyState((int)Keys.CapsLock) & 1) != 0) held.Add("CapsLock:on");
+        return held.Count == 0 ? "none" : string.Join(",", held);
     }
 
     /// Routes an injection through the secure-desktop input service when it is connected, so the
@@ -1632,7 +1679,7 @@ internal sealed class InputSharingCoordinator : IDisposable
         }
     }
 
-    private static void SendKeyboardInputLocal(ushort virtualKey, bool keyUp)
+    private static bool SendKeyboardInputLocal(ushort virtualKey, bool keyUp)
     {
         // Include the layout's scan code alongside the virtual key so injected presses look like
         // physical ones to consumers that read scan codes (consoles, games, RDP).
@@ -1655,7 +1702,7 @@ internal sealed class InputSharingCoordinator : IDisposable
                 }
             }
         };
-        SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        return SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>()) == 1;
     }
 
     private static readonly Dictionary<Keys, string> WindowsKeyToCanonical = new()
@@ -1776,6 +1823,12 @@ internal sealed class InputSharingCoordinator : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    private static extern short GetKeyState(int nVirtKey);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT

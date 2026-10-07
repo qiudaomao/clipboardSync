@@ -113,6 +113,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var sleepPreventionStatusTimer: Timer?
     private var inputStatusMenuItem = NSMenuItem()
     private var inputSharingItem = NSMenuItem()
+    private var keyEventHUDItem = NSMenuItem()
+    private var keyEventHUD: KeyEventHUD?
     private var controlDeviceMenuItem = NSMenuItem(title: AppText.text("menu.controlDevice"), action: nil, keyEquivalent: "")
     private var controlDeviceMenu = NSMenu(title: AppText.text("menu.controlDevice"))
     private var inputDevices: [String: InputDeviceMenuDevice] = [:]
@@ -523,6 +525,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let screenLayoutItem = NSMenuItem(title: AppText.text("menu.screenLayout"), action: #selector(showScreenLayout), keyEquivalent: "")
         screenLayoutItem.target = self
         menu.addItem(screenLayoutItem)
+
+        keyEventHUDItem = NSMenuItem(title: AppText.text("menu.keyEventHUD"), action: #selector(toggleKeyEventHUD), keyEquivalent: "")
+        keyEventHUDItem.target = self
+        keyEventHUDItem.state = .off
+        menu.addItem(keyEventHUDItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -1641,6 +1648,28 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func checkForUpdates() {
         updateController.checkForUpdates()
+    }
+
+    /// Session-only debug toggle: the HUD shows every keystroke, so it never survives a relaunch.
+    @objc private func toggleKeyEventHUD() {
+        if let hud = keyEventHUD {
+            inputCoordinator.onKeyEvent = nil
+            hud.hide()
+            keyEventHUD = nil
+            keyEventHUDItem.state = .off
+            NSLog("Key event HUD disabled")
+            return
+        }
+        let hud = KeyEventHUD()
+        keyEventHUD = hud
+        inputCoordinator.onKeyEvent = { [weak hud] direction, detail in
+            DispatchQueue.main.async {
+                hud?.record(direction, detail)
+            }
+        }
+        hud.show()
+        keyEventHUDItem.state = .on
+        NSLog("Key event HUD enabled")
     }
 
     @objc private func toggleInputSharing() {
