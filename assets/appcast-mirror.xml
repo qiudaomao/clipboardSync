@@ -11,6 +11,19 @@
         <description>Clipboard Sync macOS release feed (mirror)</description>
         <language>en</language>
         <item>
+            <title>0.2.4</title>
+            <description>Fixes fn and numpad modifier flags sticking on keys injected from a remote controller after an arrow key, until a modifier like Cmd was pressed.</description>
+            <pubDate>Thu, 08 Oct 2026 01:47:20 +0000</pubDate>
+            <sparkle:version>44</sparkle:version>
+            <sparkle:shortVersionString>0.2.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure
+                url="https://cdn.jsdelivr.net/gh/qiudaomao/clipboardSyncRelease@main/releases/ClipboardSync-0.2.4.zip"
+                sparkle:edSignature="B27LcxcVB7JUV7Rlrcr+Pl2LPDwMyx9gg4dDc6myJvSajF2GUFQlgNl/QKOsV3INJp2AykcGzcUajfhHYdPvBA=="
+                length="4710749"
+                type="application/octet-stream" />
+        </item>
+        <item>
             <title>0.2.3</title>
             <description>Adds a &quot;Show Key Event HUD (Debug)&quot; menu option that overlays every key event input sharing sends, receives, and injects, for diagnosing stuck modifiers. Off by default and session-only.</description>
             <pubDate>Wed, 07 Oct 2026 13:24:35 +0000</pubDate>
