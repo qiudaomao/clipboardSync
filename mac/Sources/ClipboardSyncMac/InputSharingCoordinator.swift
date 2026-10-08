@@ -1250,13 +1250,14 @@ final class InputSharingCoordinator {
         guard let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: key.action == "down") else {
             return
         }
-        // Hardware arrow/nav key events carry implicit maskSecondaryFn (+ maskNumericPad for
-        // arrows), and WindowServer's symbolic hotkeys only match when they're present — the
+        // Hardware arrow/nav/function key events carry implicit maskSecondaryFn (+ maskNumericPad
+        // for arrows), and WindowServer's symbolic hotkeys only match when they're present — the
         // Spaces switch is registered as Control+Fn+Arrow, so a bare Control+Arrow never fires
-        // it. Keep those implicit bits (whether contributed by the CGEvent constructor or added
-        // here) instead of overwriting the flags with just the four plain modifier masks.
+        // it. Derive those bits from the key itself only. Never carry them over from the flags
+        // the CGEvent constructor seeded: a nil source seeds from the session's current flag
+        // state, which a previously posted arrow left holding fn+numpad, so every later key
+        // re-posted them and they stuck until a real modifier flagsChanged reset the state.
         var flags = Self.flags(from: Array(mappedModifiers(remotePressedSourceModifierKeys)))
-        flags.formUnion(event.flags.intersection([.maskSecondaryFn, .maskNumericPad]))
         if Self.secondaryFnKeys.contains(key.key) {
             flags.insert(.maskSecondaryFn)
         }
@@ -1605,7 +1606,10 @@ final class InputSharingCoordinator {
     private static let modifierKeyOrder = ["Shift", "Control", "Alt", "Meta"]
     private static let modifierKeys = Set(modifierKeyOrder)
     private static let arrowKeys: Set<String> = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]
-    private static let secondaryFnKeys: Set<String> = arrowKeys.union(["Home", "End", "PageUp", "PageDown", "Delete"])
+    private static let secondaryFnKeys: Set<String> = arrowKeys.union([
+        "Home", "End", "PageUp", "PageDown", "Delete",
+        "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12"
+    ])
     /// Real keypad events carry NX_NUMERICPADMASK; apps that distinguish the keypad from the
     /// main block (spreadsheets, calculators, games) read it, so injected keypad keys set it too.
     private static let numpadKeys: Set<String> = [
